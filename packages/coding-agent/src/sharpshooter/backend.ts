@@ -1,5 +1,4 @@
 import { rm } from "node:fs/promises";
-import { bindModelRequestExecution } from "@oh-my-pi/pi-ai/model-request-execution";
 import { logger } from "@oh-my-pi/pi-utils";
 import type { MemoryBackend, MemoryBackendSearchItem, MemoryBackendStatus } from "../memory-backend/types";
 import { truncateApproxTokens } from "../mnemopi/config";
@@ -91,9 +90,9 @@ export const sharpshooterBackend: MemoryBackend = {
 				sessionId: session.sessionId,
 			});
 			try {
-				// Bound to the registering session's model-request context: events fire in the emitter's context.
-				const unsubscribe = session.subscribe(
-					bindModelRequestExecution((event: AgentSessionEvent) => {
+				// Run under the owning session's model-request context: events fire in the emitter's context.
+				const unsubscribe = session.subscribe((event: AgentSessionEvent) =>
+					session.runInModelRequestContext(() => {
 						// message_start is the only event that carries the committed user
 						// prompt itself (agent_start fires before the transcript appends),
 						// and it also covers mid-turn steering prompts.
@@ -105,7 +104,7 @@ export const sharpshooterBackend: MemoryBackend = {
 							agentDir,
 							message: event.message,
 						});
-					}),
+					}, "memory"),
 				);
 				// Backend startup can race the first turn's events (print mode
 				// submits while resolveMemoryBackend is still importing us).

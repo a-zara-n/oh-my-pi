@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as path from "node:path";
 import {
 	type Api,
@@ -8,11 +8,17 @@ import {
 	type SimpleStreamOptions,
 	streamSimple,
 } from "@oh-my-pi/pi-ai";
-import { authorizeModelRequest } from "@oh-my-pi/pi-ai/model-request-execution";
+import {
+	authorizeModelRequest,
+	getModelRequestExecution,
+	resolveModelRequestScope,
+} from "@oh-my-pi/pi-ai/model-request-execution";
 import type { ModelRequestAttempt } from "@oh-my-pi/pi-ai/model-request-gate";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { loadMnemopiConfig } from "@oh-my-pi/pi-coding-agent/mnemopi/config";
+import { loadMnemopi, loadMnemopiCore, MnemopiSessionState } from "@oh-my-pi/pi-coding-agent/mnemopi/state";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import { createAgentSession } from "@oh-my-pi/pi-coding-agent/sdk";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
@@ -126,6 +132,7 @@ describe("model request context of an AgentSession", () => {
 	});
 
 	afterEach(async () => {
+		vi.restoreAllMocks();
 		for (const session of sessions.splice(0)) await session.dispose();
 		modelRegistry.clearSourceRegistrations(SOURCE_ID);
 		authStorage.close();
@@ -342,6 +349,41 @@ describe("model request context of an AgentSession", () => {
 				purpose: "memory",
 				agent: { kind: "main", id: ROOT_AGENT_ID, name: "main", depth: 0 },
 			},
+		]);
+	});
+	it("runs a memory listener attached with no session context active (as /memory reset does) under the session", async () => {
+		const session = await createSession({ agentId: ROOT_AGENT_ID });
+		const hookRuns: Array<{ hook: string; sessionId: string | undefined; purpose: string | undefined }> = [];
+		const observe = (hook: string): void => {
+			const execution = getModelRequestExecution();
+			const scope = execution === undefined ? undefined : resolveModelRequestScope(execution);
+			hookRuns.push({ hook, sessionId: scope?.sessionId, purpose: scope?.purpose });
+		};
+		vi.spyOn(MnemopiSessionState.prototype, "maybeRecallOnAgentStart").mockImplementation(async () => observe("recall"));
+		vi.spyOn(MnemopiSessionState.prototype, "maybeRetainOnAgentEnd").mockImplementation(async () => observe("retain"));
+		await Promise.all([loadMnemopi(), loadMnemopiCore()]);
+		const settings = Settings.isolated({
+			"memory.backend": "mnemopi",
+			"mnemopi.dbPath": path.join(tempDir.path(), "mnemopi.db"),
+			"mnemopi.noEmbeddings": true,
+			"mnemopi.llmMode": "none",
+		});
+		const state = new MnemopiSessionState({
+			sessionId: sessionIdOf(session),
+			config: loadMnemopiConfig(settings, tempDir.path()),
+			session,
+		});
+
+		// The test stack has no model-request context, exactly like a slash-command handler.
+		expect(getModelRequestExecution()).toBeUndefined();
+		state.attachSessionListeners();
+		await session.prompt("hello");
+		await session.waitForIdle();
+		await state.dispose({ consolidate: false });
+
+		expect(hookRuns).toEqual([
+			{ hook: "recall", sessionId: sessionIdOf(session), purpose: "memory" },
+			{ hook: "retain", sessionId: sessionIdOf(session), purpose: "memory" },
 		]);
 	});
 });

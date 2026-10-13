@@ -1,6 +1,5 @@
 import { dirname } from "node:path";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import { bindModelRequestExecution, runWithModelRequestPurpose } from "@oh-my-pi/pi-ai/model-request-execution";
 import type * as MnemopiNs from "@oh-my-pi/pi-mnemopi";
 import type { Mnemopi, RecallResult } from "@oh-my-pi/pi-mnemopi";
 import type * as MnemopiCoreNs from "@oh-my-pi/pi-mnemopi/core";
@@ -612,11 +611,11 @@ export class MnemopiSessionState {
 	attachSessionListeners(): void {
 		this.unsubscribe?.();
 		// The session emits events in its own context, which is not necessarily the one that registered this
-		// listener (and loses it entirely on a timer or queue hop). Bind to the registering session's context so
-		// recall and retention requests stay attributed to it, declared as memory work.
+		// listener (and this runs from `/memory reset|rebuild|sync` with no session context active at all). Run each
+		// event under the owning session's context, declared as memory work, rather than whatever is active here.
 		this.unsubscribe = this.session.subscribe(
-			bindModelRequestExecution((event: AgentSessionEvent) =>
-				runWithModelRequestPurpose("memory", () => {
+			(event: AgentSessionEvent) =>
+				this.session.runInModelRequestContext(() => {
 					if (event.type === "agent_start") {
 						void this.maybeRecallOnAgentStart().catch(error => {
 							this.#logLifecycleFailure(
@@ -630,8 +629,7 @@ export class MnemopiSessionState {
 							this.#logLifecycleFailure("agent_end retention", [this.scoped.retain.bank], error);
 						});
 					}
-				}),
-			),
+				}, "memory"),
 		);
 	}
 	#logLifecycleFailure(operation: string, banks: readonly string[], error: unknown): void {

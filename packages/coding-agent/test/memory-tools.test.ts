@@ -195,6 +195,8 @@ function registerMnemopiState(
 				options.listeners?.add(listener);
 				return () => options.listeners?.delete(listener);
 			},
+			// No request context exists for a stub session: run the callback as-is.
+			runInModelRequestContext: (fn: () => unknown) => fn(),
 		} as never,
 	});
 	setMnemopiSessionState(registeredMnemopiState.session as never, registeredMnemopiState);
