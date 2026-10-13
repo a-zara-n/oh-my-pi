@@ -247,6 +247,7 @@ export async function invokeJsTool(
 			},
 		},
 		toolSession: options.session,
+		callTool: bindModelRequestExecution(callSessionTool),
 		resolve,
 		reject,
 		toolCalls: new Map(),
