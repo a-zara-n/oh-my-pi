@@ -302,19 +302,23 @@ describe("model request context of an AgentSession", () => {
 		// Catalog identity and compat are kept; only the endpoint is replaced by a loopback address nothing listens on.
 		const remoteModel: Model<Api> = { ...bundled, baseUrl: "http://127.0.0.1:1/v1" };
 		const fetched: Array<{ url: string; sessionId: string | undefined; purpose: string | undefined }> = [];
-		vi.spyOn(globalThis, "fetch").mockImplementation(async input => {
-			const execution = getModelRequestExecution();
-			const scope = execution === undefined ? undefined : resolveModelRequestScope(execution);
-			fetched.push({
-				url: String(input instanceof Request ? input.url : input),
-				sessionId: scope?.sessionId,
-				purpose: scope?.purpose,
-			});
-			return new Response(JSON.stringify({ error: { message: "stubbed" } }), {
-				status: 400,
-				headers: { "content-type": "application/json" },
-			});
-		});
+		const fetchStub = Object.assign(
+			async (input: string | URL | Request) => {
+				const execution = getModelRequestExecution();
+				const scope = execution === undefined ? undefined : resolveModelRequestScope(execution);
+				fetched.push({
+					url: String(input instanceof Request ? input.url : input),
+					sessionId: scope?.sessionId,
+					purpose: scope?.purpose,
+				});
+				return new Response(JSON.stringify({ error: { message: "stubbed" } }), {
+					status: 400,
+					headers: { "content-type": "application/json" },
+				});
+			},
+			{ preconnect: globalThis.fetch.preconnect },
+		);
+		vi.spyOn(globalThis, "fetch").mockImplementation(fetchStub);
 		const session = await createSession({
 			agentId: ROOT_AGENT_ID,
 			model: remoteModel,

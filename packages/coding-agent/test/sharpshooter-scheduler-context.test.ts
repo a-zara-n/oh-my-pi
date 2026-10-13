@@ -20,9 +20,10 @@ function attributedSession(): string | undefined {
 
 function hostExecution(sessionId: string) {
 	return createModelRequestSessionExecution({
-		getSessionId: () => sessionId,
+		sessionId: () => sessionId,
 		root: { kind: "self" },
 		agent: { id: sessionId, kind: "main", name: sessionId, depth: 0 },
+		purpose: "main",
 	});
 }
 

@@ -102,6 +102,8 @@ function assistant(opts: {
 	toolCall?: { name: string; arguments: Record<string, unknown> };
 	stopReason?: AssistantMessage["stopReason"];
 	errorMessage?: string;
+	errorStatus?: number;
+	errorId?: number;
 }): AssistantMessage {
 	const content: AssistantMessage["content"] = [];
 	if (opts.text) content.push({ type: "text", text: opts.text });
@@ -124,6 +126,8 @@ function assistant(opts: {
 		},
 		stopReason: opts.stopReason ?? "stop",
 		errorMessage: opts.errorMessage,
+		errorStatus: opts.errorStatus,
+		errorId: opts.errorId,
 		timestamp: Date.now(),
 	};
 }
