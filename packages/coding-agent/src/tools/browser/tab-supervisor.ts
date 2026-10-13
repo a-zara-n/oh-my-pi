@@ -1,3 +1,4 @@
+import { bindModelRequestExecution } from "@oh-my-pi/pi-ai/model-request-execution";
 import {
 	getProjectDir,
 	getPuppeteerDir,
@@ -71,6 +72,12 @@ export interface PendingRun {
 	session: ToolSession;
 	signal?: AbortSignal;
 	toolCalls: Map<string, AbortController>;
+	/**
+	 * Session-tool bridge bound when the run starts, inside the browser tool call's model-request context. Worker
+	 * messages arrive outside any context, so tool calls made by the script (`completion()`, `agent()`, ...)
+	 * re-enter the host session's context through this binding.
+	 */
+	callTool: typeof callSessionTool;
 	/**
 	 * Fires when `releaseTab` closes the tab out from under an in-flight run
 	 * (sibling `browser close --all`, session-scoped reap, etc.). Composed
@@ -791,6 +798,7 @@ async function runInTabWithSnapshot(
 		session: opts.session ?? ({} as ToolSession),
 		signal: opts.signal,
 		toolCalls: new Map(),
+		callTool: bindModelRequestExecution(callSessionTool),
 		closeAc,
 	};
 	// Register BEFORE the unfreeze await below. Settle-freeze guards on
@@ -1585,7 +1593,7 @@ async function dispatchToolCall(
 	if (pending.signal?.aborted) onParentAbort();
 	else pending.signal?.addEventListener("abort", onParentAbort, { once: true });
 	try {
-		const value = await callSessionTool(msg.name, msg.args, {
+		const value = await pending.callTool(msg.name, msg.args, {
 			session: pending.session,
 			signal: ctrl.signal,
 			emitStatus: () => {

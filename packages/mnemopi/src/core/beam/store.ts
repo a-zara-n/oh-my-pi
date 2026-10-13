@@ -1,4 +1,5 @@
 import type { Database, SQLQueryBindings } from "bun:sqlite";
+import { bindModelRequestExecution } from "@oh-my-pi/pi-ai/model-request-execution";
 import { logger } from "@oh-my-pi/pi-utils";
 import { transaction } from "../../db";
 import { toUtcIso } from "../../util/datetime";
@@ -327,7 +328,11 @@ async function runFactExtraction(beam: BeamMemoryState, memoryId: string, conten
 function scheduleFactExtraction(beam: BeamMemoryState, memoryId: string, content: string): void {
 	if (content.trim() === "") return;
 	const runtimeOptions = getMnemopiRuntimeOptions();
-	const task = withMnemopiRuntimeOptions(runtimeOptions, () => runFactExtraction(beam, memoryId, content));
+	// Bound alongside the runtime options: the task stays attributed to the session that stored the memory.
+	const task = withMnemopiRuntimeOptions(
+		runtimeOptions,
+		bindModelRequestExecution(() => runFactExtraction(beam, memoryId, content)),
+	);
 	const pending = beam.pendingExtractions;
 	if (pending !== undefined) {
 		pending.add(task);

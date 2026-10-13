@@ -1,4 +1,5 @@
 import type { ImageContent } from "@oh-my-pi/pi-ai";
+import { bindModelRequestExecution } from "@oh-my-pi/pi-ai/model-request-execution";
 import { logger } from "@oh-my-pi/pi-utils";
 import type { StructuredSubagentOutput } from "@oh-my-pi/pi-tui/tools/task";
 import type { OutputMeta } from "@oh-my-pi/pi-tui/tools/output-meta";
@@ -399,9 +400,12 @@ export class AsyncJobManager {
 				});
 			}
 		};
+		// The body may start after a queue hop or outlive the call that registered it; it keeps the registering
+		// session's model-request context rather than whatever context settles the job.
+		const runInContext = bindModelRequestExecution(run);
 		job.promise = (async () => {
 			try {
-				const outcome = await run({
+				const outcome = await runInContext({
 					jobId: id,
 					signal: abortController.signal,
 					reportProgress,

@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { type AgentTelemetry, instrumentedCompleteSimple } from "@oh-my-pi/pi-agent-core";
 import type { Api, Model } from "@oh-my-pi/pi-ai";
+import { bindModelRequestExecution, runWithModelRequestPurpose } from "@oh-my-pi/pi-ai/model-request-execution";
 import {
 	getAgentDir,
 	getSkillDescriptionsDbPath,
@@ -57,20 +58,22 @@ export function createSkillDescriptionCompressor(
 		const { model } = selected;
 		const apiKey = await registry.getApiKey(model, sessionId);
 		if (!apiKey) throw new Error(`No credential for ${model.provider}/${model.id}`);
-		const response = await instrumentedCompleteSimple(
-			model,
-			{
-				messages: [{ role: "user", content: request, timestamp: Date.now() }],
-			},
-			{
-				apiKey: registry.resolver(model, sessionId),
-				sessionId,
-				maxTokens: 1024,
-				disableReasoning: true,
-				temperature: 0,
-				signal: AbortSignal.timeout(30_000),
-			},
-			{ telemetry: getTelemetry?.(), oneshotKind: "skill_description" },
+		const response = await runWithModelRequestPurpose("other", () =>
+			instrumentedCompleteSimple(
+				model,
+				{
+					messages: [{ role: "user", content: request, timestamp: Date.now() }],
+				},
+				{
+					apiKey: registry.resolver(model, sessionId),
+					sessionId,
+					maxTokens: 1024,
+					disableReasoning: true,
+					temperature: 0,
+					signal: AbortSignal.timeout(30_000),
+				},
+				{ telemetry: getTelemetry?.(), oneshotKind: "skill_description" },
+			),
 		);
 		if (response.stopReason !== "stop") {
 			throw new Error(`Model stopped: ${response.stopReason} ${response.errorMessage ?? ""}`);
@@ -308,8 +311,9 @@ export class SkillDescriptionCatalog {
 		if (!this.#compress) return;
 		const job = `${store.path}:${key}`;
 		if (inFlight.has(job)) return;
-		// Defer model work until the current synchronous prompt rendering has finished.
-		const pending = Promise.resolve().then(async () => {
+		// Defer model work until the current synchronous prompt rendering has finished. The job runs in the
+		// context of the session that rendered the prompt, not of whatever drains the microtask queue.
+		const run = bindModelRequestExecution(async () => {
 			try {
 				await compressionSlots.acquire();
 				try {
@@ -329,6 +333,7 @@ export class SkillDescriptionCatalog {
 				inFlight.delete(job);
 			}
 		});
+		const pending = Promise.resolve().then(run);
 		inFlight.set(job, pending);
 	}
 }

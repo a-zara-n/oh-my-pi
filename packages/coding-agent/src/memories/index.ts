@@ -4,6 +4,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import { type ApiKey, completeSimple, Effort, type Model, retryTransientCompletion } from "@oh-my-pi/pi-ai";
+import { runWithModelRequestPurpose } from "@oh-my-pi/pi-ai/model-request-execution";
 import { clampThinkingLevelForModel } from "@oh-my-pi/pi-catalog/model-thinking";
 import {
 	getAgentDbPath,
@@ -875,23 +876,27 @@ async function runStage1Job(options: {
 			response_items_json: truncatedItems,
 		});
 
-		const response = await retryTransientCompletion(
-			() =>
-				completeSimple(
-					model,
-					{
-						systemPrompt: [stageOneSystemTemplate],
-						messages: [{ role: "user", content: [{ type: "text", text: inputPrompt }], timestamp: Date.now() }],
-					},
-					{
-						apiKey,
-						sessionId: options.sessionId,
-						metadata: options.metadata,
-						maxTokens: Math.max(1024, Math.min(4096, Math.floor(modelMaxTokens * 0.2))),
-						reasoning: clampThinkingLevelForModel(model, Effort.Low),
-					},
-				),
-			{ provider: model.provider },
+		const response = await runWithModelRequestPurpose("memory", () =>
+			retryTransientCompletion(
+				() =>
+					completeSimple(
+						model,
+						{
+							systemPrompt: [stageOneSystemTemplate],
+							messages: [
+								{ role: "user", content: [{ type: "text", text: inputPrompt }], timestamp: Date.now() },
+							],
+						},
+						{
+							apiKey,
+							sessionId: options.sessionId,
+							metadata: options.metadata,
+							maxTokens: Math.max(1024, Math.min(4096, Math.floor(modelMaxTokens * 0.2))),
+							reasoning: clampThinkingLevelForModel(model, Effort.Low),
+						},
+					),
+				{ provider: model.provider },
+			),
 		);
 
 		if (response.stopReason === "error") {
@@ -1018,23 +1023,25 @@ async function runConsolidationModel(options: {
 		rollout_summaries: truncateByApproxTokens(rolloutSummaries, 12_000),
 	});
 
-	const response = await retryTransientCompletion(
-		() =>
-			completeSimple(
-				model,
-				{
-					systemPrompt: [consolidationSystemTemplate],
-					messages: [{ role: "user", content: [{ type: "text", text: input }], timestamp: Date.now() }],
-				},
-				{
-					apiKey,
-					sessionId: options.sessionId,
-					metadata: options.metadata,
-					maxTokens: 8192,
-					reasoning: clampThinkingLevelForModel(model, Effort.Medium),
-				},
-			),
-		{ provider: model.provider },
+	const response = await runWithModelRequestPurpose("memory", () =>
+		retryTransientCompletion(
+			() =>
+				completeSimple(
+					model,
+					{
+						systemPrompt: [consolidationSystemTemplate],
+						messages: [{ role: "user", content: [{ type: "text", text: input }], timestamp: Date.now() }],
+					},
+					{
+						apiKey,
+						sessionId: options.sessionId,
+						metadata: options.metadata,
+						maxTokens: 8192,
+						reasoning: clampThinkingLevelForModel(model, Effort.Medium),
+					},
+				),
+			{ provider: model.provider },
+		),
 	);
 	if (response.stopReason === "error") {
 		throw new Error(response.errorMessage || "phase2 model error");

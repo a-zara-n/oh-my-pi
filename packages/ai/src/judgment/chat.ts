@@ -75,9 +75,13 @@ export function chatTextBackend(model: Model<Api>, options: ChatTextBackendOptio
 					: new AIError.AbortError("judgment: completion aborted");
 			}
 			if (response.stopReason === "error") {
-				throw new AIError.ProviderResponseError(response.errorMessage ?? "unknown error", {
+				const failure = new AIError.ProviderResponseError(response.errorMessage ?? "unknown error", {
 					provider: model.provider,
 				});
+				// Flattening the message into an Error must keep a gate denial terminal for the judge chain.
+				throw AIError.isModelRequestDenied(response) && response.errorId !== undefined
+					? AIError.attach(failure, response.errorId)
+					: failure;
 			}
 			let text = "";
 			for (const block of response.content) {

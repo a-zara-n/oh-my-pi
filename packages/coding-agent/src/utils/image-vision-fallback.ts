@@ -18,6 +18,7 @@ import {
 	instrumentedCompleteSimple,
 	resolveTelemetry,
 } from "@oh-my-pi/pi-agent-core";
+import { runWithModelRequestPurpose } from "@oh-my-pi/pi-ai/model-request-execution";
 import { sendsImageInputOnWire } from "@oh-my-pi/pi-ai/providers/vision-guard";
 import type { Api, completeSimple, ImageContent, Model, TextContent } from "@oh-my-pi/pi-ai";
 import { logger, prompt, toError } from "@oh-my-pi/pi-utils";
@@ -143,23 +144,25 @@ async function describeImage(
 	signal: AbortSignal | undefined,
 ): Promise<string | null> {
 	try {
-		const response = await instrumentedCompleteSimple(
-			visionModel,
-			{
-				systemPrompt: [prompt.render(describeSystemPrompt)],
-				messages: [
-					{
-						role: "user",
-						content: [
-							{ type: "image", data: image.data, mimeType: image.mimeType },
-							{ type: "text", text: prompt.render(describeUserPrompt) },
-						],
-						timestamp: Date.now(),
-					},
-				],
-			},
-			{ apiKey: deps.modelRegistry.resolver(visionModel, deps.sessionId), signal },
-			{ telemetry, oneshotKind: ONESHOT_KIND, completeImpl: deps.completeImpl },
+		const response = await runWithModelRequestPurpose("side-channel", () =>
+			instrumentedCompleteSimple(
+				visionModel,
+				{
+					systemPrompt: [prompt.render(describeSystemPrompt)],
+					messages: [
+						{
+							role: "user",
+							content: [
+								{ type: "image", data: image.data, mimeType: image.mimeType },
+								{ type: "text", text: prompt.render(describeUserPrompt) },
+							],
+							timestamp: Date.now(),
+						},
+					],
+				},
+				{ apiKey: deps.modelRegistry.resolver(visionModel, deps.sessionId), signal },
+				{ telemetry, oneshotKind: ONESHOT_KIND, completeImpl: deps.completeImpl },
+			),
 		);
 		if (response.stopReason === "error" || response.stopReason === "aborted") {
 			logger.warn("image attachment description did not complete", {

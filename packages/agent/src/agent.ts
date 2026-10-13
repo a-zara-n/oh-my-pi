@@ -157,6 +157,12 @@ export interface AgentOptions {
 	 * Custom stream function (for proxy backends, etc.). Default uses streamSimple.
 	 */
 	streamFn?: StreamFn;
+
+	/**
+	 * Runs every agent run (turns, tool executions, retries and event delivery to subscribers) inside the scope
+	 * the host provides, e.g. to install an `AsyncLocalStorage` context. When omitted, runs execute unscoped.
+	 */
+	runInScope?: <T>(fn: () => T) => T;
 	/** Absolute wall-clock deadline in Unix epoch milliseconds. */
 	deadline?: number;
 
@@ -511,6 +517,7 @@ export class Agent {
 	#cursorToolResultDrain: CursorToolResultEntry[] | undefined;
 
 	streamFn: StreamFn;
+	#runInScope?: <T>(fn: () => T) => T;
 	getApiKey?: (model: Model) => Promise<ApiKey | undefined> | ApiKey | undefined;
 	/** Prepare actual queue deliveries after dequeue gates; commit runs only while ownership remains valid. */
 	prepareQueuedMessages?: PrepareQueuedMessages;
@@ -558,6 +565,7 @@ export class Agent {
 		this.#followUpMode = opts.followUpMode || "one-at-a-time";
 		this.#interruptMode = opts.interruptMode || "immediate";
 		this.streamFn = opts.streamFn || streamSimple;
+		this.#runInScope = opts.runInScope;
 		this.#sessionId = opts.sessionId;
 		this.#deadline = opts.deadline;
 		this.#promptCacheKey = opts.promptCacheKey;
@@ -1629,7 +1637,13 @@ export class Agent {
 		return signals.length === 1 ? signals[0] : AbortSignal.any(signals);
 	}
 
-	async continue(signal?: AbortSignal) {
+	async continue(signal?: AbortSignal): Promise<void> {
+		const runInScope = this.#runInScope;
+		if (runInScope === undefined) return this.#continue(signal);
+		return runInScope(() => this.#continue(signal));
+	}
+
+	async #continue(signal?: AbortSignal): Promise<void> {
 		if (this.#state.isStreaming) {
 			throw new AgentBusyError();
 		}
@@ -1717,6 +1731,17 @@ export class Agent {
 	 * Otherwise, continues from existing context.
 	 */
 	async #runLoop(
+		messages?: AgentMessage[],
+		options?: AgentPromptOptions & { skipInitialSteeringPoll?: boolean },
+		continuationSignal?: AbortSignal,
+		runStateClaimed = false,
+	): Promise<void> {
+		const runInScope = this.#runInScope;
+		if (runInScope === undefined) return this.#runLoopBody(messages, options, continuationSignal, runStateClaimed);
+		return runInScope(() => this.#runLoopBody(messages, options, continuationSignal, runStateClaimed));
+	}
+
+	async #runLoopBody(
 		messages?: AgentMessage[],
 		options?: AgentPromptOptions & { skipInitialSteeringPoll?: boolean },
 		continuationSignal?: AbortSignal,

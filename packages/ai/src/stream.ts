@@ -1072,6 +1072,7 @@ function isRetryableThinkingLoop(message: AssistantMessage): boolean {
 	return (
 		message.stopReason === "error" &&
 		message.content.length === 0 &&
+		!AIError.isModelRequestDenied(message) &&
 		AIError.is(message.errorId, AIError.Flag.ThinkingLoop)
 	);
 }
@@ -1142,6 +1143,8 @@ function isRetryableUpstreamError(
 	status: number | undefined,
 	message: string | undefined,
 ): boolean {
+	// A gate denial is terminal: its text must never select a rotatable class.
+	if (AIError.isModelRequestDenied(error)) return false;
 	if (AIError.isAuthRetryableError(error)) return true;
 	// 401 means the credential is bad; 403 is its valid-token twin (access
 	// denied by plan, model policy, or org restriction — a sibling account may

@@ -3163,6 +3163,8 @@ const streamAnthropicOnce = (
 					break;
 				} catch (streamError) {
 					const streamFailure = activeAbortTracker.getLocalAbortReason() ?? streamError;
+					// A gate denial is terminal: no strict-tool/fast-mode/thinking replay, no slow-mode wait, no backoff.
+					if (AIError.isModelRequestDenied(streamFailure)) throw streamFailure;
 					if (
 						!disableStrictTools &&
 						firstTokenTime === undefined &&

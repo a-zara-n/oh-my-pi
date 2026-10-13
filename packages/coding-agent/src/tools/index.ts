@@ -32,6 +32,7 @@ import type { AgentRegistry } from "../registry/agent-registry";
 import type { ArtifactManager } from "../session/artifacts";
 import type { ClientBridge } from "../session/client-bridge";
 import type { CustomMessage } from "../session/messages";
+import type { ModelRequestRootAssignment } from "../session/model-request-context";
 import type { UsageStatistics } from "../session/session-entries";
 import type { SessionManager } from "../session/session-manager";
 import type { ToolChoiceQueue } from "../session/tool-choice-queue";
@@ -354,6 +355,12 @@ export interface ToolSession {
 	getMnemopiSessionState?: () => MnemopiSessionState | undefined;
 	/** Agent identity used for IRC routing. Returns the registry id (e.g. "Main", "AuthLoader"). */
 	getAgentId?: () => string | null;
+	/**
+	 * The root a session or tool spawning a child session hands over as `CreateAgentSessionOptions.modelRequestRoot`,
+	 * resolved at call time. Always present on a real session; hand-built test sessions may omit it.
+	 * @internal
+	 */
+	childModelRequestRoot?: () => ModelRequestRootAssignment;
 	/** Look up a registered tool by name (used by the eval js backend's tool bridge). */
 	getToolByName?: (name: string) => AgentTool | undefined;
 	/** Look up an enabled tool through the eval bridge's normal permission pipeline. */

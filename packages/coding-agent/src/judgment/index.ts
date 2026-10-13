@@ -38,6 +38,8 @@ import {
 	type Usage,
 } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
+import { runWithModelRequestPurpose } from "@oh-my-pi/pi-ai/model-request-execution";
+import type { ModelRequestPurpose } from "@oh-my-pi/pi-ai/model-request-gate";
 import { calculateCost } from "@oh-my-pi/pi-catalog/models";
 import { logger, prompt } from "@oh-my-pi/pi-utils";
 import type { ModelRegistry } from "../config/model-registry";
@@ -75,6 +77,8 @@ export interface JudgeDeps {
 	metadataResolver?: (provider: string) => Record<string, unknown> | undefined;
 	/** Why the judgment runs (`find`, `ttsr`, `judge_batch`, …); labels ledger entries and telemetry spans. */
 	purpose: string;
+	/** Purpose declared to the model-request gate for this judgment's requests; defaults to `judge`. */
+	requestPurpose?: ModelRequestPurpose;
 	/**
 	 * Receives every billed attempt exactly once — failed ones included, cache
 	 * hits never. Wire {@link journalJudgmentUsage} here to bill the session.
@@ -277,11 +281,15 @@ export class ChainJudge implements Judge {
 					lastUnavailable = `no API key for ${candidate.model.provider}/${candidate.model.id}`;
 					continue;
 				}
-				return await run(judge, kindOf(candidate));
+				return await runWithModelRequestPurpose(this.#deps.requestPurpose ?? "judge", () =>
+					run(judge, kindOf(candidate)),
+				);
 			} catch (error) {
 				if (signal?.aborted) {
 					throw signal.reason instanceof Error ? signal.reason : new AIError.AbortError("judgment aborted");
 				}
+				// A gate denial is terminal: the next candidate must not be tried and no account cooldown is recorded.
+				if (AIError.isModelRequestDenied(error)) throw error;
 				if (isAbortOrTimeout(error)) throw error;
 				const rejected = isAccountRejection(error);
 				if (rejected) rejections.set(identity, Date.now() + CANDIDATE_REJECTION_COOLDOWN_MS);

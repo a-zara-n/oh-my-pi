@@ -43,6 +43,13 @@ export const Flag = {
 	OAuthExpiry: 0x4000_0000,
 	/** HTTP 413 byte/media rejection — token compaction cannot shrink bytes or media budgets (#9235). */
 	PayloadRejected: 0x8000_0000,
+	/**
+	 * A registered ModelRequestGate refused the request before any I/O. Terminal and exclusive:
+	 * never retried, rotated to another credential, or fallen back from, whatever the denial text says.
+	 * Uses a bit above 0x3ff: an unclassified id is a raw HTTP status (max 599), so a lower bit would read as set
+	 * for ordinary 4xx/5xx ids. Classified ids always carry Flag.Class.
+	 */
+	ModelRequestDenied: 0x0000_0400,
 } as const;
 
 export type Flag = (typeof Flag)[keyof typeof Flag];
@@ -66,7 +73,8 @@ const KIND_MASK =
 	Flag.Abort |
 	Flag.Grammar |
 	Flag.FastModeUnsupported |
-	Flag.OAuthExpiry;
+	Flag.OAuthExpiry |
+	Flag.ModelRequestDenied;
 
 const RETRIABLE_KINDS =
 	Flag.Transient |
@@ -372,6 +380,7 @@ const ERROR_KIND_LABELS: readonly [Flag, string][] = [
 	[Flag.SilentAbort, "silent-abort"],
 	[Flag.UserInterrupt, "user-interrupt"],
 	[Flag.Abort, "abort"],
+	[Flag.ModelRequestDenied, "model-request-denied"],
 ];
 
 const STATUS_MESSAGE_PATTERNS = [
@@ -393,6 +402,7 @@ export function is(id: number | undefined, flag: Flag): boolean {
 }
 
 export function retriable(id: number | undefined, opts?: { replayUnsafe?: boolean }): boolean {
+	if (is(id, Flag.ModelRequestDenied)) return false;
 	if (is(id, Flag.ContentBlocked)) return false;
 	if (is(id, Flag.PayloadRejected)) return false;
 	if (opts?.replayUnsafe) return false;
@@ -738,7 +748,24 @@ export function classify(error: unknown, api?: Api): number {
 		link = typeof link === "object" && "cause" in link ? (link as { cause: unknown }).cause : undefined;
 	}
 
+	if ((kinds & Flag.ModelRequestDenied) !== 0) return create(Flag.ModelRequestDenied);
 	return kinds !== 0 ? create(kinds) : (status(error) ?? 0);
+}
+
+/**
+ * Whether `value` (an error, its cause chain, or an `AssistantMessage` that carries `errorId`) is a
+ * gate denial. Reads the structured {@link Flag.ModelRequestDenied} bit only — never message text — so a
+ * denial whose wording mentions a limit or a status code cannot be mistaken for a retryable failure.
+ */
+export function isModelRequestDenied(value: unknown): boolean {
+	const seen = new Set<object>();
+	let link: unknown = value;
+	while (typeof link === "object" && link !== null && !seen.has(link)) {
+		seen.add(link);
+		if ("errorId" in link && typeof link.errorId === "number" && is(link.errorId, Flag.ModelRequestDenied)) return true;
+		link = "cause" in link ? link.cause : undefined;
+	}
+	return false;
 }
 
 /**
@@ -875,6 +902,8 @@ export function classifyMessage(message: {
 	);
 
 	let kinds = ((existingId ?? 0) | textId) & KIND_MASK;
+	// A gate denial is authoritative: its text must not add retryable/rotatable kinds.
+	if ((kinds & Flag.ModelRequestDenied) !== 0) kinds = Flag.ModelRequestDenied;
 	// Two-phase finalization: drop stale status-inferred payload bit when final text proves token overflow (#9235).
 	if (
 		currentStatus === 413 &&

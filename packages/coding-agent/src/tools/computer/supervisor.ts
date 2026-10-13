@@ -1,4 +1,5 @@
 import type { AgentToolContext } from "@oh-my-pi/pi-agent-core";
+import { bindModelRequestExecution } from "@oh-my-pi/pi-ai/model-request-execution";
 import { untilAborted } from "@oh-my-pi/pi-utils";
 import type { DesktopCapabilities } from "@oh-my-pi/pi-natives";
 import { withTimeout } from "@oh-my-pi/pi-utils/async";
@@ -74,6 +75,12 @@ interface PendingRun {
 	reject(error: unknown): void;
 	signal?: AbortSignal;
 	toolCalls: Map<string, AbortController>;
+	/**
+	 * Session-tool bridge bound when the run starts, inside the computer tool call's model-request context. Worker
+	 * messages arrive outside any context, so tool calls made by the script (`completion()`, `agent()`, ...) re-enter
+	 * the host session's context through this binding.
+	 */
+	callTool: ComputerSessionToolCaller;
 	context?: AgentToolContext;
 }
 
@@ -205,7 +212,14 @@ export class ComputerSupervisor implements ComputerController {
 
 		const id = `computer-${++this.#nextId}`;
 		const { promise, resolve, reject } = Promise.withResolvers<ComputerRunOk>();
-		const pending: PendingRun = { resolve, reject, signal, context, toolCalls: new Map() };
+		const pending: PendingRun = {
+			resolve,
+			reject,
+			signal,
+			context,
+			toolCalls: new Map(),
+			callTool: bindModelRequestExecution(this.#callSessionTool),
+		};
 		this.#pending.set(id, pending);
 		const abort = (): void => {
 			this.#safeSend({ type: "abort", id });
@@ -362,7 +376,7 @@ export class ComputerSupervisor implements ComputerController {
 		if (pending.signal?.aborted) onParentAbort();
 		else pending.signal?.addEventListener("abort", onParentAbort, { once: true });
 		try {
-			const value = await this.#callSessionTool(message.name, message.args, {
+			const value = await pending.callTool(message.name, message.args, {
 				session: this.#session,
 				signal: controller.signal,
 				emitStatus: () => {},

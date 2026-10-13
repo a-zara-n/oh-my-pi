@@ -30,6 +30,7 @@ import {
 	createCustomMessage,
 } from "@oh-my-pi/pi-agent-core/compaction/messages";
 import { type AuthCredential, SqliteAuthCredentialStore, type TSchema } from "@oh-my-pi/pi-ai";
+import { getModelRequestExecution } from "@oh-my-pi/pi-ai/model-request-execution";
 import { piEscapeRegexLiteral, piJoinPath } from "@oh-my-pi/pi-ai/providers/cursor-pi-args";
 import { getKeybindings, type Keybinding, Text } from "@oh-my-pi/pi-tui";
 import {
@@ -59,6 +60,7 @@ import {
 	truncateHead,
 	truncateTail,
 } from "@oh-my-pi/pi-tui/tools/streaming-output";
+import { childModelRequestRootOf } from "../session/model-request-context";
 import type { SessionEntry } from "../session/session-entries";
 import type { Tool, ToolSession } from "../tools";
 import { BashTool } from "../tools/bash";
@@ -1368,12 +1370,24 @@ export type LegacyPiCreateAgentSessionOptions = CreateAgentSessionOptions & {
 	resourceLoader?: ResourceLoader;
 };
 
+/**
+ * Legacy callers cannot name their host session, so the hand-over is derived from the model-request context
+ * their code is running in (the host session's extension handler / tool call). Outside any context the
+ * session is user-started and stays its own root. An explicit `modelRequestRoot` always wins.
+ */
+function withHostModelRequestRoot<T extends CreateAgentSessionOptions>(options: T): T {
+	if (options.modelRequestRoot !== undefined) return options;
+	const host = getModelRequestExecution();
+	if (host === undefined) return options;
+	return { ...options, modelRequestRoot: childModelRequestRootOf(host) };
+}
+
 export async function createAgentSession(
 	options: LegacyPiCreateAgentSessionOptions = {},
 ): Promise<CreateAgentSessionResult> {
 	const loader = options.resourceLoader;
 	if (!loader) {
-		return ompCreateAgentSession(options);
+		return ompCreateAgentSession(withHostModelRequestRoot(options));
 	}
 
 	if (loader instanceof DefaultResourceLoader && !loader.loaded) {
@@ -1440,7 +1454,7 @@ export async function createAgentSession(
 		forwarded.appendSystemPrompt = state.appendSystemPrompt.join("\n\n");
 	}
 
-	return ompCreateAgentSession(forwarded);
+	return ompCreateAgentSession(withHostModelRequestRoot(forwarded));
 }
 
 /**

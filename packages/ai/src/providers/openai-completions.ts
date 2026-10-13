@@ -963,6 +963,8 @@ const streamOpenAICompletionsOnce = (
 			try {
 				openaiStream = await createCompletionsStream();
 			} catch (error) {
+				// A gate denial is terminal: no effort/strict-tool fallback re-asks the gate.
+				if (AIError.isModelRequestDenied(error)) throw error;
 				const capturedErrorResponse = error instanceof OpenAIHttpError ? error.captured : undefined;
 				// A caller disable with a retained effort preference is still an
 				// explicit disable: without this, a fieldless rejection of the

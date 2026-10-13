@@ -15,6 +15,7 @@ import securityPublishDescription from "../prompts/tools/security-publish.md" wi
 import { createAgentSession } from "../sdk";
 import type { AgentSession } from "../session/agent-session";
 import type { AuthStorage } from "../session/auth-storage";
+import type { ModelRequestRootAssignment } from "../session/model-request-context";
 import { SessionManager } from "../session/session-manager";
 import { createSecurityAuthResolver, selectSecurityAuth } from "./auth";
 import type {
@@ -85,6 +86,11 @@ export interface SecurityCoordinatorHost {
 	sessionId?: string;
 	agentId?: string;
 	asyncJobManager?: AsyncJobManager;
+	/**
+	 * Root of the host session, read when a scan session is created. Scans start from slash-command and tool
+	 * handlers and run in background jobs, so the host hands its root over explicitly.
+	 */
+	childModelRequestRoot?: () => ModelRequestRootAssignment | undefined;
 }
 
 export interface SecurityPreflightInput {
@@ -255,6 +261,7 @@ async function createDefaultSecuritySession(input: SecurityScanSessionFactoryInp
 			providerResolver: model => input.host.modelRegistry.resolver(model, providerSessionId),
 		}),
 		providerSessionId,
+		modelRequestRoot: input.host.childModelRequestRoot?.(),
 		sessionManager: input.sessionManager,
 		customTools: [input.publicationTool],
 		toolNames: SECURITY_SESSION_TOOLS,

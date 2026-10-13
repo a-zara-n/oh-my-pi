@@ -1662,7 +1662,7 @@ async function openInitialCodexEventStream(
 					options ? event => options.onSseEvent?.(event, model) : undefined,
 				);
 			} catch (error) {
-				if (!(error instanceof CodexWebSocketTransportError)) throw error;
+				if (AIError.isModelRequestDenied(error) || !(error instanceof CodexWebSocketTransportError)) throw error;
 				const fatalWebSocketMessage = error.message.toLowerCase();
 				const isFatal = CODEX_WEBSOCKET_FATAL_PATTERNS.some(pattern =>
 					fatalWebSocketMessage.includes(pattern.toLowerCase()),
@@ -1693,7 +1693,12 @@ async function openInitialCodexEventStream(
 	try {
 		return await openCodexSseTransport(model, requestContext, requestSetup, options, websocketState, transformedBody);
 	} catch (error) {
-		if (!dropRejectedCodexAccessPrograms(transformedBody, model, requestContext.accountId, error)) throw error;
+		if (
+			AIError.isModelRequestDenied(error) ||
+			!dropRejectedCodexAccessPrograms(transformedBody, model, requestContext.accountId, error)
+		) {
+			throw error;
+		}
 		return openCodexSseTransport(model, requestContext, requestSetup, options, websocketState, transformedBody);
 	}
 }
@@ -1764,7 +1769,11 @@ async function* streamCodexCompactionEvents(
 			try {
 				for await (const event of initial.eventStream) bufferedEvents.push(event);
 			} catch (error) {
-				if (options.signal?.aborted || !(error instanceof CodexWebSocketTransportError)) {
+				if (
+					options.signal?.aborted ||
+					AIError.isModelRequestDenied(error) ||
+					!(error instanceof CodexWebSocketTransportError)
+				) {
 					throw error;
 				}
 				const state = requestContext.websocketState;
@@ -2811,6 +2820,8 @@ class CodexStreamProcessor {
 	}
 
 	async #recoverStreamError(error: unknown): Promise<boolean> {
+		// A gate denial is terminal: no SSE replay, websocket reconnect, provider-error backoff, or access-program retry.
+		if (AIError.isModelRequestDenied(error)) return false;
 		this.#stopSteeringOnNativeLaneRejection(error);
 		if (
 			error instanceof CodexSteerCommitError &&

@@ -7,6 +7,7 @@
  * current execution and forwards to the same `callSessionTool` implementation
  * the JavaScript bridge uses.
  */
+import { bindModelRequestExecution } from "@oh-my-pi/pi-ai/model-request-execution";
 import { logger, postmortem } from "@oh-my-pi/pi-utils";
 import type { ToolSession } from "../../tools";
 import type { RuntimeCallIdentity } from "../js/shared/runtime";
@@ -33,6 +34,16 @@ export interface PyToolBridgeEntry {
 	abortRequested?: () => boolean;
 }
 
+/**
+ * A registered execution. `callTool` is bound when the entry is registered, inside the eval tool call's
+ * model-request context: loopback requests come from kernel threads and carry no context, so each call
+ * re-enters the host session's context through it.
+ */
+interface PyToolBridgeRegistration {
+	entry: PyToolBridgeEntry;
+	callTool: typeof callSessionTool;
+}
+
 export interface PyToolBridgeInfo {
 	url: string;
 	token: string;
@@ -43,7 +54,7 @@ interface BridgeServer {
 	stop: () => Promise<void>;
 }
 
-const registrations = new Map<string, PyToolBridgeEntry>();
+const registrations = new Map<string, PyToolBridgeRegistration>();
 let serverPromise: Promise<BridgeServer> | null = null;
 
 function markExpectedBridgeShutdownError(error: unknown): error is Error {
@@ -104,9 +115,10 @@ async function waitForSpeculativeClaim<T>(claim: Promise<T>, name: string, signa
 async function callSessionToolPromptOnAbort(
 	name: string,
 	args: unknown,
-	entry: PyToolBridgeEntry,
+	registration: PyToolBridgeRegistration,
 	identity?: RuntimeCallIdentity,
 ): Promise<unknown> {
+	const { entry, callTool } = registration;
 	if (entry.abortRequested?.()) {
 		throw new Error(`bridge call ${JSON.stringify(name)} aborted: eval cell was interrupted`);
 	}
@@ -122,7 +134,7 @@ async function callSessionToolPromptOnAbort(
 		}
 		if (claimed) return bridgeValueFromToolResult(name, args, claimed, entry.emitStatus);
 	}
-	const call = callSessionTool(name, args, {
+	const call = callTool(name, args, {
 		session: entry.toolSession,
 		signal: entry.signal,
 		emitStatus: entry.emitStatus,
@@ -180,8 +192,8 @@ async function startServer(): Promise<BridgeServer> {
 				return Response.json({ ok: false, error: "Missing session/run/name" }, { status: 400 });
 			}
 			const registrationKey = bridgeRegistrationKey(sessionId, runId);
-			const entry = registrations.get(registrationKey) ?? registrations.get(sessionId);
-			if (!entry) {
+			const registration = registrations.get(registrationKey) ?? registrations.get(sessionId);
+			if (!registration) {
 				return Response.json(
 					{ ok: false, error: `No active Python tool bridge session: ${registrationKey}` },
 					{ status: 200 },
@@ -202,7 +214,7 @@ async function startServer(): Promise<BridgeServer> {
 						? identityRecord.occurrence
 						: undefined;
 				const identity = siteId !== undefined && occurrence !== undefined ? { siteId, occurrence } : undefined;
-				const value = await callSessionToolPromptOnAbort(name, body.args, entry, identity);
+				const value = await callSessionToolPromptOnAbort(name, body.args, registration, identity);
 				return Response.json({ ok: true, value });
 			} catch (err) {
 				return Response.json({
@@ -268,9 +280,10 @@ function bridgeRegistrationKey(sessionId: string, runId: string): string {
 
 export function registerPyToolBridge(sessionId: string, runId: string, entry: PyToolBridgeEntry): () => void {
 	const key = bridgeRegistrationKey(sessionId, runId);
-	registrations.set(key, entry);
+	const registration: PyToolBridgeRegistration = { entry, callTool: bindModelRequestExecution(callSessionTool) };
+	registrations.set(key, registration);
 	return () => {
-		if (registrations.get(key) === entry) {
+		if (registrations.get(key) === registration) {
 			registrations.delete(key);
 		}
 	};

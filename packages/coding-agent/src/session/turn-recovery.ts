@@ -1337,6 +1337,7 @@ export class TurnRecovery {
 	 */
 	isRetryableReasonlessAbort(message: AssistantMessage): boolean {
 		if (
+			AIError.isModelRequestDenied(message) ||
 			(message.stopReason !== "aborted" && message.stopReason !== "error") ||
 			message.content.length !== 0 ||
 			this.#host.abortInProgress() ||
@@ -1361,7 +1362,11 @@ export class TurnRecovery {
 	 * cannot fall through to the generic 408 replay path.
 	 */
 	async handleResponsesRequestBodyReadTimeout(message: AssistantMessage): Promise<RequestBodyReadTimeoutRecovery> {
-		if (message.stopReason !== "error" || !AIError.isResponsesRequestBodyReadTimeout(message)) {
+		if (
+			AIError.isModelRequestDenied(message) ||
+			message.stopReason !== "error" ||
+			!AIError.isResponsesRequestBodyReadTimeout(message)
+		) {
 			return "not-applicable";
 		}
 		const generation = this.#host.promptGeneration();
@@ -1404,6 +1409,8 @@ export class TurnRecovery {
 	 */
 	isRetryableError(message: AssistantMessage): boolean {
 		if (message.stopReason !== "error") return false;
+		// A gate denial is a stop, not a transient failure: no backoff, rotation, or replay.
+		if (AIError.isModelRequestDenied(message)) return false;
 		if (this.#isUsagePreflightBlocked(message)) return false;
 		if (AIError.isResponsesRequestBodyReadTimeout(message)) return false;
 		const model = this.#host.model();
@@ -2208,6 +2215,7 @@ export class TurnRecovery {
 		const model = this.#activeFireworksFastModel();
 		if (!model) return false;
 		if (message.stopReason !== "error") return false;
+		if (AIError.isModelRequestDenied(message)) return false;
 		if (this.#isUsagePreflightBlocked(message)) return false;
 		if (this.#hasReplayUnsafeOutput(message)) return false;
 		// A content refusal/sensitivity stop is the model's decision, not a route
@@ -2237,6 +2245,8 @@ export class TurnRecovery {
 	 */
 	isHardErrorFallbackEligible(message: AssistantMessage): boolean {
 		if (message.stopReason !== "error") return false;
+		// A denial must surface to the caller; another model would only be asked the same gate.
+		if (AIError.isModelRequestDenied(message)) return false;
 		if (this.#isUsagePreflightBlocked(message)) return false;
 		const model = this.#host.model();
 		if (!model) return false;
@@ -2384,6 +2394,8 @@ export class TurnRecovery {
 		},
 	): Promise<boolean> {
 		const retrySettings = cfgRetry.get(this.#host.settings);
+		// A gate denial is terminal on every recovery path: no backoff, rotation, or model fallback.
+		if (AIError.isModelRequestDenied(message)) return false;
 		if (this.#host.abortInProgress() || this.#host.isDisposed()) return false;
 		// The Fireworks Fast→base degrade is an intrinsic model-selection safety net,
 		// not a retry loop, so it runs even when the user disabled retries: it switches

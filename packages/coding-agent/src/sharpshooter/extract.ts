@@ -1,6 +1,7 @@
 import { type } from "@oh-my-pi/omptype";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import { completeSimple, Effort, type Model, retryTransientCompletion } from "@oh-my-pi/pi-ai";
+import { runWithModelRequestPurpose } from "@oh-my-pi/pi-ai/model-request-execution";
 import { clampThinkingLevelForModel } from "@oh-my-pi/pi-catalog/model-thinking";
 import { logger, prompt } from "@oh-my-pi/pi-utils";
 import type { ModelRegistry } from "../config/model-registry";
@@ -214,27 +215,29 @@ async function runSharpshooterExtraction(
 	if (!model || session.isDisposed) return;
 
 	const input = prompt.render(extractInputTemplate, { ...envelope });
-	const response = await retryTransientCompletion(
-		() =>
-			completeSimple(
-				model,
-				{
-					systemPrompt: [prompt.render(extractSystemTemplate)],
-					messages: [{ role: "user", content: [{ type: "text", text: input }], timestamp: Date.now() }],
-					tools: [recordDeltasTool],
-				},
-				{
-					apiKey: modelRegistry.resolver(model, session.sessionId),
-					sessionId: session.sessionId,
-					maxTokens: 2048,
-					reasoning: clampThinkingLevelForModel(model, Effort.Low),
-					toolChoice: "required",
-				},
-			),
-		{ provider: model.provider },
+	const response = await runWithModelRequestPurpose("memory", () =>
+		retryTransientCompletion(
+			() =>
+				completeSimple(
+					model,
+					{
+						systemPrompt: [prompt.render(extractSystemTemplate)],
+						messages: [{ role: "user", content: [{ type: "text", text: input }], timestamp: Date.now() }],
+						tools: [recordDeltasTool],
+					},
+					{
+						apiKey: modelRegistry.resolver(model, session.sessionId),
+						sessionId: session.sessionId,
+						maxTokens: 2048,
+						reasoning: clampThinkingLevelForModel(model, Effort.Low),
+						toolChoice: "required",
+					},
+				),
+			{ provider: model.provider },
+		),
 	);
 	if (response.stopReason === "error") {
-		throw new Error(response.errorMessage || "Sharpshooter extraction model error");
+		throw new Error(response.errorMessage || "Sharpshooter extraction model error", { cause: response });
 	}
 
 	for (const block of response.content) {

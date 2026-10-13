@@ -604,6 +604,8 @@ function buildExecutorOptions(
 		parentMnemopiSessionState: session.getMnemopiSessionState?.(),
 		parentTelemetry: session.getTelemetry?.(),
 		parentAgentId: session.getAgentId?.() ?? MAIN_AGENT_ID,
+		// Explicit hand-over of the spawning session's root; kept for the child's revives (see ExecutorOptions).
+		modelRequestRoot: session.childModelRequestRoot?.(),
 		parentServiceTier: session.getServiceTierByFamily ? (session.getServiceTierByFamily() ?? null) : undefined,
 	};
 }

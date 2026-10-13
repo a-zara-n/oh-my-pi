@@ -137,6 +137,7 @@ function createContext(overrides?: {
 		effectiveExtensionRoots: overrides?.effectiveExtensionRoots,
 		extensionPaths: overrides?.extensionPaths,
 		getAgentId: vi.fn(() => overrides?.agentId),
+		childModelRequestRoot: vi.fn(() => ({ kind: "child", rootSessionId: "top-level-root" })),
 		sendCustomMessage: vi.fn(async () => {
 			sequence.push("sendCustomMessage");
 		}),
@@ -286,6 +287,26 @@ describe("TanCommandController", () => {
 		// The local mapping keys off the session-manager id (not `session.sessionId`,
 		// still "parent-session"), matching the parent's large-paste / local:// writes.
 		expect(opts.getSessionId?.()).toBe("parent-local-session");
+	});
+
+	it("creates the clone inside the dispatching session's root, even after the interactive session switches", async () => {
+		const harness = createContext();
+		vi.spyOn(SessionManager, "forkFrom").mockResolvedValue(harness.cloneManager);
+		const { clone } = createCloneStub({ lastAssistantText: "done" });
+		let capturedOptions: CreateAgentSessionOptions | undefined;
+		vi.spyOn(sdkModule, "createAgentSession").mockImplementation(async options => {
+			capturedOptions = options;
+			return { session: clone } as unknown as CreateAgentSessionResult;
+		});
+		const rootSpy = vi.spyOn(harness.ctx.session, "childModelRequestRoot");
+		await new TanCommandController(harness.ctx).start("summarize the failing test");
+		// `/new` in the parent after dispatch must not move the already-dispatched clone to another root.
+		rootSpy.mockReturnValue({ kind: "child", rootSessionId: "root-after-new" });
+		const capturedRun = harness.capturedRun;
+		if (!capturedRun) throw new Error("run function was not captured");
+		await capturedRun({ jobId: "job-123", signal: new AbortController().signal, reportProgress: async () => {} });
+
+		expect(capturedOptions?.modelRequestRoot).toEqual({ kind: "child", rootSessionId: "top-level-root" });
 	});
 
 	it("keeps the tangent alive until successive descendant results produce the final answer", async () => {

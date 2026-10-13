@@ -179,6 +179,8 @@ const streamAzureOpenAIResponsesOnce = (
 					openaiStream = handle.events;
 					break;
 				} catch (error) {
+					// A gate denial is terminal: no effort fallback re-asks the gate.
+					if (AIError.isModelRequestDenied(error)) throw error;
 					const capturedErrorResponse = error instanceof OpenAIHttpError ? error.captured : undefined;
 					const reasoningEffortFallback: OpenAIReasoningEffortFallback | undefined = !requestSignal.aborted
 						? resolveOpenAIReasoningEffortFallback(error, capturedErrorResponse, params)

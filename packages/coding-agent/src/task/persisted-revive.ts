@@ -186,6 +186,9 @@ export function createPersistedSubagentReviverFactory(
 					// Revived agents join the root session tree, so their observability
 					// frames ride the same bus the RPC/collab surfaces subscribed to.
 					subagentEventBus: ctx.subagentEventBus,
+					// A cold revive runs from IRC/hub handlers with no ambient context: the live
+					// top-level session hands its current root over, never the revived agent's own id.
+					modelRequestRoot: ctx.session.childModelRequestRoot(),
 					modelRegistry: ctx.modelRegistry,
 					...(persistedModelPattern ? { modelPattern: persistedModelPattern } : {}),
 					modelPatternAuthFallback: init.resolvedModel,

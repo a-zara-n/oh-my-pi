@@ -45,6 +45,7 @@ function coordinatorFor(runtime: SlashCommandRuntime) {
 		sessionId: runtime.session.sessionId,
 		agentId: runtime.session.getAgentId(),
 		asyncJobManager: runtime.session.asyncJobManager,
+		childModelRequestRoot: () => runtime.session.childModelRequestRoot(),
 	});
 }
 

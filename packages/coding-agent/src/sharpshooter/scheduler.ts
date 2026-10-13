@@ -1,3 +1,4 @@
+import { bindModelRequestExecution } from "@oh-my-pi/pi-ai/model-request-execution";
 import { logger } from "@oh-my-pi/pi-utils";
 
 import type { ModelRegistry } from "../config/model-registry";
@@ -31,7 +32,9 @@ export function startSharpshooterScheduler(options: {
 		return createDisposer(bankDir, existing);
 	}
 
-	const tick = async (): Promise<void> => {
+	// The interval outlives the call that started it (and is shared by every session on this bank), so the tick
+	// is bound to the starting session's model-request context rather than whatever fires the timer.
+	const tick = bindModelRequestExecution(async (): Promise<void> => {
 		try {
 			const [depth, state] = await Promise.all([
 				sharpshooterQueueDepth(options.agentDir, options.cwd),
@@ -46,7 +49,7 @@ export function startSharpshooterScheduler(options: {
 				error: error instanceof Error ? error.message : String(error),
 			});
 		}
-	};
+	});
 	const timer = setInterval(() => void tick(), SCHEDULER_TICK_MS);
 	timer.unref();
 	const entry: SchedulerEntry = { timer, refCount: 1 };

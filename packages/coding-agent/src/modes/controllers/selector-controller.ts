@@ -694,6 +694,7 @@ export class SelectorController {
 					activeModelPattern,
 					defaultModelPattern,
 					model => this.ctx.session.effectiveServiceTier(model),
+					() => this.ctx.session.childModelRequestRoot(),
 				),
 				{ onCancel: () => done() },
 			);

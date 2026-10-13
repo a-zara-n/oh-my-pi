@@ -20,6 +20,12 @@ import type {
 	TextContent,
 } from "@oh-my-pi/pi-ai";
 import {
+	getModelRequestExecution,
+	type ModelRequestExecution,
+	resolveModelRequestScope,
+	runWithModelRequestExecution,
+} from "@oh-my-pi/pi-ai/model-request-execution";
+import {
 	clearContextHistoryIndex,
 	getContextHistoryIndex,
 	markPerCallContextMessage,
@@ -519,6 +525,12 @@ export class ExtensionRunner {
 	#commandDiagnostics: Array<{ type: string; message: string; path: string }> = [];
 	#toolRegistrationScope = new AsyncLocalStorage<ToolRegistrationScope>();
 	#toolRegistrationBarrier: Promise<void> | undefined;
+	/**
+	 * Core-minted model-request context of the session this runner serves. Every place that runs
+	 * extension-authored code (handlers, tools, commands, timers, file fallbacks) runs it under this
+	 * context, so a request such an extension makes reaches the model-request gate as this session's.
+	 */
+	#modelRequestExecution: ModelRequestExecution | undefined;
 	#initialized = false;
 	/** Full load order, captured on the first {@link setSuspendedExtensions} call. */
 	#loadOrder: Extension[] | undefined;
@@ -639,6 +651,38 @@ export class ExtensionRunner {
 
 	setToolCallPreflight(preflight: ToolCallPreflight | undefined): void {
 		this.#toolCallPreflight = preflight;
+	}
+
+	/**
+	 * Internal. Hands the runner the session's model-request context. Extension code runs inside it from
+	 * then on; before this is called (or when it never is) extension code runs in whatever context is active.
+	 */
+	setModelRequestExecution(execution: ModelRequestExecution): void {
+		this.#modelRequestExecution = execution;
+	}
+
+	/**
+	 * Run extension-authored code inside this session's model-request context.
+	 *
+	 * AsyncLocalStorage context follows awaits and timers but not callbacks fired by a foreign emitter, so
+	 * this is applied where the runner itself dispatches (handler, tool, command, timer, fallback). An
+	 * already-active context of this same session is kept as is, so a derived identity (the advisor's
+	 * toolset shares this runner) is not flattened into the session's own; a context of any other session
+	 * is replaced, because code reached from another session's tool call is still this session's extension.
+	 * Nothing the extension passes can influence which context applies.
+	 */
+	runInSessionExecution<T>(fn: () => T): T {
+		const own = this.#modelRequestExecution;
+		if (own === undefined) return fn();
+		const active = getModelRequestExecution();
+		if (active === own) return fn();
+		if (active !== undefined && resolveModelRequestScope(active).sessionId === this.sessionId) return fn();
+		return runWithModelRequestExecution(own, fn);
+	}
+
+	/** Re-enter this session's model-request context when a deferred callback fires (timers, queued jobs). */
+	#bindToSessionExecution<A extends unknown[], R>(callback: (...args: A) => R): (...args: A) => R {
+		return (...args) => this.runInSessionExecution(() => callback(...args));
 	}
 
 	async runToolCallPreflightBefore(
@@ -864,7 +908,7 @@ export class ExtensionRunner {
 						const ctx = this.createContext();
 						for (const handler of ext.fileWriteFallbackHandlers) {
 							try {
-								if (await handler(req, ctx)) return true;
+								if (await this.runInSessionExecution(() => handler(req, ctx))) return true;
 							} catch (error) {
 								logger.warn("Extension file write fallback handler threw; trying next handler", {
 									extension: ext.path,
@@ -883,7 +927,7 @@ export class ExtensionRunner {
 						const ctx = this.createContext();
 						for (const handler of ext.fileDeleteFallbackHandlers) {
 							try {
-								if (await handler(req, ctx)) return true;
+								if (await this.runInSessionExecution(() => handler(req, ctx))) return true;
 							} catch (error) {
 								logger.warn("Extension file delete fallback handler threw; trying next handler", {
 									extension: ext.path,
@@ -1329,12 +1373,14 @@ export class ExtensionRunner {
 	/**
 	 * Run an extension-owned callback within this session's settings scope, so a
 	 * synchronous `SettingsManager.create(ctx.cwd)` inside it resolves THIS
-	 * session's manager rather than a same-cwd sibling's. Event handlers get this
-	 * scope via {@link #runHandlerWithTimeout}; slash commands and shortcuts are
-	 * invoked directly by their controllers and route through here instead.
+	 * session's manager rather than a same-cwd sibling's, and inside this session's
+	 * model-request context (see {@link runInSessionExecution}). Event handlers get
+	 * this scope via {@link #runHandlerWithTimeout}; slash commands, shortcuts and
+	 * extension tools are invoked directly by their controllers and route through
+	 * here instead.
 	 */
 	runScoped<T>(fn: () => T): T {
-		return withActiveSettings(this.settings, fn);
+		return withActiveSettings(this.settings, () => this.runInSessionExecution(fn));
 	}
 
 	/**
@@ -1414,8 +1460,10 @@ export class ExtensionRunner {
 				: undefined,
 			localProtocolOptions: this.localProtocolOptions,
 			memory: this.#getMemoryFn?.(),
-			setInterval: (callback, ms, ...args) => this.#managedTimers.setInterval(callback, ms, ...args),
-			setTimeout: (callback, ms, ...args) => this.#managedTimers.setTimeout(callback, ms, ...args),
+			setInterval: (callback, ms, ...args) =>
+				this.#managedTimers.setInterval(this.#bindToSessionExecution(callback), ms, ...args),
+			setTimeout: (callback, ms, ...args) =>
+				this.#managedTimers.setTimeout(this.#bindToSessionExecution(callback), ms, ...args),
 			clearTimer: timer => this.#managedTimers.clear(timer),
 			addAdditionalContext: delegation?.context?.addAdditionalContext,
 			invokeTool:
@@ -1509,7 +1557,7 @@ export class ExtensionRunner {
 		let handlerResult: R | typeof EXTENSION_HANDLER_TIMEOUT | typeof EXTENSION_HANDLER_ABORTED | undefined;
 		let handlerFailure: { error: unknown } | undefined;
 		try {
-			handlerResult = await withActiveSettings(this.settings, () =>
+			handlerResult = await this.runScoped(() =>
 				raceHandlerWithTimeout(
 					async (handlerSignal, budget) => {
 						registrationScope.signal = handlerSignal;

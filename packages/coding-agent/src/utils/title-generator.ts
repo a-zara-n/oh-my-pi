@@ -14,6 +14,8 @@ import {
 	type Model,
 	retryTransientCompletion,
 } from "@oh-my-pi/pi-ai";
+import * as AIError from "@oh-my-pi/pi-ai/error";
+import { runWithModelRequestPurpose } from "@oh-my-pi/pi-ai/model-request-execution";
 import { StreamMarkupHealing } from "@oh-my-pi/pi-ai/utils/stream-markup-healing";
 import { writeTerminalSequence } from "@oh-my-pi/pi-tui";
 import { isNativeRendering, onNativeRenderingChange } from "@oh-my-pi/pi-tui/native/state";
@@ -336,30 +338,38 @@ async function generateTitleOnlineWithModels(
 			const messages: Message[] = [{ role: "user", content: userMessage, timestamp: Date.now() }];
 			if (model.supportsAssistantPrefill) messages.push(titlePrefill(model));
 
-			const response = await retryTransientCompletion(
-				() =>
-					completeSimple(
-						model,
-						{
-							systemPrompt,
-							messages,
-						},
-						{
-							apiKey: registry.resolver(model, sessionId),
-							sessionId,
-							maxTokens,
-							disableReasoning: true,
-							// Greedy decode: titling is extraction, not generation. Backends that
-							// default temperature high (e.g. Ollama's 0.8) otherwise garble names
-							// from the message ("hashline" → "HasHroshi"). Providers whose models
-							// reject sampling params drop this via `supportsSamplingParams`.
-							temperature: 0,
-							metadata,
-							signal,
-						},
-					),
-				{ signal, provider: model.provider },
+			const response = await runWithModelRequestPurpose("title", () =>
+				retryTransientCompletion(
+					() =>
+						completeSimple(
+							model,
+							{
+								systemPrompt,
+								messages,
+							},
+							{
+								apiKey: registry.resolver(model, sessionId),
+								sessionId,
+								maxTokens,
+								disableReasoning: true,
+								// Greedy decode: titling is extraction, not generation. Backends that
+								// default temperature high (e.g. Ollama's 0.8) otherwise garble names
+								// from the message ("hashline" → "HasHroshi"). Providers whose models
+								// reject sampling params drop this via `supportsSamplingParams`.
+								temperature: 0,
+								metadata,
+								signal,
+							},
+						),
+					{ signal, provider: model.provider },
+				),
 			);
+
+			// A gate denial is terminal: trying the next title candidate would be a fallback around it.
+			if (AIError.isModelRequestDenied(response)) {
+				logger.debug("title-generator: model request denied", { ...modelContext, reason: "denied" });
+				return null;
+			}
 
 			if (response.stopReason === "aborted" || signal?.aborted) {
 				logger.debug("title-generator: aborted", {
@@ -401,6 +411,10 @@ async function generateTitleOnlineWithModels(
 
 			return title;
 		} catch (err) {
+			if (AIError.isModelRequestDenied(err)) {
+				logger.debug("title-generator: model request denied", { ...modelContext, reason: "denied" });
+				return null;
+			}
 			if (signal?.aborted || (err instanceof Error && (err.name === "AbortError" || err.name === "TimeoutError"))) {
 				logger.debug("title-generator: aborted", {
 					...modelContext,

@@ -259,9 +259,14 @@ export async function requestAnthropicNativeCompaction(
 	}
 	if (response.stopReason === "error") {
 		const message = `Anthropic compaction failed: ${response.errorMessage ?? "unknown error"}`;
-		throw response.errorStatus === undefined
-			? new Error(message)
-			: new AIError.ProviderHttpError(message, response.errorStatus);
+		const failure =
+			response.errorStatus === undefined
+				? new Error(message)
+				: new AIError.ProviderHttpError(message, response.errorStatus);
+		// Flattening must keep a gate denial terminal for the caller's native-compaction fallbacks.
+		throw AIError.isModelRequestDenied(response) && response.errorId !== undefined
+			? AIError.attach(failure, response.errorId)
+			: failure;
 	}
 	const payload = response.providerPayload;
 	if (

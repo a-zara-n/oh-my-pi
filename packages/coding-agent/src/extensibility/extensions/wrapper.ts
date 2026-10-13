@@ -113,17 +113,19 @@ export class RegisteredToolAdapter implements AgentTool<any, any, any> {
 		// call, so a bare `ctx.invokeTool(params)` keeps the caller's `toolCall`/provider metadata
 		// (write/edit LSP batching, computer safety acknowledgement), stops when the outer call is
 		// aborted, and still streams native progress.
-		return this.registeredTool.definition.execute(
-			toolCallId,
-			params,
-			signal,
-			onUpdate,
-			this.runner.createContext(undefined, {
-				toolName: this.registeredTool.definition.name,
-				context,
+		return this.runner.runInSessionExecution(() =>
+			this.registeredTool.definition.execute(
+				toolCallId,
+				params,
 				signal,
 				onUpdate,
-			}),
+				this.runner.createContext(undefined, {
+					toolName: this.registeredTool.definition.name,
+					context,
+					signal,
+					onUpdate,
+				}),
+			),
 		);
 	}
 }

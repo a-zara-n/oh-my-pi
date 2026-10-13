@@ -647,13 +647,16 @@ function resolveCompactionEffort(model: Model, level: ThinkingLevel | undefined)
  */
 function createSummarizationError(prefix: string, response: AssistantMessage): Error {
 	const text = `${prefix}: ${response.errorMessage || "Unknown error"}`;
-	return response.errorStatus === undefined
-		? new Error(text)
-		: new AIError.ProviderHttpError(text, response.errorStatus);
+	const error =
+		response.errorStatus === undefined ? new Error(text) : new AIError.ProviderHttpError(text, response.errorStatus);
+	// Flattening the message into an Error must keep a gate denial terminal for every caller's retry/fallback.
+	return AIError.isModelRequestDenied(response) && response.errorId !== undefined
+		? AIError.attach(error, response.errorId)
+		: error;
 }
 
 function shouldRetryHandoffWithAutoToolChoice(response: AssistantMessage): boolean {
-	if (response.errorStatus !== 400) return false;
+	if (response.errorStatus !== 400 || AIError.isModelRequestDenied(response)) return false;
 	const message = response.errorMessage ?? "";
 	return /\btool_choice\b/i.test(message) && /\bauto\b/i.test(message) && /\bsupported\b/i.test(message);
 }
@@ -1816,7 +1819,7 @@ export async function compact(
 				// A user/session abort is a cancellation, not a remote failure —
 				// swallowing it here would downgrade Esc into "fall back to local
 				// summarization" and keep compaction running on an aborted signal.
-				if (signal?.aborted) throw err;
+				if (signal?.aborted || AIError.isModelRequestDenied(err)) throw err;
 				nativeCompactionError = selectNativeCompactionError(nativeCompactionError, err);
 				// Claim the V1 fallback only when the V1 block below will run.
 				logger.warn(
@@ -1874,7 +1877,7 @@ export async function compact(
 				// A user/session abort is a cancellation, not a remote failure —
 				// swallowing it here would downgrade Esc into "fall back to local
 				// summarization" and keep compaction running on an aborted signal.
-				if (signal?.aborted) throw err;
+				if (signal?.aborted || AIError.isModelRequestDenied(err)) throw err;
 				nativeCompactionError = selectNativeCompactionError(nativeCompactionError, err);
 				logger.warn("OpenAI remote compaction failed", {
 					error: err instanceof Error ? err.message : String(err),
@@ -2022,7 +2025,7 @@ export async function compact(
 			// A user/session abort is a cancellation, not a remote failure —
 			// swallowing it here would downgrade Esc into "fall back to local
 			// summarization" and keep compaction running on an aborted signal.
-			if (signal?.aborted) throw err;
+			if (signal?.aborted || AIError.isModelRequestDenied(err)) throw err;
 			nativeCompactionError = selectNativeCompactionError(nativeCompactionError, err);
 			logger.warn("Anthropic server-side compaction failed", {
 				error: err instanceof Error ? err.message : String(err),

@@ -9,6 +9,7 @@ import {
 	withAuth,
 } from "@oh-my-pi/pi-ai";
 import { ProviderHttpError } from "@oh-my-pi/pi-ai/error";
+import { runWithModelRequestPurpose } from "@oh-my-pi/pi-ai/model-request-execution";
 import { fetchWithRetry } from "@oh-my-pi/pi-utils";
 import { type CompleteOptions, callHostLlm, getHostLlmBackend } from "./llm-backends";
 import {
@@ -189,20 +190,22 @@ export async function callConfiguredCompletion(
 		return null;
 	}
 	try {
-		const message = await retryTransientCompletion(
-			() =>
-				completeSimple(
-					model,
-					{
-						messages: [{ role: "user", content: prompt, timestamp: Date.now() }],
-					},
-					{
-						apiKey: llmApiKey() || undefined,
-						maxTokens: opts.maxTokens ?? llmMaxTokens(),
-						temperature,
-					},
-				),
-			{ provider: model.provider },
+		const message = await runWithModelRequestPurpose("memory", () =>
+			retryTransientCompletion(
+				() =>
+					completeSimple(
+						model,
+						{
+							messages: [{ role: "user", content: prompt, timestamp: Date.now() }],
+						},
+						{
+							apiKey: llmApiKey() || undefined,
+							maxTokens: opts.maxTokens ?? llmMaxTokens(),
+							temperature,
+						},
+					),
+				{ provider: model.provider },
+			),
 		);
 		return assistantText(message).trim() || null;
 	} catch {

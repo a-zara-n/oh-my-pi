@@ -1422,6 +1422,10 @@ export class AdvisorRuntime {
 					const rawErrorId = AIError.classify(err);
 					const terminalFailureId =
 						terminalFailure === undefined ? undefined : AIError.classifyMessage(terminalFailure);
+					// A gate denial is terminal: no model-fallback hook, no retry of the bounded batch.
+					const gateDenied =
+						AIError.isModelRequestDenied(err) ||
+						(terminalFailure !== undefined && AIError.isModelRequestDenied(terminalFailure));
 					const classifierRefusal =
 						(terminalFailure !== undefined && isClassifierRefusal(terminalFailure)) ||
 						(!AIError.is(rawErrorId, AIError.Flag.AccountPolicy) &&
@@ -1434,9 +1438,10 @@ export class AdvisorRuntime {
 					// retry — classify it before rollback so the batch is dropped after
 					// one attempt instead of burning the 3-attempt budget (#5468).
 					const terminalFailureRetriable =
-						terminalFailureId === undefined ||
-						AIError.retriable(terminalFailureId) ||
-						AIError.is(terminalFailureId, AIError.Flag.ContextOverflow);
+						!gateDenied &&
+						(terminalFailureId === undefined ||
+							AIError.retriable(terminalFailureId) ||
+							AIError.is(terminalFailureId, AIError.Flag.ContextOverflow));
 					this.#rollbackFailedTurn(messageSnapshot);
 					logger.debug("advisor turn failed", { err: String(err) });
 					if (classifierRefusal) {
@@ -1512,14 +1517,16 @@ export class AdvisorRuntime {
 						continue;
 					}
 					let recovered = false;
-					try {
-						recovered =
-							(await raceWithSignal(
-								Promise.resolve(this.host.onTurnError?.(err, failedMessages, iterationAbort.signal)),
-								iterationAbort.signal,
-							)) === true;
-					} catch (hookErr) {
-						logger.debug("advisor onTurnError hook failed", { err: String(hookErr) });
+					if (!gateDenied) {
+						try {
+							recovered =
+								(await raceWithSignal(
+									Promise.resolve(this.host.onTurnError?.(err, failedMessages, iterationAbort.signal)),
+									iterationAbort.signal,
+								)) === true;
+						} catch (hookErr) {
+							logger.debug("advisor onTurnError hook failed", { err: String(hookErr) });
+						}
 					}
 					if (this.#sessionTransitionPaused) {
 						this.#pending.unshift(...popped);

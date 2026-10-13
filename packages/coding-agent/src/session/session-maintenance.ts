@@ -60,6 +60,7 @@ import type {
 	ProviderSessionState,
 } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
+import { runWithModelRequestPurpose } from "@oh-my-pi/pi-ai/model-request-execution";
 import { resolvePromptCacheLookback } from "@oh-my-pi/pi-catalog/compat/prompt-cache-lookback";
 import { preferredDialect } from "@oh-my-pi/pi-catalog/identity";
 import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
@@ -504,6 +505,9 @@ export interface SessionMaintenanceHost {
 	}): Promise<void>;
 	abortHandoff(): void;
 }
+
+/** `compact` with the requests it makes declared as compaction (a no-op outside a session context). */
+const compactAsCompaction: typeof compact = (...args) => runWithModelRequestPurpose("compaction", () => compact(...args));
 
 /** Owns compaction, pruning, shake, promotion, and automatic context maintenance. */
 export class SessionMaintenance {
@@ -1518,6 +1522,7 @@ export class SessionMaintenance {
 				!compactionCommitted &&
 				!compactionAbortController.signal.aborted &&
 				!(error instanceof CompactionCancelledError) &&
+				!AIError.isModelRequestDenied(error) &&
 				selectedMethodIndex >= 0 &&
 				selectedMethodIndex + 1 < methods.length
 			) {
@@ -3513,6 +3518,8 @@ export class SessionMaintenance {
 					},
 				);
 			} catch (error) {
+				// A gate denial is terminal: no other compaction candidate may be asked.
+				if (AIError.isModelRequestDenied(error)) throw error;
 				const id = AIError.classify(error instanceof NativeCompactionError ? error.cause : error, candidate.api);
 				if (AIError.is(id, AIError.Flag.AuthFailed)) continue;
 				if (error instanceof NativeCompactionError) {
@@ -4909,7 +4916,7 @@ export class SessionMaintenance {
 					let attempt = 0;
 					while (true) {
 						try {
-							compactResult = await compact(
+							compactResult = await compactAsCompaction(
 								this.#host.obfuscatePreparationForProvider(preparation),
 								candidate,
 								this.#host.modelRegistry.resolver(candidate, this.#host.sessionId()),
@@ -4946,7 +4953,8 @@ export class SessionMaintenance {
 							);
 							break;
 						} catch (error) {
-							if (autoCompactionSignal.aborted) {
+							// A gate denial is terminal: no retry wait, no next candidate; the outer handler surfaces it.
+							if (autoCompactionSignal.aborted || AIError.isModelRequestDenied(error)) {
 								throw error;
 							}
 
@@ -5104,7 +5112,7 @@ export class SessionMaintenance {
 					: reason === "incomplete"
 						? `Incomplete response recovery failed: ${errorMessage}`
 						: `Auto-compaction failed: ${errorMessage}`;
-			if (!compactionCommitted && methodIndex + 1 < methods.length) {
+			if (!compactionCommitted && !AIError.isModelRequestDenied(error) && methodIndex + 1 < methods.length) {
 				logger.warn("Automatic compaction method failed; trying next preference", {
 					method,
 					error: errorMessage,

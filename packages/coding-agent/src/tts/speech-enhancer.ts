@@ -16,6 +16,7 @@
  *   model.
  */
 import { type AssistantMessage, completeSimple, retryTransientCompletion } from "@oh-my-pi/pi-ai";
+import { runWithModelRequestPurpose } from "@oh-my-pi/pi-ai/model-request-execution";
 import { logger, prompt } from "@oh-my-pi/pi-utils";
 import type { ModelRegistry } from "../config/model-registry";
 import { roleCandidatePool } from "../config/model-roles";
@@ -83,26 +84,28 @@ export class SpeechEnhancer {
 			if (!apiKey) return null;
 			// Resolve metadata after getApiKey so the session-sticky credential is recorded first.
 			const metadata = this.#deps.metadataResolver?.(model.provider);
-			const response = await retryTransientCompletion(
-				() => {
-					const timeout = AbortSignal.timeout(REWRITE_TIMEOUT_MS);
-					return completeSimple(
-						model,
-						{
-							systemPrompt: [SYSTEM_PROMPT],
-							messages: [{ role: "user", content: boundBlock(block), timestamp: Date.now() }],
-						},
-						{
-							apiKey: registry.resolver(model, sessionId),
-							sessionId,
-							maxTokens: ANSWER_MAX_TOKENS,
-							disableReasoning: true,
-							metadata,
-							signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
-						},
-					);
-				},
-				{ signal, provider: model.provider },
+			const response = await runWithModelRequestPurpose("speech-enhance", () =>
+				retryTransientCompletion(
+					() => {
+						const timeout = AbortSignal.timeout(REWRITE_TIMEOUT_MS);
+						return completeSimple(
+							model,
+							{
+								systemPrompt: [SYSTEM_PROMPT],
+								messages: [{ role: "user", content: boundBlock(block), timestamp: Date.now() }],
+							},
+							{
+								apiKey: registry.resolver(model, sessionId),
+								sessionId,
+								maxTokens: ANSWER_MAX_TOKENS,
+								disableReasoning: true,
+								metadata,
+								signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+							},
+						);
+					},
+					{ signal, provider: model.provider },
+				),
 			);
 			if (response.stopReason === "error") {
 				logger.debug("speech-enhancer: rewrite errored", { error: response.errorMessage });

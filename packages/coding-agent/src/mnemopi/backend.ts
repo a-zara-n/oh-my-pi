@@ -1,6 +1,8 @@
 import { rm } from "node:fs/promises";
 import * as path from "node:path";
 import { type ApiKeyResolver, completeSimple, retryTransientCompletion } from "@oh-my-pi/pi-ai";
+import * as AIError from "@oh-my-pi/pi-ai/error";
+import { runWithModelRequestPurpose } from "@oh-my-pi/pi-ai/model-request-execution";
 import { hostMatchesUrl } from "@oh-my-pi/pi-catalog/hosts";
 import type { Mnemopi } from "@oh-my-pi/pi-mnemopi";
 import type { MnemopiLlmCompleteOptions } from "@oh-my-pi/pi-mnemopi/core/runtime-options";
@@ -612,36 +614,40 @@ async function resolveMnemopiProviderOptions(
 						});
 						continue;
 					}
-					const message = await retryTransientCompletion(
-						() =>
-							completeSimple(
-								model,
-								{
-									...(request.systemPrompt ? { systemPrompt: [request.systemPrompt] } : {}),
-									messages: [{ role: "user", content: request.prompt, timestamp: Date.now() }],
-								},
-								{
-									apiKey: modelRegistry.resolver(model, sessionId),
-									sessionId,
-									maxTokens: opts?.maxTokens,
-									temperature: opts?.temperature,
-									signal,
-									onAttempt: message =>
-										onUsage?.({
-											purpose: "memory",
-											role: "memory",
-											api: model.api,
-											provider: model.provider,
-											model: model.id,
-											usage: message.usage,
-											stopReason: message.stopReason,
-											errorMessage: message.errorMessage,
-										}),
-								},
-							),
-						{ provider: model.provider, signal },
+					const message = await runWithModelRequestPurpose("memory", () =>
+						retryTransientCompletion(
+							() =>
+								completeSimple(
+									model,
+									{
+										...(request.systemPrompt ? { systemPrompt: [request.systemPrompt] } : {}),
+										messages: [{ role: "user", content: request.prompt, timestamp: Date.now() }],
+									},
+									{
+										apiKey: modelRegistry.resolver(model, sessionId),
+										sessionId,
+										maxTokens: opts?.maxTokens,
+										temperature: opts?.temperature,
+										signal,
+										onAttempt: message =>
+											onUsage?.({
+												purpose: "memory",
+												role: "memory",
+												api: model.api,
+												provider: model.provider,
+												model: model.id,
+												usage: message.usage,
+												stopReason: message.stopReason,
+												errorMessage: message.errorMessage,
+											}),
+									},
+								),
+							{ provider: model.provider, signal },
+						),
 					);
 					if (message.stopReason === "aborted" || signal?.aborted) return null;
+					// A gate denial is terminal: no other memory model may be asked in its place.
+					if (message.stopReason === "error" && AIError.isModelRequestDenied(message)) return null;
 					if (message.stopReason === "error") {
 						logger.warn("Mnemopi: memory completion model failed; trying the next configured fallback.", {
 							provider: model.provider,
@@ -659,7 +665,7 @@ async function resolveMnemopiProviderOptions(
 						.join("\n")
 						.trim();
 				} catch (error) {
-					if (signal?.aborted) return null;
+					if (signal?.aborted || AIError.isModelRequestDenied(error)) return null;
 					logger.warn("Mnemopi: memory completion model threw; trying the next configured fallback.", {
 						provider: model.provider,
 						model: model.id,

@@ -640,6 +640,8 @@ function formatCompactionV2Failure(event: Record<string, unknown>, type: string)
 }
 
 function isRetryableCompactionError(error: Error): boolean {
+	// A gate denial is terminal whatever its text or status say.
+	if (AIError.isModelRequestDenied(error)) return false;
 	// The gateway's synthetic auth_unavailable is an HTTP 503, but the
 	// captured response cause classifies it as auth. Let provider fallback run
 	// immediately instead of spending the transient retry budget.

@@ -77,6 +77,7 @@ export async function classifyUnexpectedStop(
 			sessionId: deps.sessionId,
 			metadataResolver: deps.metadataResolver,
 			purpose: "unexpected-stop",
+			requestPurpose: "side-channel",
 			onUsage: deps.onUsage,
 			telemetry: deps.telemetry,
 			cache: sharedJudgmentCache(),

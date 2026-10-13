@@ -13,3 +13,4 @@ export * from "./provider";
 export * from "./rate-limit";
 export * from "./retryable";
 export * from "./validation";
+export * from "./model-request-denied";

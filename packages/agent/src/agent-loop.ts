@@ -2619,7 +2619,8 @@ function recoverTransientErrorToolTurn(
 	message: AssistantMessage,
 	availableTools: ReadonlyArray<Pick<AgentTool, "name" | "customWireName">>,
 ): AssistantMessage {
-	if (message.stopReason !== "error") return message;
+	// A gate denial stays a stop whatever its text says: never convert it into a continuing tool turn.
+	if (message.stopReason !== "error" || AIError.isModelRequestDenied(message)) return message;
 	const toolCalls = message.content.filter(block => block.type === "toolCall");
 	if (toolCalls.length === 0) return message;
 	const stopDetailType = message.stopDetails?.type;

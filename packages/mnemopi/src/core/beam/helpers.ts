@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import { bindModelRequestExecution } from "@oh-my-pi/pi-ai/model-request-execution";
 import { logger } from "@oh-my-pi/pi-utils";
 import { generateId as generateTimedId, sha256Hex16, stableMemoryId } from "../../util/ids";
 import { cjkFtsTerms, containsSpacelessCjk, ftsQueryTerms, hasCjk, isCjkChar, recallTokens } from "../../util/regex";
@@ -778,7 +779,12 @@ export function scheduleEmbedding(beam: BeamMemoryState, items: readonly EmbedIt
 	const cleaned = items.filter(item => item.content.trim() !== "");
 	if (cleaned.length === 0) return;
 	const runtimeOptions = getMnemopiRuntimeOptions();
-	const task = withMnemopiRuntimeOptions(runtimeOptions, () => runEmbedding(beam, cleaned));
+	// The model-request context of the storing session is bound next to the runtime options so the task
+	// stays attributed to that session even though the caller's scope has exited by the time it runs.
+	const task = withMnemopiRuntimeOptions(
+		runtimeOptions,
+		bindModelRequestExecution(() => runEmbedding(beam, cleaned)),
+	);
 	const pending = beam.pendingExtractions;
 	if (pending !== undefined) {
 		pending.add(task);

@@ -14,6 +14,7 @@
  * raw candidates being reverts — hence the explicit revert rejection.
  */
 import { completeSimple, retryTransientCompletion } from "@oh-my-pi/pi-ai";
+import { runWithModelRequestPurpose } from "@oh-my-pi/pi-ai/model-request-execution";
 import { diffLineRuns, editDiffString, summarizeCode } from "@oh-my-pi/pi-natives";
 import { logger, prompt } from "@oh-my-pi/pi-utils";
 import { resolveRoleSelection } from "../config/model-resolver";
@@ -372,23 +373,25 @@ export async function attemptEditAutoRepair(options: {
 	const timeout = AbortSignal.timeout(REPAIR_TIMEOUT_MS);
 	const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
 	const complete = async (builtPrompt: string): Promise<string> => {
-		const response = await retryTransientCompletion(
-			() =>
-				completeSimple(
-					model,
-					{ messages: [{ role: "user", content: builtPrompt, timestamp: Date.now() }] },
-					{
-						apiKey: registry.resolver(model, sessionId),
-						sessionId,
-						maxTokens: COMPLETION_MAX_TOKENS,
-						disableReasoning: true,
-						signal,
-					},
-				),
-			{ signal, provider: model.provider },
+		const response = await runWithModelRequestPurpose("auto-repair", () =>
+			retryTransientCompletion(
+				() =>
+					completeSimple(
+						model,
+						{ messages: [{ role: "user", content: builtPrompt, timestamp: Date.now() }] },
+						{
+							apiKey: registry.resolver(model, sessionId),
+							sessionId,
+							maxTokens: COMPLETION_MAX_TOKENS,
+							disableReasoning: true,
+							signal,
+						},
+					),
+				{ signal, provider: model.provider },
+			),
 		);
 		if (response.stopReason === "error") {
-			throw new Error(response.errorMessage ?? "auto-repair completion failed");
+			throw new Error(response.errorMessage ?? "auto-repair completion failed", { cause: response });
 		}
 		// An abort resolves (not rejects) with empty content; treating that as a
 		// candidate would silently burn the retry and hide the stall.

@@ -200,6 +200,8 @@ function isOpenAIResponsesReplayUnsafeEvent(event: ResponseStreamEvent): boolean
 }
 
 function isRetryableOpenAIResponsesStreamFailure(error: unknown): boolean {
+	// A gate denial is terminal even when its text resembles a transient stream failure.
+	if (AIError.isModelRequestDenied(error)) return false;
 	return (
 		AIError.isTransientStreamParseError(error) ||
 		(error instanceof AIError.ProviderResponseError && error.kind === "incomplete-stream") ||
@@ -274,7 +276,9 @@ export async function pollOpenAIResponsesResultForCompletion(args: {
 					body = decoded as OpenAIResponsesPolledResult;
 				}
 			}
-		} catch {
+		} catch (error) {
+			// A gate denial is terminal: polling again would only re-ask the gate.
+			if (AIError.isModelRequestDenied(error)) throw error;
 			body = undefined;
 		}
 		if (status === 200) {
@@ -902,6 +906,8 @@ const streamOpenAIResponsesOnce = (
 						}
 						break;
 					} catch (error) {
+						// A gate denial is terminal: no effort/strict-tool/chain fallback re-asks the gate.
+						if (AIError.isModelRequestDenied(error)) throw error;
 						const capturedErrorResponse = error instanceof OpenAIHttpError ? error.captured : undefined;
 						const reasoningEffortFallback =
 							activeReasoningEffortFallbackKey && activeRequestParams && !requestSignal.aborted

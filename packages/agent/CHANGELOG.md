@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `AgentOptions.runInScope` so a host can run every agent run (turns, tool executions, retries and subscriber callbacks) inside a scope it provides.
+
+### Changed
+
+- Compaction and loop retry paths treat a model request gate denial as terminal instead of retrying or falling back.
+
 ## [18.8.8] - 2026-10-10
 
 ### Added

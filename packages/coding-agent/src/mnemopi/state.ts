@@ -1,5 +1,6 @@
 import { dirname } from "node:path";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
+import { bindModelRequestExecution, runWithModelRequestPurpose } from "@oh-my-pi/pi-ai/model-request-execution";
 import type * as MnemopiNs from "@oh-my-pi/pi-mnemopi";
 import type { Mnemopi, RecallResult } from "@oh-my-pi/pi-mnemopi";
 import type * as MnemopiCoreNs from "@oh-my-pi/pi-mnemopi/core";
@@ -610,21 +611,28 @@ export class MnemopiSessionState {
 
 	attachSessionListeners(): void {
 		this.unsubscribe?.();
-		this.unsubscribe = this.session.subscribe((event: AgentSessionEvent) => {
-			if (event.type === "agent_start") {
-				void this.maybeRecallOnAgentStart().catch(error => {
-					this.#logLifecycleFailure(
-						"agent_start recall",
-						this.scoped.recall.map(target => target.bank),
-						error,
-					);
-				});
-			} else if (event.type === "agent_end") {
-				void this.maybeRetainOnAgentEnd(event.messages).catch(error => {
-					this.#logLifecycleFailure("agent_end retention", [this.scoped.retain.bank], error);
-				});
-			}
-		});
+		// The session emits events in its own context, which is not necessarily the one that registered this
+		// listener (and loses it entirely on a timer or queue hop). Bind to the registering session's context so
+		// recall and retention requests stay attributed to it, declared as memory work.
+		this.unsubscribe = this.session.subscribe(
+			bindModelRequestExecution((event: AgentSessionEvent) =>
+				runWithModelRequestPurpose("memory", () => {
+					if (event.type === "agent_start") {
+						void this.maybeRecallOnAgentStart().catch(error => {
+							this.#logLifecycleFailure(
+								"agent_start recall",
+								this.scoped.recall.map(target => target.bank),
+								error,
+							);
+						});
+					} else if (event.type === "agent_end") {
+						void this.maybeRetainOnAgentEnd(event.messages).catch(error => {
+							this.#logLifecycleFailure("agent_end retention", [this.scoped.retain.bank], error);
+						});
+					}
+				}),
+			),
+		);
 	}
 	#logLifecycleFailure(operation: string, banks: readonly string[], error: unknown): void {
 		logger.warn("Mnemopi: lifecycle hook failed", {

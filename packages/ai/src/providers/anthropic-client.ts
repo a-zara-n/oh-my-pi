@@ -258,6 +258,8 @@ export class AnthropicHttpClient {
 				response = await this.#fetchOnce(fetchFn, url, method, headers, body, timeoutMs, callerSignal);
 			} catch (error) {
 				if (callerSignal?.aborted) throw createAbortError();
+				// A gate denial is terminal: never retried, never rewrapped as a connection error.
+				if (AIError.isModelRequestDenied(error)) throw error;
 				if (attempt < maxRetries) {
 					await this.#backoff(attempt, undefined, callerSignal);
 					continue;

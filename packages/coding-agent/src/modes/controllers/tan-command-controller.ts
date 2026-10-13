@@ -91,6 +91,10 @@ export class TanCommandController {
 		const parentExtensionPaths = session.extensionPaths;
 		const parentExtensionRoots = session.effectiveExtensionRoots;
 		const ownerId = session.getAgentId() ?? MAIN_AGENT_ID;
+		// The clone runs in a background job outside any request context, so the parent's root is
+		// handed over explicitly (snapshotted at dispatch, like the other parent state above): the
+		// clone's requests belong to the parent's root, not to the clone's own session id.
+		const modelRequestRoot = session.childModelRequestRoot();
 		const mcpManager = this.ctx.mcpManager;
 		const cwd = this.ctx.sessionManager.getCwd();
 		const parentArtifactsDir = this.ctx.sessionManager.getArtifactsDir();
@@ -169,6 +173,7 @@ export class TanCommandController {
 								agentDisplayName: "tan",
 								parentTaskPrefix: cloneId,
 								parentAgentId: ownerId,
+								modelRequestRoot,
 								agentRegistry,
 								disableExtensionDiscovery: true,
 								// `[]` is truthy and would make the child pick bindPreparedExtensions([])

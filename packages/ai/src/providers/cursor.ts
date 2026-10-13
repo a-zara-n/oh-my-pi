@@ -1502,7 +1502,9 @@ function streamCursorWithWireMode(
 			stream.end();
 		} catch (caughtError) {
 			let error = caughtError;
-			const h2Unavailable = transportMode === "http2" && isHttp2Unavailable(error);
+			// A gate denial is terminal: no transport fallback, wire-model fallback, or checkpoint resume.
+			const denied = AIError.isModelRequestDenied(error);
+			const h2Unavailable = !denied && transportMode === "http2" && isHttp2Unavailable(error);
 			if (
 				h2Unavailable &&
 				options?.transport !== "http2" &&
@@ -1555,6 +1557,7 @@ function streamCursorWithWireMode(
 			}
 			if (h2Unavailable) error = mapH2TransportError(error, model.baseUrl || CURSOR_API_URL);
 			const fallbackWireModelId =
+				!denied &&
 				wireMode === "normalized" &&
 				!sawProgressOrSideEffect &&
 				!options?.signal?.aborted &&
@@ -1612,6 +1615,7 @@ function streamCursorWithWireMode(
 			const repeatedCheckpoint = checkpointHash !== undefined && checkpointHash === retryContext?.checkpointHash;
 			const noProgressResumes = repeatedCheckpoint ? (retryContext?.noProgressResumes ?? 0) + 1 : 0;
 			const canRetryFromCheckpoint =
+				!denied &&
 				replaySafe &&
 				!options?.signal?.aborted &&
 				retryAttempt < CURSOR_MAX_STREAM_RETRIES &&

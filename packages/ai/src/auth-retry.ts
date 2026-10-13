@@ -2,7 +2,7 @@ import { extractHttpStatusFromError } from "@oh-my-pi/pi-utils";
 import type { LimitsApi, OAuthAccess, OAuthApi, OAuthRequestIdentity } from "./auth/types";
 import * as AIError from "./error";
 import { isAuthRetryableError, isInvalidatedOAuthTokenError } from "./error/auth-classify";
-import { isAccountPolicyError, isUsageLimit } from "./error/flags";
+import { isAccountPolicyError, isModelRequestDenied, isUsageLimit } from "./error/flags";
 import { isConcurrencyCapExclusion, isUsageLimitOutcome } from "./error/rate-limit";
 
 /**
@@ -135,6 +135,7 @@ export const AUTH_RETRY_STEPS: readonly boolean[] = [false, true];
 export const AUTH_RETRY_MAX_ATTEMPTS = 64;
 
 function isDirectCredentialRotationError(error: unknown): boolean {
+	if (isModelRequestDenied(error)) return false;
 	if (isAccountPolicyError(error)) return true;
 	if (isUsageLimit(error) || isInvalidatedOAuthTokenError(error)) return true;
 	const status = AIError.status(error);
@@ -215,6 +216,8 @@ export async function resolveNextAuthRetryKey(
 	onResolved?: (resolved: ApiKeyResolution) => void,
 ): Promise<string | undefined> {
 	if (signal?.aborted) return undefined;
+	// A gate denial is terminal: no refresh, no sibling rotation, whatever its text says.
+	if (isModelRequestDenied(error)) return undefined;
 	if (state.attempts >= AUTH_RETRY_MAX_ATTEMPTS) return undefined;
 	if (error instanceof AIError.OAuthError && error.kind === "token-refresh") {
 		if (state.tokenRefreshReplayUsed) return undefined;
@@ -259,7 +262,7 @@ async function runOAuthAttempt<T>(
 	try {
 		return { ok: true, result: await attempt(access) };
 	} catch (error) {
-		if (!isAuthError(error)) throw error;
+		if (isModelRequestDenied(error) || !isAuthError(error)) throw error;
 		return { ok: false, error };
 	}
 }
@@ -304,7 +307,7 @@ export async function withAuth<T>(
 	try {
 		return await attempt(initialKey);
 	} catch (error) {
-		if (!isAuthError(error)) throw error;
+		if (isModelRequestDenied(error) || !isAuthError(error)) throw error;
 		lastError = error;
 	}
 
@@ -314,7 +317,7 @@ export async function withAuth<T>(
 		try {
 			return await attempt(nextKey);
 		} catch (error) {
-			if (!isAuthError(error)) throw error;
+			if (isModelRequestDenied(error) || !isAuthError(error)) throw error;
 			lastError = error;
 		}
 	}

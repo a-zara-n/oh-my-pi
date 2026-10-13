@@ -1,4 +1,5 @@
 import { completeSimple } from "@oh-my-pi/pi-ai";
+import { runWithModelRequestPurpose } from "@oh-my-pi/pi-ai/model-request-execution";
 import { prompt } from "@oh-my-pi/pi-utils";
 import type { CustomCommandContext } from "../../../../extensibility/custom-commands/types";
 import summaryPrompt from "./prompts/text-summary.md" with { type: "text" };
@@ -17,18 +18,20 @@ export async function generateTextReviewContextSummary(
 
 	const timeout = AbortSignal.timeout(60_000);
 	const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
-	const message = await completeSimple(
-		model,
-		{
-			systemPrompt: [prompt.render(summaryPrompt)],
-			messages: [{ role: "user", content: sourceText, timestamp: Date.now() }],
-		},
-		{
-			apiKey: ctx.modelRegistry.resolver(model, ctx.sessionManager.getSessionId()),
-			disableReasoning: true,
-			maxTokens: 512,
-			signal: requestSignal,
-		},
+	const message = await runWithModelRequestPurpose("annotate", () =>
+		completeSimple(
+			model,
+			{
+				systemPrompt: [prompt.render(summaryPrompt)],
+				messages: [{ role: "user", content: sourceText, timestamp: Date.now() }],
+			},
+			{
+				apiKey: ctx.modelRegistry.resolver(model, ctx.sessionManager.getSessionId()),
+				disableReasoning: true,
+				maxTokens: 512,
+				signal: requestSignal,
+			},
+		),
 	);
 	if (message.stopReason === "error" || message.stopReason === "aborted") return undefined;
 	const completion = message.content

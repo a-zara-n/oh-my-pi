@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added the core execution context for model requests: sessions, agent runs, extension handlers/tools/commands, child sessions, advisors and background jobs now carry a session, root and purpose, and child sessions receive their spawner's root explicitly (`modelRequestRoot`).
+- Session-less CLI commands are marked as such at process entry so their model requests are classified as standalone.
+
+### Changed
+
+- A model request gate denial now stops turn auto-retry, model fallback, judge-candidate fallback and compaction fallback instead of retrying.
+
 ## [18.8.8] - 2026-10-10
 
 ### Added

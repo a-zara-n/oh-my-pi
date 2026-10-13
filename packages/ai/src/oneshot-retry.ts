@@ -108,6 +108,8 @@ function backoffDelayMs(attempt: number, baseDelayMs: number): number {
 
 /** Retryable when the provider says transient, or when it says "wait, then retry". */
 function isRetryableOneshotFailure(errorId: number, errorStatus: number | undefined, errorMessage: string): boolean {
+	// A gate denial is terminal whatever its text or status say.
+	if (AIError.is(errorId, AIError.Flag.ModelRequestDenied)) return false;
 	// llama.cpp reports deterministic tool-call JSON parse failures as HTTP 500.
 	// Replaying the same prompt produces the same malformed output.
 	if (AIError.LLAMA_CPP_TOOL_CALL_PARSE_PATTERN.test(errorMessage)) return false;
@@ -182,7 +184,11 @@ export async function retryTransientCompletion(
 
 		const errorId =
 			thrown !== undefined ? AIError.classify(thrown) : AIError.classifyMessage(message as AssistantMessage);
-		if (AIError.is(errorId, AIError.Flag.Abort) || AIError.is(errorId, AIError.Flag.UserInterrupt)) {
+		if (
+			AIError.is(errorId, AIError.Flag.Abort) ||
+			AIError.is(errorId, AIError.Flag.UserInterrupt) ||
+			AIError.isModelRequestDenied(thrown !== undefined ? thrown : message)
+		) {
 			if (thrown !== undefined) throw thrown;
 			return message as AssistantMessage;
 		}

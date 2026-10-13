@@ -29,6 +29,7 @@ import {
 
 import { declareWorkerHostEntry, installWorkerInbox, isWorkerHostSelector } from "@oh-my-pi/pi-utils/worker-host";
 import { extractProfileFlags } from "./cli/profile-bootstrap";
+import { isSessionlessCommand } from "./cli/standalone-commands";
 import {
 	BLOB_BROKER_WORKER_ARG,
 	COMPUTER_WORKER_ARG,
@@ -557,6 +558,15 @@ export async function runCli(argv: string[]): Promise<void> {
 			return;
 		}
 		runningCommand = resolved.argv[0];
+		// A command that never creates an agent session marks the process session-less before it runs, so its
+		// own model requests are classified as standalone. Only the real process entry may mark: an importer
+		// (profile CLI tests, SDK embedding) that calls `runCli` must keep the ability to create sessions.
+		if (isProcessEntry && isSessionlessCommand(resolved.argv[0], commands)) {
+			// Latency boundary (same reason as the other dynamic imports in this entry): the execution-context
+			// module stays off the help/version/launch startup path.
+			const { markModelRequestProcessStandalone } = await import("@oh-my-pi/pi-ai/model-request-execution");
+			markModelRequestProcessStandalone();
+		}
 		await run({ bin: APP_NAME, version: VERSION, argv: resolved.argv, commands, metadataHelp: showHelp });
 	} finally {
 		stopStartupComposer?.();

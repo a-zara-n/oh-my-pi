@@ -19,6 +19,7 @@ import type {
 	SimpleStreamOptions,
 	ToolChoice,
 } from "@oh-my-pi/pi-ai";
+import type { ModelRequestExecution } from "@oh-my-pi/pi-ai/model-request-execution";
 import type { postmortem } from "@oh-my-pi/pi-utils";
 import type { AdvisorConfig } from "@oh-my-pi/pi-tui/overlays/advisor-config";
 import type { AsyncJob, AsyncJobDeliveryState, AsyncJobManager } from "../async";
@@ -285,6 +286,17 @@ export interface AgentSessionConfig {
 	sideStreamFn?: StreamFn;
 	/** Stream wrapper for advisor requests. */
 	advisorStreamFn?: StreamFn;
+	/**
+	 * Core-minted model-request context of this session (see `./model-request-context`). Sessions built without one
+	 * (tests, direct construction) run no request under a session context and have no root to hand to children.
+	 * @internal
+	 */
+	modelRequestExecution?: ModelRequestExecution;
+	/**
+	 * Context the session's advisors run under: this session's root with the advisor agent identity.
+	 * @internal
+	 */
+	advisorModelRequestExecution?: ModelRequestExecution;
 	/** Shared saved-reset coordinator; defaults process-wide so concurrent Codex/Claude sessions cannot double-spend. Inject a fresh one in tests. */
 	codexResetCoordinator?: CodexAutoRedeemCoordinator;
 	/** Provider payload hook used by the active session request path. */

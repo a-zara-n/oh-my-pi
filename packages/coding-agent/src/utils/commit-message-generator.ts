@@ -5,6 +5,8 @@
 import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { Api, Model } from "@oh-my-pi/pi-ai";
 import { completeSimple, retryTransientCompletion } from "@oh-my-pi/pi-ai";
+import * as AIError from "@oh-my-pi/pi-ai/error";
+import { runWithModelRequestPurpose } from "@oh-my-pi/pi-ai/model-request-execution";
 import { logger, prompt } from "@oh-my-pi/pi-utils";
 
 import type { ModelRegistry } from "../config/model-registry";
@@ -106,23 +108,31 @@ export async function generateCommitMessage(
 
 		try {
 			const maxTokens = COMMIT_MAX_TOKENS;
-			const response = await retryTransientCompletion(
-				() =>
-					completeSimple(
-						candidate.model,
-						{
-							systemPrompt: [COMMIT_SYSTEM_PROMPT],
-							messages: [{ role: "user", content: userMessage, timestamp: Date.now() }],
-						},
-						{
-							apiKey: registry.resolver(candidate.model, sessionId),
-							sessionId,
-							maxTokens,
-							reasoning: toReasoningEffort(candidate.thinkingLevel),
-						},
-					),
-				{ provider: candidate.model.provider },
+			const response = await runWithModelRequestPurpose("commit", () =>
+				retryTransientCompletion(
+					() =>
+						completeSimple(
+							candidate.model,
+							{
+								systemPrompt: [COMMIT_SYSTEM_PROMPT],
+								messages: [{ role: "user", content: userMessage, timestamp: Date.now() }],
+							},
+							{
+								apiKey: registry.resolver(candidate.model, sessionId),
+								sessionId,
+								maxTokens,
+								reasoning: toReasoningEffort(candidate.thinkingLevel),
+							},
+						),
+					{ provider: candidate.model.provider },
+				),
 			);
+
+			// A gate denial is terminal: trying the next candidate model would be a fallback around it.
+			if (AIError.isModelRequestDenied(response)) {
+				logger.debug("commit-msg-generator: model request denied", { model: candidate.model.id });
+				return null;
+			}
 
 			if (response.stopReason === "error") {
 				logger.debug("commit-msg-generator: error", { model: candidate.model.id, error: response.errorMessage });
@@ -142,6 +152,10 @@ export async function generateCommitMessage(
 			logger.debug("commit-msg-generator: generated", { model: candidate.model.id, msg });
 			return msg;
 		} catch (err) {
+			if (AIError.isModelRequestDenied(err)) {
+				logger.debug("commit-msg-generator: model request denied", { model: candidate.model.id });
+				return null;
+			}
 			logger.debug("commit-msg-generator: error", {
 				model: candidate.model.id,
 				error: err instanceof Error ? err.message : String(err),

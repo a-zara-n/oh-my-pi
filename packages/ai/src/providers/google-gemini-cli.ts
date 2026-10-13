@@ -1077,6 +1077,8 @@ export const streamGoogleGeminiCli: StreamFunction<"google-gemini-cli"> = (
 					}
 					break;
 				} catch (error) {
+					// A gate denial is terminal: its text/status must not fail over to the next endpoint.
+					if (AIError.isModelRequestDenied(error)) throw error;
 					const status = extractHttpStatusFromError(error);
 					if (
 						!isLastEndpoint &&

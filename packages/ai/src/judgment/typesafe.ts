@@ -166,7 +166,7 @@ export class TypeSafeJudge implements Judge {
 					signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
 				});
 			} catch (error) {
-				if (signal?.aborted || attempt + 1 >= MAX_ATTEMPTS) throw error;
+				if (AIError.isModelRequestDenied(error) || signal?.aborted || attempt + 1 >= MAX_ATTEMPTS) throw error;
 				await Bun.sleep(backoffMs(attempt, undefined));
 				continue;
 			}

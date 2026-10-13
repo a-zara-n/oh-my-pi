@@ -1,4 +1,5 @@
 import * as path from "node:path";
+import { bindModelRequestExecution } from "@oh-my-pi/pi-ai/model-request-execution";
 import { logger, Snowflake, workerHostEntry } from "@oh-my-pi/pi-utils";
 import {
 	createWorkerHandle,
@@ -63,6 +64,12 @@ interface PendingRun {
 	runId: string;
 	runState: VmRunState;
 	toolSession: ToolSession;
+	/**
+	 * Bridge entry bound at run start, when the eval tool call's model-request context is active. Worker messages
+	 * arrive outside any context, so every host call a cell makes (`agent()`, `completion()`, tools) re-enters the
+	 * host session's context through this binding instead of running context-free.
+	 */
+	callTool: typeof callSessionTool;
 	shadowCell?: EvalShadowCellSession;
 	resolve(value: { value: unknown }): void;
 	reject(error: Error): void;
@@ -512,6 +519,7 @@ async function runOnce(
 		runId,
 		runState: options.runState,
 		toolSession: options.session,
+		callTool: bindModelRequestExecution(callSessionTool),
 		shadowCell: getActiveEvalShadowCell(),
 		resolve,
 		reject,
@@ -816,7 +824,7 @@ async function handleToolCall(session: JsSession, msg: Extract<WorkerOutbound, {
 	const ctrl = new AbortController();
 	pending.toolCalls.set(msg.id, ctrl);
 	try {
-		const value = await callSessionTool(msg.name, msg.args, {
+		const value = await pending.callTool(msg.name, msg.args, {
 			session: pending.toolSession,
 			signal: ctrl.signal,
 			identity: msg.identity,

@@ -38,6 +38,11 @@ import type {
 } from "@oh-my-pi/pi-ai";
 import { isUsageLimitOutcome, resolveModelServiceTier, streamSimple } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
+import {
+	type ModelRequestExecution,
+	runWithModelRequestExecution,
+	runWithModelRequestPurpose,
+} from "@oh-my-pi/pi-ai/model-request-execution";
 import { extractProviderRetryHint } from "@oh-my-pi/pi-ai/utils/retry-after";
 import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
 import { extractHttpStatusFromError, logger, prompt } from "@oh-my-pi/pi-utils";
@@ -101,6 +106,7 @@ import type { AgentSessionEvent } from "./agent-session-events";
 import type { ClientBridge } from "./client-bridge";
 import { resolveCompactionMethodOrder, resolveMethodSettings } from "./compaction-methods";
 import { type CustomMessage, type CustomMessagePayload, isUserAuthoredMessage, isUserTurnInitiator } from "./messages";
+import { withModelRequestExecution } from "./model-request-context";
 import { isAdvisorCard, isTerminalTextAssistantAnswer } from "./queued-messages";
 import {
 	calculateRetryBackoffDelayMs,
@@ -442,6 +448,11 @@ export interface SessionAdvisorsOptions {
 	configs?: AdvisorConfig[];
 	/** WATCHDOG.yml problems found during discovery; surfaced once as a warning. */
 	configWarnings?: string[];
+	/**
+	 * Request context the advisors' loops and streams run under (this session's root, advisor identity and purpose).
+	 * Absent for a session without a core-minted context.
+	 */
+	modelRequestExecution?: ModelRequestExecution;
 	streamFn?: StreamFn;
 	transformProviderContext?: (context: Context, model: Model) => Context | Promise<Context>;
 }
@@ -541,6 +552,13 @@ export class SessionAdvisors {
 	#advisorContextPrompt: string | undefined;
 	#advisorMemoryPrompt: string | undefined;
 	#advisorStreamFn: StreamFn | undefined;
+	#modelRequestExecution: ModelRequestExecution | undefined;
+	/** `compact` for the advisor's own context: attributed to the advisor, with the purpose declared as compaction. */
+	readonly #compactAsAdvisor: typeof compact = (...args) => {
+		const run = () => runWithModelRequestPurpose("compaction", () => compact(...args));
+		const execution = this.#modelRequestExecution;
+		return execution === undefined ? run() : runWithModelRequestExecution(execution, run);
+	};
 	#transformProviderContext: ((context: Context, model: Model) => Context | Promise<Context>) | undefined;
 	#advisors: ActiveAdvisor[] = [];
 	#advisorConfigs: AdvisorConfig[] | undefined;
@@ -616,6 +634,7 @@ export class SessionAdvisors {
 		this.#advisorConfigs = options.configs;
 		this.#advisorConfigWarnings = options.configWarnings ?? [];
 		this.#advisorStreamFn = options.streamFn;
+		this.#modelRequestExecution = options.modelRequestExecution;
 		this.#transformProviderContext = options.transformProviderContext;
 		if (this.#advisorEnabled) this.#buildAdvisorRuntime();
 	}
@@ -1391,7 +1410,12 @@ export class SessionAdvisors {
 				// not the same permission as calling one of its tools.
 				mcpResources: this.#advisorMcpResources,
 			});
-			const baseAdvisorStreamFn = this.#advisorStreamFn ?? streamSimple;
+			const advisorExecution = this.#modelRequestExecution;
+			const rawAdvisorStreamFn = this.#advisorStreamFn ?? streamSimple;
+			const baseAdvisorStreamFn =
+				advisorExecution === undefined
+					? rawAdvisorStreamFn
+					: withModelRequestExecution(rawAdvisorStreamFn, advisorExecution);
 			const advisorStreamFn: StreamFn = (requestModel, context, streamOptions) => {
 				// Read per request so a mid-session `providers.openaiWebsockets` change reaches advisors.
 				const options = {
@@ -1428,6 +1452,7 @@ export class SessionAdvisors {
 				cwdResolver: () => this.#host.sessionManager.getCwd(),
 				getApiKey: requestModel => this.#host.modelRegistry.resolver(requestModel, advisorProviderSessionId),
 				streamFn: advisorStreamFn,
+				runInScope: advisorExecution && (fn => runWithModelRequestExecution(advisorExecution, fn)),
 				// Maintenance installs compactionSummary messages; the core Agent's
 				// default converter drops custom roles and would discard their replay.
 				convertToLlm: messages => this.#host.convertToLlmForSideRequest(messages),
@@ -2479,7 +2504,7 @@ export class SessionAdvisors {
 				? buildSessionMetadata(advisorProviderSessionId, candidate.provider, this.#host.modelRegistry.authStorage)
 				: undefined;
 			try {
-				compactResult = await compact(
+				compactResult = await this.#compactAsAdvisor(
 					candidatePreparation,
 					candidate,
 					this.#host.modelRegistry.resolver(candidate, advisorProviderSessionId),
@@ -2504,7 +2529,8 @@ export class SessionAdvisors {
 				);
 				break;
 			} catch (error) {
-				if (signal.aborted) throw error;
+				// A gate denial is terminal: no other compaction candidate, and no re-prime retry.
+				if (signal.aborted || AIError.isModelRequestDenied(error)) throw error;
 				const id = AIError.classify(error, candidate.api);
 				if (error instanceof NativeCompactionError && !AIError.is(id, AIError.Flag.AuthFailed)) {
 					nativeCompactionFailure ??= { error, provider: candidate.provider };

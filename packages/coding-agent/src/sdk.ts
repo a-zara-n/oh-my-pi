@@ -27,6 +27,7 @@ import type {
 import { resolveApiKeyOnce } from "@oh-my-pi/pi-ai/auth-retry";
 import type { DiscoverAuthStorageOptions } from "@oh-my-pi/pi-ai/auth-broker/discover";
 import type { Dialect } from "@oh-my-pi/pi-ai/dialect";
+import { deriveModelRequestExecution, runWithModelRequestExecution } from "@oh-my-pi/pi-ai/model-request-execution";
 import { prewarmOpenAICodexResponses } from "@oh-my-pi/pi-ai/providers/openai-codex-responses";
 import { isOpenAICodexWebSocketPreferred } from "@oh-my-pi/pi-ai/providers/openai-codex-transport";
 import { withCredentialRedaction } from "@oh-my-pi/pi-ai/providers/transform-messages";
@@ -215,6 +216,13 @@ import {
 } from "./session/session-tools";
 import { anthropicSlowModeHasNoSiblingHeadroom } from "./session/anthropic-slow-mode";
 import { CacheWarmer } from "./session/cache-warmer";
+import {
+	childModelRequestRootOf,
+	createSessionModelRequestExecution,
+	type ModelRequestRootAssignment,
+	resolveModelRequestRootSource,
+	withModelRequestExecution,
+} from "./session/model-request-context";
 import { createSettingsAwareStreamFn, resolveOpenAIWebsocketPreference } from "./session/settings-stream-fn";
 import { SnapcompactInlineTransformer } from "./session/snapcompact-inline";
 import { createSnapcompactSavingsRecorder } from "./session/snapcompact-savings-journal";
@@ -819,6 +827,14 @@ export interface CreateAgentSessionOptions {
 	 * top-level "Main" session, which has no parent.
 	 */
 	parentAgentId?: string;
+	/**
+	 * Root session a child session's model requests are attributed to. A spawner obtains it from its own session
+	 * (`AgentSession.childModelRequestRoot()` / `ToolSession.childModelRequestRoot()`); it is never inferred from a
+	 * parent session header or an agent id chain. Omitted: a session created while another session's request context
+	 * is active is a child with no root, anything else is a root of its own.
+	 * @internal
+	 */
+	modelRequestRoot?: ModelRequestRootAssignment;
 
 	/** Session manager. Default: session stored under the configured agentDir sessions root */
 	sessionManager?: SessionManager;
@@ -1674,14 +1690,22 @@ export function createAutoLearnCaptureRunner(
  * ```
  */
 export async function createAgentSession(options: CreateAgentSessionOptions = {}): Promise<CreateAgentSessionResult> {
+	// Decided once, from the caller's context, before anything else runs: an explicit assignment makes this a child of
+	// that root; an ambient session context without one makes it a root-less child; neither makes it its own root.
+	const rootSource = resolveModelRequestRootSource(options.modelRequestRoot);
+	const modelRequestRoot: ModelRequestRootAssignment | undefined =
+		rootSource.kind === "inherited" ? { kind: "child", rootSessionId: rootSource.rootSessionId } : undefined;
 	registerLocalInferenceApi();
 	const extensionRoots = options.extensionRoots?.();
 	const explicit = extensionRoots?.explicit ?? options.additionalExtensionPaths ?? [];
 	const mode = extensionRoots?.mode ?? (options.disableExtensionDiscovery ? "explicit-only" : "merge");
-	return await withOmpExtensionRootScope(explicit, mode, () => createAgentSessionScoped(options));
+	return await withOmpExtensionRootScope(explicit, mode, () => createAgentSessionScoped(options, modelRequestRoot));
 }
 
-async function createAgentSessionScoped(options: CreateAgentSessionOptions): Promise<CreateAgentSessionResult> {
+async function createAgentSessionScoped(
+	options: CreateAgentSessionOptions,
+	modelRequestRoot: ModelRequestRootAssignment | undefined,
+): Promise<CreateAgentSessionResult> {
 	if (options.systemPromptTemplate !== undefined && options.customSystemPrompt !== undefined) {
 		throw new Error("systemPromptTemplate cannot be combined with a literal custom system prompt");
 	}
@@ -2225,6 +2249,19 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 	const evalKernelOwnerId = `agent-session:${Snowflake.next()}`;
 
 	try {
+		// The session's one request context. Its session id is read from the session manager on every request, so
+		// `/new`, resume and fork keep this same object while the id it reports follows the live session.
+		const modelRequestExecution = createSessionModelRequestExecution({
+			getSessionId: () => sessionManager.getSessionId(),
+			agent: {
+				kind: isSubagentSession ? "sub" : "main",
+				id: resolvedAgentId,
+				name: resolvedAgentName,
+				depth: taskDepth,
+				...(options.parentAgentId ? { parentId: options.parentAgentId } : {}),
+			},
+			modelRequestRoot,
+		});
 		const getActiveModelString = (): string | undefined => {
 			const activeModel = agent?.state.model;
 			if (activeModel) return formatModelString(activeModel);
@@ -2315,6 +2352,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			getHindsightSessionState: () => session?.getHindsightSessionState(),
 			getMnemopiSessionState: () => session?.getMnemopiSessionState(),
 			getAgentId: () => resolvedAgentId,
+			childModelRequestRoot: () => childModelRequestRootOf(modelRequestExecution),
 			getToolByName: name => session?.getToolByName(name),
 			getToolForEvalBridge: name => session?.getToolForEvalBridge(name),
 			getEvalBridgeToolNames: () => session?.getEvalBridgeToolNames() ?? [],
@@ -3304,6 +3342,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				...(options.parentAgentId ? { parentId: options.parentAgentId } : {}),
 			}),
 		);
+		extensionRunner.setModelRequestExecution(modelRequestExecution);
 
 		credentialDisabledTarget = extensionRunner;
 		for (const event of startupCredentialDisabledEvents.splice(0)) {
@@ -4287,6 +4326,10 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				preferWebsockets: streamOptions?.preferWebsockets ?? resolveOpenAIWebsocketPreference(settings),
 			});
 		};
+		// Every stream the session issues requests through runs under this session's request context, declaring why.
+		const sessionStreamFn = withModelRequestExecution(primaryStreamFn, modelRequestExecution);
+		const cacheWarmStreamFn = withModelRequestExecution(primaryStreamFn, modelRequestExecution, "cache-warm");
+		const memoryStreamFn = withModelRequestExecution(primaryStreamFn, modelRequestExecution, "memory");
 		// Prompt-cache warmer for the main agent loop only: replays the last
 		// request through the same primary wrapper just before the entry would
 		// expire, so idle gaps do not force a full-prefix cache re-write.
@@ -4295,7 +4338,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			options.cacheWarming === false
 				? undefined
 				: new CacheWarmer({
-						stream: (model, context, streamOptions) => primaryStreamFn(model, context, streamOptions),
+						stream: (model, context, streamOptions) => cacheWarmStreamFn(model, context, streamOptions),
 						getPromptTokens: () => session.lastPromptTokens(),
 						getMode: () => cfgProvidersCacheWarming.get(settings),
 						decide: event => extensionRunner.emitCacheWarmingDecision(event),
@@ -4339,6 +4382,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			sessionId: providerSessionId,
 			promptCacheKey: providerPromptCacheKey,
 			deadline: options.deadline,
+			runInScope: fn => runWithModelRequestExecution(modelRequestExecution, fn),
 			transformContext,
 			transformProviderContext,
 			steeringMode: cfgSteeringMode.get(settings),
@@ -4371,7 +4415,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 						? {}
 						: { toolNamespacesInfo: codeModeState.namespacesInfo }),
 				};
-				const stream = primaryStreamFn(streamModel, context, {
+				const stream = sessionStreamFn(streamModel, context, {
 					...merged,
 					...(fallbackCreditRedemption !== undefined ? { fallbackCreditRedemption } : {}),
 				});
@@ -4466,6 +4510,11 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			depth: 0,
 			parentId: resolvedAgentId,
 		});
+		// Advisors bill to this session's root; only who is asking and why differ.
+		const advisorModelRequestExecution = deriveModelRequestExecution(modelRequestExecution, {
+			purpose: "advisor",
+			agent: advisorAgent,
+		});
 
 		// Full toolset for the advisor, built unconditionally so it can be toggled at
 		// runtime. Bound to a DISTINCT ToolSession (its own `-advisor` session id +
@@ -4537,6 +4586,8 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		session = new AgentSession({
 			codeModeState,
 			cacheWarmer,
+			modelRequestExecution,
+			advisorModelRequestExecution,
 			advisorWatchdogPrompt,
 			advisorContextPrompt,
 			advisorMemoryPrompt,
@@ -5134,15 +5185,19 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 
 		const startMemoryBackend = async () => {
 			const memoryBackend = await resolveMemoryBackend(settings);
-			await memoryBackend.start({
-				session,
-				settings,
-				modelRegistry,
-				agentDir,
-				taskDepth,
-				parentHindsightSessionState: options.parentHindsightSessionState,
-				parentMnemopiSessionState: options.parentMnemopiSessionState,
-			});
+			await session.runInModelRequestContext(
+				() =>
+					memoryBackend.start({
+						session,
+						settings,
+						modelRegistry,
+						agentDir,
+						taskDepth,
+						parentHindsightSessionState: options.parentHindsightSessionState,
+						parentMnemopiSessionState: options.parentMnemopiSessionState,
+					}),
+				"memory",
+			);
 		};
 
 		const runAutoLearnCapture = createAutoLearnCaptureRunner({
@@ -5187,7 +5242,8 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					hideThinkingSummary: agent.hideThinkingSummary,
 					maxRetryDelayMs: agent.maxRetryDelayMs,
 					getToolContext: toolCall => toolContextStore.getContext(toolCall),
-					streamFn: primaryStreamFn,
+					streamFn: memoryStreamFn,
+					runInScope: fn => session.runInModelRequestContext(fn, "memory"),
 					transformToolCallArguments,
 					// No fallback resolver. The capture agent advertises only
 					// `learn`/`manage_skill`, both of which stay top-level and never

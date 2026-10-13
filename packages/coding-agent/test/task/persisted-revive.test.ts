@@ -25,6 +25,7 @@ import { AgentSession, type AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import type { CustomMessage } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { convertToLlm } from "@oh-my-pi/pi-coding-agent/session/messages";
+import type { ModelRequestRootAssignment } from "@oh-my-pi/pi-coding-agent/session/model-request-context";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import {
 	findRetryFallbackCandidates,
@@ -48,6 +49,7 @@ import { createSessionDefaults } from "../helpers/session-defaults";
 import { cfgAdvisorEnabled } from "@oh-my-pi/pi-coding-agent/advisor/settings";
 
 const tempDirs: TempDir[] = [];
+const PARENT_ROOT: ModelRequestRootAssignment = { kind: "child", rootSessionId: "top-level-root" };
 
 function makeTempDir(prefix: string): string {
 	const dir = TempDir.createSync(prefix);
@@ -214,6 +216,7 @@ function createFactory(cwd: string, eventBus?: EventBus, owner: ReviveOwnerOptio
 			getCwd: () => cwd,
 			getArtifactManager: () => undefined,
 		},
+		childModelRequestRoot: () => PARENT_ROOT,
 		get sessionFile() {
 			return path.join(cwd, "parent.jsonl");
 		},
@@ -427,6 +430,35 @@ describe("persisted subagent revival", () => {
 		// which is where finalizeRunResult writes <id>.md, not the live root dir.
 		expect(capturedArtifactsDir).toBe(path.dirname(sessionFile));
 		expect(capturedArtifactsDir).not.toBe(path.join(cwd, "parent"));
+		AgentRegistry.resetGlobalForTests();
+	});
+
+	it("revives the subagent inside the top-level session's root, not as a root of its own", async () => {
+		AgentRegistry.resetGlobalForTests();
+		const cwd = makeTempDir("@pi-revive-root-");
+		const sessionFile = await createPersistedSession(cwd);
+		MCPManager.setInstance(fakeMcpManager(() => []));
+		let capturedOptions: CreateAgentSessionOptions | undefined;
+		vi.spyOn(sdkModule, "createAgentSession").mockImplementation(async options => {
+			capturedOptions = options;
+			return { session: createRevivedSession([]).session } as CreateAgentSessionResult;
+		});
+		const ref = createRef(sessionFile);
+		AgentRegistry.global().register({
+			id: ref.id,
+			displayName: ref.displayName,
+			kind: "sub",
+			session: null,
+			sessionFile,
+			status: "parked",
+		});
+		const reviver = await createFactory(cwd)(ref);
+		if (!reviver) throw new Error("Expected a persisted reviver");
+		await reviver(ref);
+
+		// A cold revive runs from an IRC/hub handler with no request context; without the explicit
+		// hand-over the revived agent would count as a free root.
+		expect(capturedOptions?.modelRequestRoot).toEqual(PARENT_ROOT);
 		AgentRegistry.resetGlobalForTests();
 	});
 

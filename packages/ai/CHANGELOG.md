@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added a generic `ModelRequestGate` API (`registerModelRequestGate`, `getModelRequestGateInfo`, `ModelRequestDeniedError`) that lets one registered owner decide whether an outbound model request may be sent, with a core-owned execution context that identifies the requesting session, root and purpose; behavior is unchanged when no gate is registered.
+
+### Changed
+
+- A gate denial is now terminal: provider backoff, credential rotation, oneshot and thinking-loop retries, and judge retries stop on it instead of retrying, whatever the denial text says.
+
 ## [18.8.8] - 2026-10-10
 
 ### Fixed

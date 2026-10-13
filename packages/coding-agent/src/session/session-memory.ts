@@ -53,6 +53,12 @@ export interface SessionMemoryHost {
 	setBaseSystemPrompt(prompt: string[]): void;
 	refreshBaseSystemPrompt(): Promise<void>;
 	replaceMemoryTools(tools: AgentTool[]): Promise<void>;
+	/**
+	 * Runs `fn` under the owning session's request context with the memory purpose. Backend start, settings hooks and
+	 * teardown flushes may call a model; they are launched from settings listeners and promise chains that run in
+	 * whatever context fired them. Absent for a host without a request context.
+	 */
+	runInMemoryContext?<T>(fn: () => T): T;
 }
 
 /** Owns memory backend transitions and transcript-scoped memory state. */
@@ -154,7 +160,7 @@ export class SessionMemory {
 				return undefined;
 			});
 			// Backend hooks may re-enter `applyMemoryBackend`, so they run outside the transition.
-			await hook?.backend.applySettings?.(this.#host.memoryBackendSession(), hook.own);
+			await this.#inMemoryContext(() => hook?.backend.applySettings?.(this.#host.memoryBackendSession(), hook.own));
 		} catch (error) {
 			logger.warn("Memory lifecycle: applying setting change failed", { changed, error: String(error) });
 			this.#host.emitNotice("error", `Failed to apply memory settings: ${String(error)}`, "Memory");
@@ -269,7 +275,7 @@ export class SessionMemory {
 		const hindsight = this.#host.getHindsightSessionState();
 		if (hindsight) {
 			try {
-				await hindsight.flushRetainQueue();
+				await this.#inMemoryContext(() => hindsight.flushRetainQueue());
 			} catch (error) {
 				logger.warn("Memory lifecycle: Hindsight flush failed", { error: String(error) });
 			}
@@ -280,7 +286,7 @@ export class SessionMemory {
 		const mnemopi = this.#host.takeMnemopiSessionState();
 		if (mnemopi) {
 			try {
-				await mnemopi.dispose({ consolidate: consolidateMnemopi, retain: retainMnemopi });
+				await this.#inMemoryContext(() => mnemopi.dispose({ consolidate: consolidateMnemopi, retain: retainMnemopi }));
 			} catch (error) {
 				logger.warn("Memory lifecycle: Mnemopi dispose failed", { error: String(error) });
 			}
@@ -330,15 +336,18 @@ export class SessionMemory {
 		try {
 			await this.#disposeMemoryBackendState(true, retain);
 			this.#runtimeCwd = cwd;
-			if (this.#memoryAgentDir && this.#memoryTaskDepth === 0 && !this.#host.isDisposed()) {
+			const agentDir = this.#memoryAgentDir;
+			if (agentDir && this.#memoryTaskDepth === 0 && !this.#host.isDisposed()) {
 				const backend = await resolveMemoryBackend(this.#host.settings);
-				await backend.start({
-					session: this.#host.memoryBackendSession(),
-					settings: this.#host.settings,
-					modelRegistry: this.#host.modelRegistry,
-					agentDir: this.#memoryAgentDir,
-					taskDepth: this.#memoryTaskDepth,
-				});
+				await this.#inMemoryContext(() =>
+					backend.start({
+						session: this.#host.memoryBackendSession(),
+						settings: this.#host.settings,
+						modelRegistry: this.#host.modelRegistry,
+						agentDir,
+						taskDepth: this.#memoryTaskDepth,
+					}),
+				);
 			}
 			if (this.#host.isDisposed()) return;
 			await this.#refreshMemoryTools();
@@ -355,6 +364,11 @@ export class SessionMemory {
 			}
 			throw error;
 		}
+	}
+
+	#inMemoryContext<T>(fn: () => T): T {
+		const host = this.#host;
+		return host.runInMemoryContext === undefined ? fn() : host.runInMemoryContext(fn);
 	}
 
 	async #refreshMemoryTools(): Promise<void> {

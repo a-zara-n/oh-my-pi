@@ -83,6 +83,12 @@ import { type Effort, serviceTierFamily, streamSimple } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { resetOpenAICodexHistoryAfterCompaction } from "@oh-my-pi/pi-ai/providers/openai-codex-responses";
 import { withCredentialRedaction } from "@oh-my-pi/pi-ai/providers/transform-messages";
+import {
+	deriveModelRequestExecution,
+	type ModelRequestExecution,
+	runWithModelRequestExecution,
+} from "@oh-my-pi/pi-ai/model-request-execution";
+import type { ModelRequestPurpose } from "@oh-my-pi/pi-ai/model-request-gate";
 import { toolWireSchema } from "@oh-my-pi/pi-ai/utils/schema";
 import { supportsOutputTokenLimit } from "@oh-my-pi/pi-catalog/compat/output-limits";
 import { requiresNativeTools, requiresToolFreeHistoryForToolOptOut } from "@oh-my-pi/pi-catalog/compat/tools";
@@ -350,6 +356,7 @@ import {
 	LAUNCH_COMPLETION_MESSAGE_TYPE,
 	type LaunchCompletionEntry,
 } from "./launch-completion";
+import { childModelRequestRootOf, type ModelRequestRootAssignment, withModelRequestExecution } from "./model-request-context";
 import {
 	type BashExecutionMessage,
 	buildReplanTitleContext,
@@ -1014,7 +1021,12 @@ export class AgentSession implements SettingsScope {
 	 */
 	#lazyContextRefreshed = new Set<string>();
 	#onSseEvent: SimpleStreamOptions["onSseEvent"] | undefined;
-	#sideStreamFn: StreamFn;
+	/** Side-request stream before request-context decoration; per-purpose variants come from {@link #sideStreamFor}. */
+	readonly #sideStreamBase: StreamFn;
+	readonly #sideStreams = new Map<ModelRequestPurpose, StreamFn>();
+	/** Core-minted request context of this session; undefined for sessions built outside `createAgentSession`. */
+	readonly #modelRequestExecution: ModelRequestExecution | undefined;
+	readonly #modelRequestPurposeExecutions = new Map<ModelRequestPurpose, ModelRequestExecution>();
 	#convertToLlm: (messages: AgentMessage[]) => Message[] | Promise<Message[]>;
 	#disconnectOwnedMcpManager: (() => Promise<void>) | undefined;
 
@@ -1867,6 +1879,7 @@ export class AgentSession implements SettingsScope {
 			},
 			refreshBaseSystemPrompt: () => this.#tools.refreshBaseSystemPrompt(),
 			replaceMemoryTools: tools => this.#tools.replaceMemoryTools(tools),
+			runInMemoryContext: fn => this.runInModelRequestContext(fn, "memory"),
 		};
 		this.#memory = new SessionMemory(memoryHost, {
 			memoryEnabled: this.memoryEnabled,
@@ -1881,7 +1894,8 @@ export class AgentSession implements SettingsScope {
 		this.#titleSystemPrompt = config.titleSystemPrompt;
 		this.#autoTitle = config.autoTitle === true;
 		this.#transformContext = config.transformContext ?? (messages => messages);
-		this.#sideStreamFn = config.sideStreamFn ?? streamSimple;
+		this.#modelRequestExecution = config.modelRequestExecution;
+		this.#sideStreamBase = config.sideStreamFn ?? streamSimple;
 		this.#onPayload = config.onPayload;
 		this.rawSseDebugBuffer = config.rawSseDebugBuffer ?? new RawSseDebugBuffer();
 		// Avoid wrapping in an `async` closure when no user callback is configured: the
@@ -2255,6 +2269,7 @@ export class AgentSession implements SettingsScope {
 			memoryPrompt: config.advisorMemoryPrompt,
 			configs: config.advisorConfigs,
 			configWarnings: config.advisorConfigWarnings,
+			modelRequestExecution: config.advisorModelRequestExecution,
 			streamFn: config.advisorStreamFn,
 			transformProviderContext: config.transformProviderContext,
 		});
@@ -2265,7 +2280,7 @@ export class AgentSession implements SettingsScope {
 			settings: this.settings,
 			modelRegistry: this.#modelRegistry,
 			extensionRunner: this.#extensionRunner,
-			sideStreamFn: this.#sideStreamFn,
+			sideStreamFn: this.#sideStreamFor("compaction"),
 			providerSessionState: this.#providerSessionState,
 			preferWebsockets: () => this.preferWebsockets,
 			model: () => this.model,
@@ -2388,7 +2403,7 @@ export class AgentSession implements SettingsScope {
 			sessionManager: this.sessionManager,
 			settings: this.settings,
 			modelRegistry: this.#modelRegistry,
-			sideStreamFn: this.#sideStreamFn,
+			sideStreamFn: this.#sideStreamFor("handoff"),
 			obfuscator: () => this.#obfuscator,
 			model: () => this.model,
 			thinkingLevel: () => this.thinkingLevel,
@@ -2971,10 +2986,56 @@ export class AgentSession implements SettingsScope {
 		return this.#admittedSubmissionsSettled.promise;
 	}
 
+	/**
+	 * The root assignment this session hands to a child session it spawns (`CreateAgentSessionOptions.modelRequestRoot`),
+	 * resolved at call time so a `/new` or session switch is reflected. A session built without a core-minted context
+	 * has no root to give: the child records that gap instead of becoming a root of its own.
+	 * @internal
+	 */
+	childModelRequestRoot(): ModelRequestRootAssignment {
+		const execution = this.#modelRequestExecution;
+		return execution === undefined ? { kind: "child", rootSessionId: undefined } : childModelRequestRootOf(execution);
+	}
+
+	/**
+	 * Run `fn` under this session's request context, optionally declaring the purpose of the requests it makes.
+	 * For work the session starts outside the agent loop (titles, memory jobs, summaries) and for callers that hand
+	 * the session's work to a timer, queue or listener, which would otherwise run in the context of whoever fires it.
+	 * Runs `fn` unchanged for a session without a core-minted context.
+	 * @internal
+	 */
+	runInModelRequestContext<T>(fn: () => T, purpose?: ModelRequestPurpose): T {
+		const execution = this.#modelRequestExecution;
+		if (execution === undefined) return fn();
+		return runWithModelRequestExecution(purpose === undefined ? execution : this.#executionForPurpose(execution, purpose), fn);
+	}
+
+	/** One derived context per purpose, created on first use. */
+	#executionForPurpose(execution: ModelRequestExecution, purpose: ModelRequestPurpose): ModelRequestExecution {
+		let derived = this.#modelRequestPurposeExecutions.get(purpose);
+		if (derived === undefined) {
+			derived = deriveModelRequestExecution(execution, { purpose });
+			this.#modelRequestPurposeExecutions.set(purpose, derived);
+		}
+		return derived;
+	}
+
+	/** The side-request stream declaring `purpose`; one decorated function per purpose. */
+	#sideStreamFor(purpose: ModelRequestPurpose): StreamFn {
+		const execution = this.#modelRequestExecution;
+		if (execution === undefined) return this.#sideStreamBase;
+		let decorated = this.#sideStreams.get(purpose);
+		if (decorated === undefined) {
+			decorated = withModelRequestExecution(this.#sideStreamBase, this.#executionForPurpose(execution, purpose));
+			this.#sideStreams.set(purpose, decorated);
+		}
+		return decorated;
+	}
+
 	async #admitSubmission<T>(work: () => Promise<T>): Promise<T> {
 		this.#admittedSubmissionCount++;
 		try {
-			return await work();
+			return await this.runInModelRequestContext(work);
 		} finally {
 			if (--this.#admittedSubmissionCount === 0 && this.#admittedSubmissionsSettled) {
 				const settled = this.#admittedSubmissionsSettled;
@@ -5394,7 +5455,7 @@ export class AgentSession implements SettingsScope {
 		this.#autolearnCaptureAbortController = controller;
 		const task = (async () => {
 			try {
-				await capture(controller.signal);
+				await this.runInModelRequestContext(() => capture(controller.signal), "memory");
 			} catch (error) {
 				if (!controller.signal.aborted) throw error;
 			} finally {
@@ -5657,7 +5718,10 @@ export class AgentSession implements SettingsScope {
 		const mnemopiState = setMnemopiSessionState(this, undefined);
 		// Bound the wait for a just-fired sharpshooter extraction before dropping
 		// its subscriptions, so print-mode exits don't cut queued-delta writes.
-		const sharpshooterFlushed = flushSharpshooterExtraction(this, options.mnemopiConsolidateTimeoutMs);
+		const sharpshooterFlushed = this.runInModelRequestContext(
+			() => flushSharpshooterExtraction(this, options.mnemopiConsolidateTimeoutMs),
+			"memory",
+		);
 		try {
 			releaseSharpshooterSession(this);
 		} catch (error) {
@@ -5672,8 +5736,11 @@ export class AgentSession implements SettingsScope {
 			this.#releaseOwnedComputerSessions(this.#eval.getKernelOwnerId()),
 			this.#disconnectOwnedMcp(),
 			advisorRecorderClosed,
-			hindsightState?.flushRetainQueue() ?? Promise.resolve(),
-			this.#disposeMnemopi(mnemopiState, options.mnemopiConsolidateTimeoutMs),
+			this.runInModelRequestContext(() => hindsightState?.flushRetainQueue() ?? Promise.resolve(), "memory"),
+			this.runInModelRequestContext(
+				() => this.#disposeMnemopi(mnemopiState, options.mnemopiConsolidateTimeoutMs),
+				"memory",
+			),
 			sharpshooterFlushed,
 		]);
 		for (const result of results) {
@@ -7148,9 +7215,13 @@ export class AgentSession implements SettingsScope {
 		const controller = new AbortController();
 		this.#imageDescriptionAbortControllers.add(controller);
 		try {
-			return await this.#providerBoundary.buildImageDescriptionNotice(
-				normalizedImages,
-				AbortSignal.any([controller.signal, AbortSignal.timeout(IMAGE_DESCRIPTION_ADMISSION_TIMEOUT_MS)]),
+			return await this.runInModelRequestContext(
+				() =>
+					this.#providerBoundary.buildImageDescriptionNotice(
+						normalizedImages,
+						AbortSignal.any([controller.signal, AbortSignal.timeout(IMAGE_DESCRIPTION_ADMISSION_TIMEOUT_MS)]),
+					),
+				"other",
 			);
 		} finally {
 			this.#imageDescriptionAbortControllers.delete(controller);
@@ -9326,13 +9397,16 @@ export class AgentSession implements SettingsScope {
 		const signal = this.#titleGenerationAbortController.signal;
 		const started = performance.now();
 		const icons = this.#cardIcons();
-		this.runEphemeralTurn({
-			promptText: prompt.render(titleForkPrompt, {
-				card: icons !== "boring",
-				nerdFonts: icons === "nf+emoji",
-			}),
-			signal: AbortSignal.any([signal, AbortSignal.timeout(TITLE_FORK_TIMEOUT_MS)]),
-		})
+		this.#runEphemeralTurn(
+			{
+				promptText: prompt.render(titleForkPrompt, {
+					card: icons !== "boring",
+					nerdFonts: icons === "nf+emoji",
+				}),
+				signal: AbortSignal.any([signal, AbortSignal.timeout(TITLE_FORK_TIMEOUT_MS)]),
+			},
+			"title",
+		)
 			.then(
 				async ({ replyText, assistantMessage }) => {
 					const title = parseCardTitleReply(replyText, icons, input.text);
@@ -9496,18 +9570,22 @@ export class AgentSession implements SettingsScope {
 		if (titleSignal.aborted) return null;
 		// The title request carries user text, so it follows this session's own credential
 		// redaction policy like its conversation requests (see `settingsAwareStreamFn`).
-		const title = await withCredentialRedaction(cfgSecretsEnabled.get(this.settings), () =>
-			generateSessionTitle(
-				firstMessage,
-				this.#modelRegistry,
-				this.settings,
-				sessionId,
-				this.model,
-				provider => buildSessionMetadata(sessionId, provider, this.#modelRegistry.authStorage),
-				customSystemPrompt ?? this.#titleSystemPrompt,
-				titleSignal,
-				parentSessionId,
-			),
+		const title = await this.runInModelRequestContext(
+			() =>
+				withCredentialRedaction(cfgSecretsEnabled.get(this.settings), () =>
+					generateSessionTitle(
+						firstMessage,
+						this.#modelRegistry,
+						this.settings,
+						sessionId,
+						this.model,
+						provider => buildSessionMetadata(sessionId, provider, this.#modelRegistry.authStorage),
+						customSystemPrompt ?? this.#titleSystemPrompt,
+						titleSignal,
+						parentSessionId,
+					),
+				),
+			"title",
 		);
 		if (await this.#sessionGenerationChanged(sessionGeneration)) return null;
 		return !titleSignal.aborted && this.sessionId === parentSessionId ? title : null;
@@ -10994,6 +11072,10 @@ export class AgentSession implements SettingsScope {
 	 * rather than missing context.
 	 */
 	async runEphemeralTurn(args: EphemeralTurnOptions): Promise<EphemeralTurnResult> {
+		return this.#runEphemeralTurn(args, "side-channel");
+	}
+
+	async #runEphemeralTurn(args: EphemeralTurnOptions, purpose: ModelRequestPurpose): Promise<EphemeralTurnResult> {
 		const model = this.model;
 		if (!model) {
 			throw new Error("No active model on session");
@@ -11107,7 +11189,7 @@ export class AgentSession implements SettingsScope {
 		let assistantMessage: AssistantMessage | undefined;
 		assertEphemeralTurnReady();
 		try {
-			const stream = await this.#sideStreamFn(model, context, options);
+			const stream = await this.#sideStreamFor(purpose)(model, context, options);
 			for await (const event of stream) {
 				if (event.type === "text_delta") {
 					providerReplyText += event.delta;
@@ -12138,7 +12220,7 @@ export class AgentSession implements SettingsScope {
 				// Same per-provider concurrency cap rationale as the compaction
 				// path above (chatgpt-codex review on #3751).
 				completeImpl: async (requestModel, requestContext, requestOptions) => {
-					const stream = await this.#sideStreamFn(requestModel, requestContext, requestOptions);
+					const stream = await this.#sideStreamFor("branch-summary")(requestModel, requestContext, requestOptions);
 					return stream.result();
 				},
 			});

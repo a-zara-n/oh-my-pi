@@ -82,6 +82,7 @@ export class ExtractionClient {
 						try {
 							return await this.callApi(model, messages, temperature, maxTokens, key);
 						} catch (exc) {
+							if (AIError.isModelRequestDenied(exc)) throw exc;
 							const flags = AIError.classify(exc);
 							if (AIError.is(flags, AIError.Flag.UsageLimit) || AIError.is(flags, AIError.Flag.Transient)) {
 								rateLimitError = exc;
@@ -99,6 +100,8 @@ export class ExtractionClient {
 				return result;
 			} catch (exc) {
 				lastError = exc;
+				// A gate denial is terminal: no other fallback model may be asked.
+				if (AIError.isModelRequestDenied(exc)) break;
 			}
 			await sleep(FALLBACK_MODEL_DELAY_MS);
 		}

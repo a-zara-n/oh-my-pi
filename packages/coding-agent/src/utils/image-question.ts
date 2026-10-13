@@ -1,4 +1,5 @@
 import { instrumentedCompleteSimple, resolveTelemetry } from "@oh-my-pi/pi-agent-core";
+import { runWithModelRequestPurpose } from "@oh-my-pi/pi-ai/model-request-execution";
 import { sendsImageInputOnWire } from "@oh-my-pi/pi-ai/providers/vision-guard";
 import { type Api, type AssistantMessage, completeSimple, type Model, type Usage } from "@oh-my-pi/pi-ai";
 import { prompt } from "@oh-my-pi/pi-utils";
@@ -136,27 +137,29 @@ export async function askImageQuestion(
 
 	let response: AssistantMessage;
 	try {
-		response = await instrumentedCompleteSimple(
-			model,
-			{
-				systemPrompt: [prompt.render(imageQuestionSystemPromptTemplate)],
-				messages: [
-					{
-						role: "user",
-						content: [
-							{ type: "image", data: image.data, mimeType: image.mimeType },
-							{ type: "text", text: question },
-						],
-						timestamp: Date.now(),
-					},
-				],
-			},
-			{
-				apiKey: modelRegistry.resolver(model, session.getSessionId?.() ?? undefined),
-				signal: effectiveSignal,
-				reasoning,
-			},
-			{ telemetry, oneshotKind: "image_question", completeImpl },
+		response = await runWithModelRequestPurpose("side-channel", () =>
+			instrumentedCompleteSimple(
+				model,
+				{
+					systemPrompt: [prompt.render(imageQuestionSystemPromptTemplate)],
+					messages: [
+						{
+							role: "user",
+							content: [
+								{ type: "image", data: image.data, mimeType: image.mimeType },
+								{ type: "text", text: question },
+							],
+							timestamp: Date.now(),
+						},
+					],
+				},
+				{
+					apiKey: modelRegistry.resolver(model, session.getSessionId?.() ?? undefined),
+					signal: effectiveSignal,
+					reasoning,
+				},
+				{ telemetry, oneshotKind: "image_question", completeImpl },
+			),
 		);
 	} catch (error) {
 		if (error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError")) {

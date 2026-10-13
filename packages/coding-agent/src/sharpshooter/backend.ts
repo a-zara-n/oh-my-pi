@@ -1,8 +1,9 @@
 import { rm } from "node:fs/promises";
+import { bindModelRequestExecution } from "@oh-my-pi/pi-ai/model-request-execution";
 import { logger } from "@oh-my-pi/pi-utils";
 import type { MemoryBackend, MemoryBackendSearchItem, MemoryBackendStatus } from "../memory-backend/types";
 import { truncateApproxTokens } from "../mnemopi/config";
-import type { AgentSession } from "../session/agent-session";
+import type { AgentSession, AgentSessionEvent } from "../session/agent-session";
 import { runSharpshooterConsolidation } from "./consolidate";
 import { maybeStartSharpshooterExtraction, resolveSharpshooterModel } from "./extract";
 import {
@@ -90,13 +91,22 @@ export const sharpshooterBackend: MemoryBackend = {
 				sessionId: session.sessionId,
 			});
 			try {
-				const unsubscribe = session.subscribe(event => {
-					// message_start is the only event that carries the committed user
-					// prompt itself (agent_start fires before the transcript appends),
-					// and it also covers mid-turn steering prompts.
-					if (event.type !== "message_start" || event.message.role !== "user") return;
-					maybeStartSharpshooterExtraction({ session, settings, modelRegistry, agentDir, message: event.message });
-				});
+				// Bound to the registering session's model-request context: events fire in the emitter's context.
+				const unsubscribe = session.subscribe(
+					bindModelRequestExecution((event: AgentSessionEvent) => {
+						// message_start is the only event that carries the committed user
+						// prompt itself (agent_start fires before the transcript appends),
+						// and it also covers mid-turn steering prompts.
+						if (event.type !== "message_start" || event.message.role !== "user") return;
+						maybeStartSharpshooterExtraction({
+							session,
+							settings,
+							modelRegistry,
+							agentDir,
+							message: event.message,
+						});
+					}),
+				);
 				// Backend startup can race the first turn's events (print mode
 				// submits while resolveMemoryBackend is still importing us).
 				// Catch up when the newest transcript message is already a user prompt.

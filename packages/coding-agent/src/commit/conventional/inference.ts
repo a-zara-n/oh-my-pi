@@ -1,6 +1,8 @@
 import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { Api, ApiKey, AuthStorage, Model } from "@oh-my-pi/pi-ai";
 import { completeSimple } from "@oh-my-pi/pi-ai";
+import * as AIError from "@oh-my-pi/pi-ai/error";
+import { runWithModelRequestPurpose } from "@oh-my-pi/pi-ai/model-request-execution";
 import { toReasoningEffort } from "@oh-my-pi/pi-tui/thinking";
 import type { ResolvedCommitModel } from "../model-selection";
 import { extractTextContent } from "../utils";
@@ -117,22 +119,27 @@ export class OmpCommitInference implements CommitInference {
 				this.#onProgress?.(request.progressLabel);
 				const timeout = AbortSignal.timeout(120_000);
 				const signal = this.#signal ? AbortSignal.any([this.#signal, timeout]) : timeout;
-				const message = await completeSimple(
-					target.model,
-					{
-						systemPrompt: request.systemPrompt.trim() ? [request.systemPrompt] : undefined,
-						messages: [{ role: "user", content: request.userPrompt, timestamp: Date.now() }],
-					},
-					{
-						apiKey: target.apiKey,
-						sessionId: this.#sessionId,
-						maxTokens: 16_384,
-						reasoning,
-						signal,
-					},
+				const message = await runWithModelRequestPurpose("commit", () =>
+					completeSimple(
+						target.model,
+						{
+							systemPrompt: request.systemPrompt.trim() ? [request.systemPrompt] : undefined,
+							messages: [{ role: "user", content: request.userPrompt, timestamp: Date.now() }],
+						},
+						{
+							apiKey: target.apiKey,
+							sessionId: this.#sessionId,
+							maxTokens: 16_384,
+							reasoning,
+							signal,
+						},
+					),
 				);
 				responseText = extractTextContent(message);
-				if (message.stopReason === "error") throw new Error(message.errorMessage ?? "Provider error");
+				// The message rides along as the cause so a gate denial stays recognisable after wrapping.
+				if (message.stopReason === "error") {
+					throw new Error(message.errorMessage ?? "Provider error", { cause: message });
+				}
 				if (!responseText.trim()) throw new Error("Empty model response");
 				const raw = { text: responseText, stopReason: message.stopReason };
 				const parsed = parse(raw);
@@ -153,6 +160,8 @@ export class OmpCommitInference implements CommitInference {
 				return parsed;
 			} catch (error) {
 				this.#signal?.throwIfAborted();
+				// A gate denial is terminal: no retry, and no cached failure for a request that never left.
+				if (AIError.isModelRequestDenied(error)) throw error;
 				lastError = error instanceof Error ? error : new Error(String(error));
 				this.#cache?.putFailure({
 					key,

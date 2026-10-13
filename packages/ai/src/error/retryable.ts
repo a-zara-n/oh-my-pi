@@ -1,6 +1,7 @@
 import { isRetryableError, isUnexpectedSocketCloseMessage } from "@oh-my-pi/pi-utils";
 import {
 	CODEX_HTTP_BODY_READ_ERROR_PATTERN,
+	isModelRequestDenied,
 	isRetryableStreamEnvelopeError,
 	isTransientStreamDropError,
 	isTransientStreamParseError,
@@ -42,6 +43,8 @@ function isTransientTransportMessage(message: string): boolean {
  * as malformed, unauthorized, or unentitled fails identically on replay.
  */
 export function isProviderRetryableError(error: unknown): boolean {
+	// A gate denial is terminal: its text (e.g. "503 overloaded") must never select backoff.
+	if (isModelRequestDenied(error)) return false;
 	if (!(error instanceof Error)) return false;
 	if (isUsageLimit(error)) return false;
 	const httpStatus = status(error);

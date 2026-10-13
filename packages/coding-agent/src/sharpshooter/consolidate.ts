@@ -2,6 +2,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { type } from "@oh-my-pi/omptype";
 import { completeSimple, Effort, retryTransientCompletion } from "@oh-my-pi/pi-ai";
+import { runWithModelRequestPurpose } from "@oh-my-pi/pi-ai/model-request-execution";
 import { clampThinkingLevelForModel } from "@oh-my-pi/pi-catalog/model-thinking";
 import { prompt, withFileLock } from "@oh-my-pi/pi-utils";
 
@@ -155,27 +156,29 @@ async function consolidateLocked(
 			maxFileLines: SHARPSHOOTER_MAX_FILE_LINES,
 		});
 
-		const response = await retryTransientCompletion(
-			() =>
-				completeSimple(
-					model,
-					{
-						systemPrompt: [system],
-						messages: [{ role: "user", content: [{ type: "text", text: input }], timestamp: Date.now() }],
-						tools: [replaceMemoryFilesTool],
-					},
-					{
-						apiKey: options.modelRegistry.resolver(model, options.sessionId),
-						sessionId: options.sessionId,
-						maxTokens: 8192,
-						reasoning: clampThinkingLevelForModel(model, Effort.Medium),
-						toolChoice: "required",
-					},
-				),
-			{ provider: model.provider },
+		const response = await runWithModelRequestPurpose("memory", () =>
+			retryTransientCompletion(
+				() =>
+					completeSimple(
+						model,
+						{
+							systemPrompt: [system],
+							messages: [{ role: "user", content: [{ type: "text", text: input }], timestamp: Date.now() }],
+							tools: [replaceMemoryFilesTool],
+						},
+						{
+							apiKey: options.modelRegistry.resolver(model, options.sessionId),
+							sessionId: options.sessionId,
+							maxTokens: 8192,
+							reasoning: clampThinkingLevelForModel(model, Effort.Medium),
+							toolChoice: "required",
+						},
+					),
+				{ provider: model.provider },
+			),
 		);
 		if (response.stopReason === "error") {
-			throw new Error(response.errorMessage || "sharpshooter consolidation model error");
+			throw new Error(response.errorMessage || "sharpshooter consolidation model error", { cause: response });
 		}
 
 		const files = parseReplacementFiles(response.content, currentFiles);

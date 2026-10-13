@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Memory extraction and deferred embedding/fact-extraction jobs keep the session's model request context, and stop on a model request gate denial instead of retrying.
+
 ## [18.8.8] - 2026-10-10
 
 ### Fixed

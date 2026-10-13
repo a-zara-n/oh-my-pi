@@ -77,6 +77,7 @@ import { type ArtifactManager, writeArtifact } from "../session/artifacts";
 import { ASYNC_RESULT_MESSAGE_TYPE } from "../session/async-job-delivery";
 import type { AuthStorage } from "../session/auth-storage";
 import { SKILL_PROMPT_MESSAGE_TYPE } from "../session/messages";
+import type { ModelRequestRootAssignment } from "../session/model-request-context";
 import { hasConversationalHistory, SessionManager } from "../session/session-manager";
 import { truncateTail } from "@oh-my-pi/pi-tui/tools/streaming-output";
 import {
@@ -563,6 +564,12 @@ export interface ExecutorOptions {
 	 * passes its own `getAgentId()`).
 	 */
 	parentAgentId?: string;
+	/**
+	 * Root hand-over from the spawning session (`ToolSession.childModelRequestRoot()`), forwarded verbatim to
+	 * `CreateAgentSessionOptions.modelRequestRoot` on spawn and on every revive of the child. Spawners always
+	 * pass it explicitly; leaving it out makes the child a root-less child when a context is active.
+	 */
+	modelRequestRoot?: ModelRequestRootAssignment;
 	/**
 	 * Keep the finished subagent addressable in the registry for IRC/revival.
 	 * Defaults to true. Eval bridge agents are programmatic one-shot helpers and
@@ -4306,6 +4313,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 					additionalDirectories: worktree !== undefined ? undefined : options.additionalDirectories,
 					authStorage,
 					modelRegistry,
+					modelRequestRoot: options.modelRequestRoot,
 					getApiKey: options.getApiKey,
 					credentialSourceSessionId: options.credentialSourceSessionId,
 					oauthAccountPools: options.oauthAccountPools,

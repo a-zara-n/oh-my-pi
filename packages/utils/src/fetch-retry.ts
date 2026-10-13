@@ -366,6 +366,7 @@ export async function fetchWithRetry(
 			response = await fetchImpl(requestUrl, init);
 		} catch (error) {
 			if (signal?.aborted) throw new Error("Request was aborted");
+			if (isMarkedNonRetryable(error)) throw error;
 			const wrapped = wrapNetworkError(error);
 			if (attempt + 1 >= maxAttempts) throw wrapped;
 			await waitForRetry(resolveDefaultDelay(defaultDelayMs, attempt, maxDelayMs), signal);
@@ -408,6 +409,20 @@ async function waitForRetry(delayMs: number, signal: AbortSignal | undefined): P
 		if (signal?.aborted) throw new Error("Request was aborted");
 		throw error;
 	}
+}
+
+/**
+ * Whether an error (or one of its causes, up to depth 4) declares itself terminal with a structural
+ * `retryable: false`. Structural on purpose: this package cannot import the error classes that set it
+ * (e.g. a gate denial), and a thrown terminal error must be rethrown as-is, never retried or re-wrapped.
+ */
+function isMarkedNonRetryable(error: unknown): boolean {
+	let link: unknown = error;
+	for (let depth = 0; depth < 5 && typeof link === "object" && link !== null; depth++) {
+		if ("retryable" in link && link.retryable === false) return true;
+		link = "cause" in link ? link.cause : undefined;
+	}
+	return false;
 }
 
 function wrapNetworkError(error: unknown): Error {
@@ -525,6 +540,7 @@ const VALIDATION_MESSAGE_PATTERN =
  * and validation-shaped messages short-circuit to `false`.
  */
 export function isRetryableError(error: unknown): boolean {
+	if (isMarkedNonRetryable(error)) return false;
 	const info = error as { message?: string; name?: string } | null;
 	const message = info?.message ?? "";
 	const name = info?.name ?? "";

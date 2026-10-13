@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `fetchWithRetry` and `isRetryableError` no longer retry an error that declares `retryable: false`.
+
 ## [18.8.8] - 2026-10-10
 
 ### Fixed

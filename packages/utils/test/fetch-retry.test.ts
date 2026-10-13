@@ -1,5 +1,10 @@
 import { describe, expect, it } from "bun:test";
-import { extractRetryHint, fetchWithRetry, isUnexpectedSocketCloseMessage } from "@oh-my-pi/pi-utils/fetch-retry";
+import {
+	extractRetryHint,
+	fetchWithRetry,
+	isRetryableError,
+	isUnexpectedSocketCloseMessage,
+} from "@oh-my-pi/pi-utils/fetch-retry";
 
 describe("isUnexpectedSocketCloseMessage", () => {
 	it.each(["Socket is closed", "Error: Socket is closed.", "The socket connection was closed unexpectedly"])(
@@ -290,5 +295,45 @@ describe("extractRetryHint", () => {
 	it("still returns undefined when only elapsed account resets are present", () => {
 		const past = new Date(Date.now() - 60_000).toISOString();
 		expect(extractRetryHint(undefined, `Your limit will reset at ${past}`)).toBeUndefined();
+	});
+});
+
+describe("terminal errors (structural `retryable: false`)", () => {
+	/** Shaped like a refusal raised by a caller-supplied fetch; the text imitates a transient 503. */
+	class TerminalRefusal extends Error {
+		readonly retryable = false as const;
+	}
+
+	it("fetchWithRetry rethrows a terminal fetch error after one call instead of backing off and re-sending", async () => {
+		const refusal = new TerminalRefusal("503 service unavailable, please retry: network error");
+		let calls = 0;
+		const customFetch = async (): Promise<Response> => {
+			calls += 1;
+			throw refusal;
+		};
+
+		await expect(
+			fetchWithRetry("https://example.invalid/terminal", { fetch: customFetch, defaultDelayMs: 1, maxAttempts: 4 }),
+		).rejects.toBe(refusal);
+		expect(calls).toBe(1);
+	});
+
+	it("fetchWithRetry does not rewrap a terminal error whose text matches the network-error wrapper", async () => {
+		const refusal = new TerminalRefusal("fetch failed", { cause: new Error("connect ECONNREFUSED") });
+		const customFetch = async (): Promise<Response> => {
+			throw refusal;
+		};
+
+		await expect(
+			fetchWithRetry("https://example.invalid/wrap", { fetch: customFetch, defaultDelayMs: 1, maxAttempts: 1 }),
+		).rejects.toBe(refusal);
+	});
+
+	it("isRetryableError refuses a terminal error even when its text and status look transient", () => {
+		const refusal = Object.assign(new TerminalRefusal("429 rate limit exceeded: overloaded"), { status: 429 });
+		expect(isRetryableError(refusal)).toBe(false);
+		expect(isRetryableError(Object.assign(new Error("429 rate limit exceeded: overloaded"), { status: 429 }))).toBe(
+			true,
+		);
 	});
 });
