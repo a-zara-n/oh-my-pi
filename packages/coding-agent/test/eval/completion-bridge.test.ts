@@ -3,6 +3,7 @@ import * as path from "node:path";
 import type { Api, AssistantMessage, Model } from "@oh-my-pi/pi-ai";
 import * as ai from "@oh-my-pi/pi-ai";
 import { Effort } from "@oh-my-pi/pi-ai";
+import * as AIError from "@oh-my-pi/pi-ai/error";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import { $ } from "bun";
 import type { ModelRegistry } from "../../src/config/model-registry";
@@ -256,6 +257,70 @@ describe("runEvalCompletion", () => {
 		expect(result).toEqual({
 			text: "fallback answer",
 			details: { model: "p/fallback", tier: "smol", structured: false },
+		});
+	});
+
+	describe("a model request gate denial is terminal", () => {
+		const WORDING = "429 usage limit reached, try another model";
+
+		async function twoModelSession() {
+			const fallback = makeModel("p", "fallback");
+			const session = makeSession({ available: [SMOL, fallback] });
+			cfgRetryFallbackChains.set(session.settings, { smol: ["p/fallback"] });
+			return session;
+		}
+
+		it("does not ask the fallback model when the first request is denied (thrown)", async () => {
+			const session = await twoModelSession();
+			const spy = vi
+				.spyOn(ai, "completeSimple")
+				.mockRejectedValueOnce(new AIError.ModelRequestDeniedError("over-limit", WORDING))
+				.mockResolvedValueOnce(assistant({ text: "fallback answer" }));
+
+			await expect(runEvalCompletionAndWait({ prompt: "q", model: "smol" }, { session })).rejects.toThrow(WORDING);
+
+			expect(spy.mock.calls.map(call => (call[0] as Model<Api>).id)).toEqual(["smol"]);
+		});
+
+		it("does not ask the fallback model when the denial arrives as an error message", async () => {
+			const session = await twoModelSession();
+			const flattened = await AIError.finalize(new AIError.ModelRequestDeniedError("over-limit", WORDING));
+			const spy = vi
+				.spyOn(ai, "completeSimple")
+				.mockResolvedValueOnce(
+					assistant({ stopReason: "error", errorMessage: flattened.message, errorStatus: flattened.status, errorId: flattened.id }),
+				)
+				.mockResolvedValueOnce(assistant({ text: "fallback answer" }));
+
+			await expect(runEvalCompletionAndWait({ prompt: "q", model: "smol" }, { session })).rejects.toThrow(WORDING);
+
+			expect(spy.mock.calls.map(call => (call[0] as Model<Api>).id)).toEqual(["smol"]);
+		});
+
+		it("still falls back for an ordinary failure that uses the same wording", async () => {
+			const session = await twoModelSession();
+			const spy = vi
+				.spyOn(ai, "completeSimple")
+				.mockResolvedValueOnce(assistant({ stopReason: "error", errorMessage: WORDING }))
+				.mockResolvedValueOnce(assistant({ text: "fallback answer" }));
+
+			const result = await runEvalCompletionAndWait({ prompt: "q", model: "smol" }, { session });
+
+			expect(spy.mock.calls.map(call => (call[0] as Model<Api>).id)).toEqual(["smol", "fallback"]);
+			expect(result.text).toBe("fallback answer");
+		});
+
+		it("still falls back when an ordinary failure is thrown with the same wording", async () => {
+			const session = await twoModelSession();
+			const spy = vi
+				.spyOn(ai, "completeSimple")
+				.mockRejectedValueOnce(new Error(WORDING))
+				.mockResolvedValueOnce(assistant({ text: "fallback answer" }));
+
+			const result = await runEvalCompletionAndWait({ prompt: "q", model: "smol" }, { session });
+
+			expect(spy.mock.calls.map(call => (call[0] as Model<Api>).id)).toEqual(["smol", "fallback"]);
+			expect(result.text).toBe("fallback answer");
 		});
 	});
 

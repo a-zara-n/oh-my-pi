@@ -15,6 +15,7 @@
 import { type } from "@oh-my-pi/omptype";
 import { instrumentedCompleteSimple, resolveTelemetry, type ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import { type Api, type AssistantMessage, Effort, type Model, type Tool } from "@oh-my-pi/pi-ai";
+import * as AIError from "@oh-my-pi/pi-ai/error";
 import { clampThinkingLevelForModel, getSupportedEfforts } from "@oh-my-pi/pi-catalog/model-thinking";
 import { Snowflake } from "@oh-my-pi/pi-utils";
 import { extractTextContent, extractToolCall, parseJsonPayload } from "../commit/utils";
@@ -354,14 +355,20 @@ async function executeCompletion(
 			);
 		} catch (error) {
 			lastError = error;
-			if (signal.aborted || index === candidates.length - 1) throw error;
+			// A gate denial is terminal: no next candidate may be asked.
+			if (signal.aborted || AIError.isModelRequestDenied(error) || index === candidates.length - 1) throw error;
 			continue;
 		}
 		if (response.stopReason === "aborted") {
 			throw new ToolError("completion() request aborted.");
 		}
 		if (response.stopReason === "error") {
-			lastError = new ToolError(response.errorMessage ?? "completion() request failed.");
+			const failure = new ToolError(response.errorMessage ?? "completion() request failed.");
+			// The message flattened the denial; keep it terminal and keep its flag on the rebuilt error.
+			if (AIError.isModelRequestDenied(response)) {
+				throw AIError.attach(failure, AIError.create(AIError.Flag.ModelRequestDenied));
+			}
+			lastError = failure;
 			if (!signal.aborted && index < candidates.length - 1) continue;
 			throw lastError;
 		}
