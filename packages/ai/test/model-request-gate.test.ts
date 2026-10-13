@@ -131,9 +131,13 @@ describe("gate registration latch", () => {
 		expect(() => runtime.registerGate("owner-a", first, { authorizeTimeoutMs: 50 })).toThrow(/already registered/);
 	});
 
-	test("rejects a timeout that is not a positive integer instead of inventing a default", () => {
+	test("accepts the largest timeout a platform timer honors", () => {
+		expect(() => newRuntime().registerGate("owner", recordingGate(PASS).gate, { authorizeTimeoutMs: 2_147_483_647 })).not.toThrow();
+	});
+
+	test("rejects a timeout that is not a positive integer a platform timer can honor, instead of clamping or inventing a default", () => {
 		const gate = recordingGate(PASS).gate;
-		for (const authorizeTimeoutMs of [0, -5, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+		for (const authorizeTimeoutMs of [0, -5, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 2_147_483_648, Number.MAX_SAFE_INTEGER]) {
 			expect(() => newRuntime().registerGate("owner", gate, { authorizeTimeoutMs })).toThrow(RangeError);
 		}
 	});

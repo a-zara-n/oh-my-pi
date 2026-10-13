@@ -110,7 +110,10 @@ async function createHarness(
 		createSessionModelRequestExecution({
 			getSessionId: () => sessionManager.getSessionId(),
 			agent: { id: "Main", kind: "main", name: "main", depth: 0 },
-			modelRequestRoot,
+			root:
+				modelRequestRoot === undefined
+					? { kind: "self" }
+					: { kind: "inherited", rootSessionId: modelRequestRoot.rootSessionId },
 		}),
 	);
 	return { runner, sessionManager };

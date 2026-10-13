@@ -11,29 +11,29 @@ import { cfgSharpshooterIntervalMinutes } from "./settings";
 
 const SCHEDULER_TICK_MS = 60_000;
 
-interface SchedulerEntry {
-	timer: NodeJS.Timeout;
-	refCount: number;
-}
-
-const schedulers = new Map<string, SchedulerEntry>();
-
-export function startSharpshooterScheduler(options: {
+interface SchedulerOptions {
 	agentDir: string;
 	cwd: string;
 	settings: Settings;
 	modelRegistry: ModelRegistry;
 	sessionId: string;
-}): () => void {
-	const bankDir = sharpshooterBankDir(options.agentDir, options.cwd);
-	const existing = schedulers.get(bankDir);
-	if (existing) {
-		existing.refCount += 1;
-		return createDisposer(bankDir, existing);
-	}
+}
 
-	// The interval outlives the call that started it (and is shared by every session on this bank), so the tick
-	// is bound to the starting session's model-request context rather than whatever fires the timer.
+/** One session's claim on a bank's shared interval, with the work it runs bound to that session's context. */
+interface SchedulerHolder {
+	readonly tick: () => Promise<void>;
+}
+
+interface SchedulerEntry {
+	timer: NodeJS.Timeout;
+	/** Live holders in registration order; the interval works for the oldest one that is still alive. */
+	holders: SchedulerHolder[];
+}
+
+const schedulers = new Map<string, SchedulerEntry>();
+
+function createHolder(options: SchedulerOptions): SchedulerHolder {
+	// Bound where the session registers: a timer fires in its own context, not the registering session's.
 	const tick = bindModelRequestExecution(async (): Promise<void> => {
 		try {
 			const [depth, state] = await Promise.all([
@@ -50,24 +50,39 @@ export function startSharpshooterScheduler(options: {
 			});
 		}
 	});
-	const timer = setInterval(() => void tick(), SCHEDULER_TICK_MS);
-	timer.unref();
-	const entry: SchedulerEntry = { timer, refCount: 1 };
-	schedulers.set(bankDir, entry);
-	void tick();
-	return createDisposer(bankDir, entry);
+	return { tick };
 }
 
-function createDisposer(bankDir: string, entry: SchedulerEntry): () => void {
+export function startSharpshooterScheduler(options: SchedulerOptions): () => void {
+	const bankDir = sharpshooterBankDir(options.agentDir, options.cwd);
+	const holder = createHolder(options);
+	const existing = schedulers.get(bankDir);
+	if (existing) {
+		existing.holders.push(holder);
+		return createDisposer(bankDir, existing, holder);
+	}
+
+	// One interval serves every session on this bank. Each tick runs the oldest live holder's work, so a request is
+	// attributed to a session that is still alive, never to one that has already been disposed.
+	const holders = [holder];
+	const timer = setInterval(() => void holders[0]?.tick(), SCHEDULER_TICK_MS);
+	timer.unref();
+	const entry: SchedulerEntry = { timer, holders };
+	schedulers.set(bankDir, entry);
+	void holder.tick();
+	return createDisposer(bankDir, entry, holder);
+}
+
+function createDisposer(bankDir: string, entry: SchedulerEntry, holder: SchedulerHolder): () => void {
 	let disposed = false;
 	return () => {
 		if (disposed) return;
 		disposed = true;
-		const current = schedulers.get(bankDir);
-		if (current !== entry) return;
-		current.refCount -= 1;
-		if (current.refCount > 0) return;
-		clearInterval(current.timer);
+		if (schedulers.get(bankDir) !== entry) return;
+		const index = entry.holders.indexOf(holder);
+		if (index >= 0) entry.holders.splice(index, 1);
+		if (entry.holders.length > 0) return;
+		clearInterval(entry.timer);
 		schedulers.delete(bankDir);
 	};
 }

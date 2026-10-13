@@ -14,7 +14,7 @@ attempt is a separate layer (see [Scope of this layer](#scope-of-this-layer)).
 | --- | --- |
 | `ModelRequestGate` | `authorize(attempt) => Promise<ModelRequestDecision>` where a decision is `pass`, `allow` (with a lease), or `deny` (code + message). |
 | `registerModelRequestGate(owner, gate, options?)` | Registers the process's gate. Re-registering the same gate under the same owner with the same options is a no-op; anything else throws. There is **no unregister**: a gate cannot be removed midway to let later requests through unchecked. |
-| `ModelRequestGateOptions.authorizeTimeoutMs` | Optional positive integer. If the gate has not answered by then, the request is denied with `gate-error`. There is no default: without it the core waits until the request's own signal aborts. In neither case does any I/O start. |
+| `ModelRequestGateOptions.authorizeTimeoutMs` | Optional positive safe integer, at most 2,147,483,647 ms (the longest delay a platform timer honors; larger values are rejected, not clamped). If the gate has not answered by then, the request is denied with `gate-error`. There is no default: without it the core waits until the request's own signal aborts. In neither case does any I/O start. |
 | `getModelRequestGateInfo()` | `{ apiVersion: 1, registered, coverage }`. `coverage` lists every inventory site with its status, how the execution context reaches it, `complete`, the context self-check result and an `inventoryVersion` digest. |
 | `verifyModelRequestContext()` | Runs (or awaits) the self-check of the execution-context mechanism. |
 | `ModelRequestDeniedError` | `code: string`, `retryable: false`. |
@@ -46,8 +46,13 @@ the caller already stopped waiting (timeout or abort) is released as `not-sent`,
   `rootSessionId: undefined`. The gap is visible to the gate; it is not turned into a fresh root.
 
 The execution module (`@oh-my-pi/pi-ai/model-request-execution`) is internal and deliberately absent from the
-`@oh-my-pi/pi-ai` barrel. No public option accepts an origin, scope or root. The runtime instance is shared through
-`globalThis`, so a second copy of the module in the same process cannot hold a different latch.
+`@oh-my-pi/pi-ai` barrel, and no public option or request argument accepts an origin, scope or root. That is the whole
+extent of the guarantee: pi-ai's package `./*` export map still makes `model-request-execution` and
+`model-request-runtime` importable by any code in the process (an extension included), and such code can mint contexts
+or mark the process standalone. What is closed is self-declaration through the request API and fabricated context
+objects (a context is accepted only if this runtime minted it); hostile in-process code is outside this boundary and
+is limited by the tool allow-list, not by this layer. The runtime instance is shared through `globalThis`, so a second
+copy of the module in the same process cannot hold a different latch.
 
 ### Where the context is installed
 
@@ -90,7 +95,10 @@ check; `packages/utils` (which cannot import pi-ai) uses the structural `retryab
 
 `coverage.complete` is true only when the context self-check passed and **no** site is uncovered. In this layer no
 per-attempt hook exists yet, so the shipped table is not complete, and a consumer must not treat it as such.
-`inventoryVersion` is a SHA-256 over the table and changes with any edit.
+`inventoryVersion` is the hex SHA-256 over every site in table order, each contributing
+`id`, `location`, `status`, `contextPropagation` and `reason` (NUL-separated, one line per site). Editing any of those
+fields of any site, or adding/removing/reordering a site, changes it; `note` text outside `reason` and the table's
+comments do not. A site's `status` is derived, so flipping a site's hook changes the version too.
 
 Context-loss boundaries (Worker hosts, child processes, native callbacks) are judged by static search only: the Python
 kernel spawn and probe spawns issue no model request, and the Worker entry modules import no model entry, but their

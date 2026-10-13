@@ -217,10 +217,15 @@ function parseDecision(value: unknown): ParsedDecision | undefined {
 	return undefined;
 }
 
+/** Largest delay a platform timer honors (signed 32-bit); a larger value would fire at once. */
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
 function assertTimeout(timeoutMs: number | undefined): void {
 	if (timeoutMs === undefined) return;
-	if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
-		throw new RangeError("authorizeTimeoutMs must be a positive integer number of milliseconds");
+	if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > MAX_TIMER_DELAY_MS) {
+		throw new RangeError(
+			`authorizeTimeoutMs must be a positive integer number of milliseconds no greater than ${MAX_TIMER_DELAY_MS}`,
+		);
 	}
 }
 

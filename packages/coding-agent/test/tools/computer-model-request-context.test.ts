@@ -88,7 +88,7 @@ describe("computer worker tool calls", () => {
 		const host = createSessionModelRequestExecution({
 			getSessionId: () => "computer-host-session",
 			agent: { id: "Main", kind: "main", name: "main", depth: 0 },
-			modelRequestRoot: undefined,
+			root: { kind: "self" },
 		});
 
 		const run = runWithModelRequestExecution(host, () => supervisor.run("return 1;", 5_000, SNAPSHOT));

@@ -44,7 +44,7 @@ function hostExecution(sessionId: string) {
 	return createSessionModelRequestExecution({
 		getSessionId: () => sessionId,
 		agent: { id: "Main", kind: "main", name: "main", depth: 0 },
-		modelRequestRoot: undefined,
+		root: { kind: "self" },
 	});
 }
 

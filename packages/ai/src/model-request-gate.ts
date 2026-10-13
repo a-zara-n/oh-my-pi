@@ -157,7 +157,8 @@ export interface ModelRequestGate {
 export interface ModelRequestGateOptions {
 	/**
 	 * Longest the core waits for `authorize` before it treats the gate as unresponsive and denies with
-	 * `gate-error`. Positive integer milliseconds. There is no default: without it the core waits until
+	 * `gate-error`. Positive safe integer milliseconds, at most 2_147_483_647 (the longest delay a platform timer
+	 * honors; a larger value would fire immediately). There is no default: without it the core waits until
 	 * the request's own signal aborts, and in neither case does any I/O start.
 	 */
 	readonly authorizeTimeoutMs?: number;

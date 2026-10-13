@@ -54,7 +54,9 @@ function row(
 
 /**
  * Site ids S-01..S-37 follow the design inventory; S-38 and up were found while wiring the context. Locations are
- * paths in this repository.
+ * paths in this repository. The design's S-24 (a catch-all for paths that cannot carry the context) has no row of its
+ * own: it is replaced by the concrete boundaries S-37 (Worker host re-entry), S-38, S-39, S-40, S-41, S-43 and S-44,
+ * and S-25/S-26 are the installation and standalone-mark rows. Do not re-add S-24 as a vague row; add the specific path.
  */
 const SITE_ROWS: readonly ModelRequestSiteRow[] = [
 	row("S-01", "packages/ai/src/utils/transport-fetch.ts", "inherited", "missing", NO_HOOK),

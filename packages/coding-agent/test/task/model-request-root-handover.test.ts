@@ -234,7 +234,7 @@ describe("child sessions reach the gate under the spawning session's root", () =
 		const host = createSessionModelRequestExecution({
 			getSessionId: () => "ambient-host-session",
 			agent: { id: "Main", kind: "main", name: "main", depth: 0 },
-			modelRequestRoot: undefined,
+			root: { kind: "self" },
 		});
 
 		const result = await runWithModelRequestExecution(host, () => spawnChild(env, { id: "RootlessChild" }));

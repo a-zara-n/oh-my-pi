@@ -50,14 +50,19 @@ export interface SessionModelRequestExecutionInit {
 	/** Re-evaluated on every request, so `/new` and session switches never bill a stale id. */
 	readonly getSessionId: () => string;
 	readonly agent: ModelRequestAgent;
-	readonly modelRequestRoot: ModelRequestRootAssignment | undefined;
+	/**
+	 * Where the root comes from, already decided by {@link resolveModelRequestRootSource} at the session boundary.
+	 * It is passed through opaquely: this module does not look at the ambient context again, so the decision cannot
+	 * drift between where it is made and where it is used.
+	 */
+	readonly root: ModelRequestRootSource;
 }
 
 /** Mint the context of a session being created. */
 export function createSessionModelRequestExecution(init: SessionModelRequestExecutionInit): ModelRequestExecution {
 	return createModelRequestSessionExecution({
 		sessionId: init.getSessionId,
-		root: resolveModelRequestRootSource(init.modelRequestRoot),
+		root: init.root,
 		agent: init.agent,
 		purpose: init.agent.kind === "main" ? "main" : "subagent",
 	});

@@ -27,7 +27,11 @@ import type {
 import { resolveApiKeyOnce } from "@oh-my-pi/pi-ai/auth-retry";
 import type { DiscoverAuthStorageOptions } from "@oh-my-pi/pi-ai/auth-broker/discover";
 import type { Dialect } from "@oh-my-pi/pi-ai/dialect";
-import { deriveModelRequestExecution, runWithModelRequestExecution } from "@oh-my-pi/pi-ai/model-request-execution";
+import {
+	deriveModelRequestExecution,
+	type ModelRequestRootSource,
+	runWithModelRequestExecution,
+} from "@oh-my-pi/pi-ai/model-request-execution";
 import { prewarmOpenAICodexResponses } from "@oh-my-pi/pi-ai/providers/openai-codex-responses";
 import { isOpenAICodexWebSocketPreferred } from "@oh-my-pi/pi-ai/providers/openai-codex-transport";
 import { withCredentialRedaction } from "@oh-my-pi/pi-ai/providers/transform-messages";
@@ -1692,19 +1696,17 @@ export function createAutoLearnCaptureRunner(
 export async function createAgentSession(options: CreateAgentSessionOptions = {}): Promise<CreateAgentSessionResult> {
 	// Decided once, from the caller's context, before anything else runs: an explicit assignment makes this a child of
 	// that root; an ambient session context without one makes it a root-less child; neither makes it its own root.
-	const rootSource = resolveModelRequestRootSource(options.modelRequestRoot);
-	const modelRequestRoot: ModelRequestRootAssignment | undefined =
-		rootSource.kind === "inherited" ? { kind: "child", rootSessionId: rootSource.rootSessionId } : undefined;
+	const modelRequestRootSource = resolveModelRequestRootSource(options.modelRequestRoot);
 	registerLocalInferenceApi();
 	const extensionRoots = options.extensionRoots?.();
 	const explicit = extensionRoots?.explicit ?? options.additionalExtensionPaths ?? [];
 	const mode = extensionRoots?.mode ?? (options.disableExtensionDiscovery ? "explicit-only" : "merge");
-	return await withOmpExtensionRootScope(explicit, mode, () => createAgentSessionScoped(options, modelRequestRoot));
+	return await withOmpExtensionRootScope(explicit, mode, () => createAgentSessionScoped(options, modelRequestRootSource));
 }
 
 async function createAgentSessionScoped(
 	options: CreateAgentSessionOptions,
-	modelRequestRoot: ModelRequestRootAssignment | undefined,
+	modelRequestRootSource: ModelRequestRootSource,
 ): Promise<CreateAgentSessionResult> {
 	if (options.systemPromptTemplate !== undefined && options.customSystemPrompt !== undefined) {
 		throw new Error("systemPromptTemplate cannot be combined with a literal custom system prompt");
@@ -2260,7 +2262,7 @@ async function createAgentSessionScoped(
 				depth: taskDepth,
 				...(options.parentAgentId ? { parentId: options.parentAgentId } : {}),
 			},
-			modelRequestRoot,
+			root: modelRequestRootSource,
 		});
 		const getActiveModelString = (): string | undefined => {
 			const activeModel = agent?.state.model;
