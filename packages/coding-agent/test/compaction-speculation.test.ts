@@ -156,6 +156,8 @@ describe("async speculative compaction", () => {
 			setModelTemporary: async () => {},
 			abort: async () => {},
 			abortHandoff: () => {},
+			// A stub host has no request context: run the work as-is.
+			runInCompactionContext: (fn: () => unknown) => fn(),
 		} as unknown as SessionMaintenanceHost;
 		return new SessionMaintenance(host);
 	}

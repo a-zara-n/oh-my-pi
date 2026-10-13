@@ -145,6 +145,7 @@ describe("model request context of an AgentSession", () => {
 		taskDepth?: number;
 		modelRequestRoot?: ModelRequestRootAssignment;
 		settings?: Settings;
+		model?: Model<Api>;
 	}): Promise<AgentSession> {
 		const { session } = await createAgentSession({
 			cwd: tempDir.path(),
@@ -154,7 +155,7 @@ describe("model request context of an AgentSession", () => {
 			authStorage,
 			modelRegistry,
 			settings: init.settings ?? Settings.isolated({ "compaction.enabled": false }),
-			model,
+			model: init.model ?? model,
 			disableExtensionDiscovery: true,
 			skills: [],
 			contextFiles: [],
@@ -289,6 +290,47 @@ describe("model request context of an AgentSession", () => {
 		expect(gate.attempts.length).toBeGreaterThan(0);
 		expect(new Set(gate.attempts.map(attempt => attempt.scope?.purpose))).toEqual(new Set(["compaction"]));
 		expect(gate.attempts.every(attempt => attempt.scope?.rootSessionId === sessionIdOf(session))).toBe(true);
+	});
+
+	it("declares the compaction purpose for the native remote compaction request, which does not use the side stream", async () => {
+		authStorage.keys.setRuntime("openai", "test-key");
+		const bundled = modelRegistry
+			.getAll("chat")
+			.filter(candidate => candidate.provider === "openai" && candidate.api === "openai-responses")
+			.sort((a, b) => a.id.localeCompare(b.id))[0];
+		if (!bundled) throw new Error("Expected a bundled openai-responses model in the catalog");
+		// Catalog identity and compat are kept; only the endpoint is replaced by a loopback address nothing listens on.
+		const remoteModel: Model<Api> = { ...bundled, baseUrl: "http://127.0.0.1:1/v1" };
+		const fetched: Array<{ url: string; sessionId: string | undefined; purpose: string | undefined }> = [];
+		vi.spyOn(globalThis, "fetch").mockImplementation(async input => {
+			const execution = getModelRequestExecution();
+			const scope = execution === undefined ? undefined : resolveModelRequestScope(execution);
+			fetched.push({
+				url: String(input instanceof Request ? input.url : input),
+				sessionId: scope?.sessionId,
+				purpose: scope?.purpose,
+			});
+			return new Response(JSON.stringify({ error: { message: "stubbed" } }), {
+				status: 400,
+				headers: { "content-type": "application/json" },
+			});
+		});
+		const session = await createSession({
+			agentId: ROOT_AGENT_ID,
+			model: remoteModel,
+			settings: Settings.isolated({ "compaction.keepRecentTokens": 1, "compaction.methodOrder": ["remote"] }),
+		});
+		await seedConversation(session);
+
+		// A manual /compact starts with no model-request context active, like a slash-command handler.
+		expect(getModelRequestExecution()).toBeUndefined();
+		await expect(session.compact(undefined, { suppressContinuation: true })).rejects.toThrow();
+
+		const remote = fetched.filter(request => request.url.startsWith("http://127.0.0.1:1/"));
+		expect(remote.length).toBeGreaterThan(0);
+		expect(remote.map(request => [request.sessionId, request.purpose])).toEqual(
+			remote.map(() => [sessionIdOf(session), "compaction"]),
+		);
 	});
 
 	it("declares the side-channel purpose for an ephemeral side turn", async () => {

@@ -60,7 +60,6 @@ import type {
 	ProviderSessionState,
 } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
-import { runWithModelRequestPurpose } from "@oh-my-pi/pi-ai/model-request-execution";
 import { resolvePromptCacheLookback } from "@oh-my-pi/pi-catalog/compat/prompt-cache-lookback";
 import { preferredDialect } from "@oh-my-pi/pi-catalog/identity";
 import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
@@ -403,6 +402,12 @@ export interface SessionMaintenanceHost {
 	modelRegistry: ModelRegistry;
 	extensionRunner: ExtensionRunner | undefined;
 	sideStreamFn: StreamFn;
+	/**
+	 * Run `fn` under the owning session's request context declared as compaction. Compaction can start from a
+	 * command, a timer or the loop, so it cannot rely on whichever context happens to be active; the remote
+	 * (V2/V1 native) compaction requests do not go through `sideStreamFn` and are covered only by this.
+	 */
+	runInCompactionContext<T>(fn: () => T): T;
 	providerSessionState: Map<string, ProviderSessionState>;
 	/** Live `providers.openaiWebsockets` hint for provider calls. */
 	preferWebsockets(): boolean | undefined;
@@ -506,11 +511,10 @@ export interface SessionMaintenanceHost {
 	abortHandoff(): void;
 }
 
-/** `compact` with the requests it makes declared as compaction (a no-op outside a session context). */
-const compactAsCompaction: typeof compact = (...args) => runWithModelRequestPurpose("compaction", () => compact(...args));
-
 /** Owns compaction, pruning, shake, promotion, and automatic context maintenance. */
 export class SessionMaintenance {
+	/** The engine's `compact`, with every request it makes (summary and remote native) attributed to compaction. */
+	readonly #compact: typeof compact = (...args) => this.#host.runInCompactionContext(() => compact(...args));
 	#compactionAbortController: AbortController | undefined;
 	/** Resolves after an active manual compaction has reconnected the agent subscription. */
 	#manualCompactionCleanup: Promise<void> | undefined;
@@ -3479,7 +3483,7 @@ export class SessionMaintenance {
 			}
 
 			try {
-				return await compact(
+				return await this.#compact(
 					this.#host.obfuscatePreparationForProvider(preparation),
 					candidate,
 					this.#host.modelRegistry.resolver(candidate, this.#host.sessionId()),
@@ -4916,7 +4920,7 @@ export class SessionMaintenance {
 					let attempt = 0;
 					while (true) {
 						try {
-							compactResult = await compactAsCompaction(
+							compactResult = await this.#compact(
 								this.#host.obfuscatePreparationForProvider(preparation),
 								candidate,
 								this.#host.modelRegistry.resolver(candidate, this.#host.sessionId()),

@@ -2281,6 +2281,7 @@ export class AgentSession implements SettingsScope {
 			modelRegistry: this.#modelRegistry,
 			extensionRunner: this.#extensionRunner,
 			sideStreamFn: this.#sideStreamFor("compaction"),
+			runInCompactionContext: fn => this.runInModelRequestContext(fn, "compaction"),
 			providerSessionState: this.#providerSessionState,
 			preferWebsockets: () => this.preferWebsockets,
 			model: () => this.model,
