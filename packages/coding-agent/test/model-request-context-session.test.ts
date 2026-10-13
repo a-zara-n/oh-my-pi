@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as path from "node:path";
 import {
 	type Api,
@@ -8,78 +8,51 @@ import {
 	type SimpleStreamOptions,
 	streamSimple,
 } from "@oh-my-pi/pi-ai";
-import {
-	authorizeModelRequest,
-	getModelRequestExecution,
-	resolveModelRequestScope,
-} from "@oh-my-pi/pi-ai/model-request-execution";
-import type { ModelRequestAttempt } from "@oh-my-pi/pi-ai/model-request-gate";
+import { getModelRequestExecution, resolveModelRequestScope } from "@oh-my-pi/pi-ai/model-request-execution";
+import type { ModelRequestAgent, ModelRequestPurpose } from "@oh-my-pi/pi-ai/model-request-gate";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { loadMnemopiConfig } from "@oh-my-pi/pi-coding-agent/mnemopi/config";
 import { loadMnemopi, loadMnemopiCore, MnemopiSessionState } from "@oh-my-pi/pi-coding-agent/mnemopi/state";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
-import { createAgentSession } from "@oh-my-pi/pi-coding-agent/sdk";
+import { createAgentSession, type ExtensionFactory } from "@oh-my-pi/pi-coding-agent/sdk";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import type { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import type { ModelRequestRootAssignment } from "@oh-my-pi/pi-coding-agent/session/model-request-context";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
-import { type FixtureGate, installFixtureGate } from "../../ai/test/helpers/model-request-gate-fixture";
 import { createAssistantMessage, createInMemoryAuthStorage } from "./helpers/agent-session-setup";
 import { assistantMsg, userMsg } from "./utilities";
 
 const API = "model-request-context-test-api";
 const PROVIDER = "model-request-context-test-provider";
 const MODEL_ID = "model-request-context-test-model";
-const SOURCE_ID = "model-request-context-test";
 const ROOT_AGENT_ID = "RootAgent";
 
 /**
- * A provider whose requests go through the same per-attempt gate call a real transport makes, so what the gate
- * observes is what a provider request issued from that call site would present.
+ * What the model-request context looks like from inside a provider's own request callback, i.e. the stack a real
+ * transport would run on. It is read through the public context API; no gate is involved. This layer installs no
+ * per-attempt hook, so these observations show which context a request is issued under, not that a gate saw it.
  */
-function fakeProviderStream(model: Model<Api>, _context: Context, options?: SimpleStreamOptions): AssistantMessageEventStream {
-	const stream = new AssistantMessageEventStream();
-	const message: AssistantMessage = {
-		...createAssistantMessage("ok"),
-		api: model.api,
-		provider: model.provider,
-		model: model.id,
-	};
-	void (async () => {
-		try {
-			await authorizeModelRequest({
-				requestId: Bun.randomUUIDv7(),
-				reason: "first",
-				kind: "chat",
-				model: { provider: model.provider, id: model.id, api: model.api },
-				wire: undefined,
-				signal: options?.signal,
-			});
-		} catch (error) {
-			stream.push({
-				type: "error",
-				reason: "error",
-				error: { ...message, stopReason: "error", errorMessage: error instanceof Error ? error.message : String(error) },
-			});
-			return;
-		}
-		stream.push({ type: "start", partial: message });
-		stream.push({ type: "done", reason: "stop", message });
-	})();
-	return stream;
+interface ObservedRequest {
+	readonly context: "session" | "none";
+	readonly sessionId?: string;
+	readonly rootSessionId?: string;
+	readonly purpose?: ModelRequestPurpose;
+	readonly agent?: ModelRequestAgent;
 }
 
-/** What a gate sees of one attempt that a consumer attributes spend or policy by. */
-function seenBy(attempt: ModelRequestAttempt) {
+function observeRequestContext(): ObservedRequest {
+	const execution = getModelRequestExecution();
+	if (execution === undefined) return { context: "none" };
+	const scope = resolveModelRequestScope(execution);
 	return {
-		origin: attempt.origin,
-		sessionId: attempt.scope?.sessionId,
-		rootSessionId: attempt.scope?.rootSessionId,
-		purpose: attempt.scope?.purpose,
-		agent: attempt.scope?.agent,
+		context: "session",
+		sessionId: scope.sessionId,
+		rootSessionId: scope.rootSessionId,
+		purpose: scope.purpose,
+		agent: scope.agent,
 	};
 }
 
@@ -88,56 +61,63 @@ function sessionIdOf(session: AgentSession): string {
 }
 
 describe("model request context of an AgentSession", () => {
-	let gate: FixtureGate;
 	let tempDir: TempDir;
 	let authStorage: AuthStorage;
 	let modelRegistry: ModelRegistry;
-	let model: Model<Api>;
 	const sessions: AgentSession[] = [];
+	const observed: ObservedRequest[] = [];
 
-	beforeAll(() => {
-		gate = installFixtureGate();
-	});
+	/**
+	 * The provider is registered the way an SDK embedder registers one: through an inline extension. A provider added
+	 * straight to the registry before the session exists would be dropped when `createAgentSession` syncs the
+	 * registry with the active extensions.
+	 */
+	const providerExtension: ExtensionFactory = pi => {
+		pi.registerProvider(PROVIDER, {
+			baseUrl: "http://127.0.0.1:1/v1",
+			apiKey: "test-key",
+			api: API,
+			streamSimple: (model: Model<Api>, _context: Context, _options?: SimpleStreamOptions) => {
+				observed.push(observeRequestContext());
+				const stream = new AssistantMessageEventStream();
+				const message: AssistantMessage = {
+					...createAssistantMessage("ok"),
+					api: model.api,
+					provider: model.provider,
+					model: model.id,
+				};
+				stream.push({ type: "start", partial: message });
+				stream.push({ type: "done", reason: "stop", message });
+				return stream;
+			},
+			models: [
+				{
+					id: MODEL_ID,
+					name: "Model request context test model",
+					reasoning: false,
+					input: ["text"],
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+					contextWindow: 128_000,
+					maxTokens: 8192,
+				},
+			],
+		});
+	};
 
 	beforeEach(() => {
-		gate.reset();
+		observed.length = 0;
 		tempDir = TempDir.createSync("@pi-model-request-context-");
 		authStorage = createInMemoryAuthStorage();
 		authStorage.keys.setRuntime(PROVIDER, "test-key");
 		modelRegistry = new ModelRegistry(authStorage, path.join(tempDir.path(), "models.yml"));
-		modelRegistry.registerProvider(
-			PROVIDER,
-			{
-				baseUrl: "http://127.0.0.1:1/v1",
-				apiKey: "test-key",
-				api: API,
-				streamSimple: fakeProviderStream,
-				models: [
-					{
-						id: MODEL_ID,
-						name: "Model request context test model",
-						reasoning: false,
-						input: ["text"],
-						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-						contextWindow: 128_000,
-						maxTokens: 8192,
-					},
-				],
-			},
-			SOURCE_ID,
-		);
-		const registered = modelRegistry.find(PROVIDER, MODEL_ID);
-		if (!registered) throw new Error("Expected the fake provider model to be registered");
-		model = registered;
 	});
 
 	afterEach(async () => {
 		vi.restoreAllMocks();
 		for (const session of sessions.splice(0)) await session.dispose();
-		modelRegistry.clearSourceRegistrations(SOURCE_ID);
+		modelRegistry.clearSourceRegistrations("<inline-0>");
 		authStorage.close();
 		tempDir.removeSync();
-		gate.reset();
 	});
 
 	async function createSession(init: {
@@ -147,6 +127,8 @@ describe("model request context of an AgentSession", () => {
 		settings?: Settings;
 		model?: Model<Api>;
 	}): Promise<AgentSession> {
+		const settings = init.settings ?? Settings.isolated({ "compaction.enabled": false });
+		settings.setModelRole("default", `${PROVIDER}/${MODEL_ID}`);
 		const { session } = await createAgentSession({
 			cwd: tempDir.path(),
 			agentDir: tempDir.path(),
@@ -154,8 +136,9 @@ describe("model request context of an AgentSession", () => {
 			agentRegistry: new AgentRegistry(),
 			authStorage,
 			modelRegistry,
-			settings: init.settings ?? Settings.isolated({ "compaction.enabled": false }),
-			model: init.model ?? model,
+			settings,
+			model: init.model,
+			extensions: [providerExtension],
 			disableExtensionDiscovery: true,
 			skills: [],
 			contextFiles: [],
@@ -192,17 +175,16 @@ describe("model request context of an AgentSession", () => {
 		await session.prompt("hello");
 		await session.waitForIdle();
 
-		const attempts = gate.attempts.map(seenBy);
-		expect(attempts[0]).toEqual({
-			origin: "session",
+		expect(observed[0]).toEqual({
+			context: "session",
 			sessionId: sessionIdOf(session),
 			rootSessionId: sessionIdOf(session),
 			purpose: "main",
 			agent: { kind: "main", id: ROOT_AGENT_ID, name: "main", depth: 0 },
 		});
-		expect(attempts.every(attempt => attempt.origin === "session" && attempt.rootSessionId === sessionIdOf(session))).toBe(
-			true,
-		);
+		expect(
+			observed.every(request => request.context === "session" && request.rootSessionId === sessionIdOf(session)),
+		).toBe(true);
 	});
 
 	it("attributes a child's requests to its own session and to the root its spawner handed over", async () => {
@@ -217,8 +199,8 @@ describe("model request context of an AgentSession", () => {
 		await child.waitForIdle();
 
 		expect(sessionIdOf(child)).not.toBe(sessionIdOf(parent));
-		expect(seenBy(gate.attempts[0]!)).toMatchObject({
-			origin: "session",
+		expect(observed[0]).toMatchObject({
+			context: "session",
 			sessionId: sessionIdOf(child),
 			rootSessionId: sessionIdOf(parent),
 			purpose: "subagent",
@@ -238,7 +220,7 @@ describe("model request context of an AgentSession", () => {
 		await session.waitForIdle();
 
 		expect(freshId).not.toBe(previousId);
-		const requests = gate.attempts.filter(attempt => attempt.scope?.purpose === "main").map(seenBy);
+		const requests = observed.filter(request => request.purpose === "main");
 		expect(requests.map(request => [request.sessionId, request.rootSessionId])).toEqual([
 			[previousId, previousId],
 			[freshId, freshId],
@@ -253,8 +235,8 @@ describe("model request context of an AgentSession", () => {
 		await orphan.prompt("work");
 		await orphan.waitForIdle();
 
-		expect(seenBy(gate.attempts[0]!)).toMatchObject({
-			origin: "session",
+		expect(observed[0]).toMatchObject({
+			context: "session",
 			sessionId: sessionIdOf(orphan),
 			rootSessionId: undefined,
 		});
@@ -266,10 +248,10 @@ describe("model request context of an AgentSession", () => {
 
 		await session.generateTitle("Fix the failing login redirect in the auth middleware");
 
-		expect(gate.attempts.length).toBeGreaterThan(0);
-		expect(gate.attempts.map(seenBy)).toEqual(
-			gate.attempts.map(() => ({
-				origin: "session",
+		expect(observed.length).toBeGreaterThan(0);
+		expect(observed).toEqual(
+			observed.map(() => ({
+				context: "session",
 				sessionId: sessionIdOf(session),
 				rootSessionId: sessionIdOf(session),
 				purpose: "title",
@@ -287,9 +269,9 @@ describe("model request context of an AgentSession", () => {
 
 		await session.compact(undefined, { suppressContinuation: true });
 
-		expect(gate.attempts.length).toBeGreaterThan(0);
-		expect(new Set(gate.attempts.map(attempt => attempt.scope?.purpose))).toEqual(new Set(["compaction"]));
-		expect(gate.attempts.every(attempt => attempt.scope?.rootSessionId === sessionIdOf(session))).toBe(true);
+		expect(observed.length).toBeGreaterThan(0);
+		expect(new Set(observed.map(request => request.purpose))).toEqual(new Set(["compaction"]));
+		expect(observed.every(request => request.rootSessionId === sessionIdOf(session))).toBe(true);
 	});
 
 	it("declares the compaction purpose for the native remote compaction request, which does not use the side stream", async () => {
@@ -341,13 +323,13 @@ describe("model request context of an AgentSession", () => {
 		const session = await createSession({ agentId: ROOT_AGENT_ID });
 		await session.prompt("hello");
 		await session.waitForIdle();
-		gate.reset();
+		observed.length = 0;
 
 		await session.runEphemeralTurn({ promptText: "Where are we?" });
 
-		expect(gate.attempts.map(seenBy)).toEqual([
+		expect(observed).toEqual([
 			{
-				origin: "session",
+				context: "session",
 				sessionId: sessionIdOf(session),
 				rootSessionId: sessionIdOf(session),
 				purpose: "side-channel",
@@ -365,9 +347,9 @@ describe("model request context of an AgentSession", () => {
 
 		await advisor.prompt("review the change");
 
-		expect(gate.attempts.map(seenBy)).toEqual([
+		expect(observed).toEqual([
 			{
-				origin: "session",
+				context: "session",
 				sessionId: sessionIdOf(session),
 				rootSessionId: sessionIdOf(session),
 				purpose: "advisor",
@@ -379,6 +361,9 @@ describe("model request context of an AgentSession", () => {
 	it("declares the memory purpose for an auto-learn capture launched from the session", async () => {
 		const session = await createSession({ agentId: ROOT_AGENT_ID });
 
+		const model = session.model;
+		if (!model) throw new Error("Expected the session to have a model");
+
 		await session.runAutolearnCapture(async () => {
 			await streamSimple(
 				model,
@@ -387,9 +372,9 @@ describe("model request context of an AgentSession", () => {
 			).result();
 		});
 
-		expect(gate.attempts.map(seenBy)).toEqual([
+		expect(observed).toEqual([
 			{
-				origin: "session",
+				context: "session",
 				sessionId: sessionIdOf(session),
 				rootSessionId: sessionIdOf(session),
 				purpose: "memory",
@@ -397,6 +382,7 @@ describe("model request context of an AgentSession", () => {
 			},
 		]);
 	});
+
 	it("runs a memory listener attached with no session context active (as /memory reset does) under the session", async () => {
 		const session = await createSession({ agentId: ROOT_AGENT_ID });
 		const hookRuns: Array<{ hook: string; sessionId: string | undefined; purpose: string | undefined }> = [];
