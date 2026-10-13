@@ -894,7 +894,10 @@ export class CommandController {
 
 		if (action === "reset" || action === "clear") {
 			try {
-				await backend.clear(agentDir, this.ctx.sessionManager.getCwd(), this.ctx.session);
+				await this.ctx.session.runInModelRequestContext(
+					() => backend.clear(agentDir, this.ctx.sessionManager.getCwd(), this.ctx.session),
+					"memory",
+				);
 				await this.ctx.session.refreshBaseSystemPrompt();
 				this.ctx.showStatus("Memory data cleared and system prompt refreshed.");
 			} catch (error) {
@@ -905,7 +908,10 @@ export class CommandController {
 
 		if (action === "enqueue" || action === "rebuild") {
 			try {
-				await backend.enqueue(agentDir, this.ctx.sessionManager.getCwd(), this.ctx.session);
+				await this.ctx.session.runInModelRequestContext(
+					() => backend.enqueue(agentDir, this.ctx.sessionManager.getCwd(), this.ctx.session),
+					"memory",
+				);
 				this.ctx.showStatus("Memory consolidation enqueued.");
 			} catch (error) {
 				this.ctx.showError(`Memory enqueue failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -932,7 +938,10 @@ export class CommandController {
 
 		if (action === "sync") {
 			try {
-				await backend.enqueue(agentDir, this.ctx.sessionManager.getCwd(), this.ctx.session);
+				await this.ctx.session.runInModelRequestContext(
+					() => backend.enqueue(agentDir, this.ctx.sessionManager.getCwd(), this.ctx.session),
+					"memory",
+				);
 				this.ctx.showStatus("Memory consolidation ran.");
 			} catch (error) {
 				this.ctx.showError(`Memory sync failed: ${error instanceof Error ? error.message : String(error)}`);

@@ -60,7 +60,8 @@ describe("sharpshooter memory backend", () => {
 	it("dispatches ACP queue and sync commands to backend hooks", async () => {
 		const cwd = await makeTempDir("sharpshooter-acp-project");
 		const settings = Settings.isolated({ "memory.backend": "sharpshooter" });
-		const session = { settings } as AgentSession;
+		// A stub session has no request context: the command runs its work as-is.
+		const session = { settings, runInModelRequestContext: (fn: () => unknown) => fn() } as AgentSession;
 		const output: string[] = [];
 		const queuePreview = spyOn(sharpshooterBackend, "queuePreview").mockResolvedValue("Pending delta");
 		const enqueue = spyOn(sharpshooterBackend, "enqueue").mockResolvedValue(undefined);

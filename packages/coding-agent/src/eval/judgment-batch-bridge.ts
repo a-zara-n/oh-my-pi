@@ -17,6 +17,7 @@
  * session releases it.
  */
 import type { JudgmentState, Question } from "@oh-my-pi/pi-ai";
+import * as AIError from "@oh-my-pi/pi-ai/error";
 import { isRecord, logger, Snowflake } from "@oh-my-pi/pi-utils";
 import { formatCost } from "@oh-my-pi/pi-tui/overlays/agent-hub-renderer";
 import type { ChainJudge } from "../judgment";
@@ -169,6 +170,8 @@ export class JudgmentBatch {
 	#cursor = 0;
 	#failed = 0;
 	#cost = 0;
+	/** Message of the first gate denial; once set, no further item is sent. */
+	#denial: string | undefined;
 	#model: string | undefined;
 	#running = true;
 	#error: string | undefined;
@@ -364,9 +367,15 @@ export class JudgmentBatch {
 		const worker = async (): Promise<void> => {
 			while (next < this.#inputs.length) {
 				const input = this.#inputs[next++];
-				this.#settle(
-					signal.aborted ? { key: input.key, error: "cancelled" } : await this.#judgeItem(judge, input, signal),
-				);
+				// A gate denial is terminal for the whole batch: items not yet started are not sent, each would only be
+				// refused again.
+				if (this.#denial !== undefined) {
+					this.#settle({ key: input.key, error: this.#denial });
+				} else {
+					this.#settle(
+						signal.aborted ? { key: input.key, error: "cancelled" } : await this.#judgeItem(judge, input, signal),
+					);
+				}
 				await this.#reportProgress(reportProgress, false);
 			}
 		};
@@ -394,6 +403,11 @@ export class JudgmentBatch {
 				return { key: input.key, answers: result.answers, model: result.model };
 			} catch (error) {
 				lastError = error;
+				// A gate denial is not retried: replaying the chain would only be refused again.
+				if (AIError.isModelRequestDenied(error)) {
+					this.#denial = error instanceof Error ? error.message : String(error);
+					return { key: input.key, error: this.#denial };
+				}
 			} finally {
 				evalRequestSlots.release();
 			}

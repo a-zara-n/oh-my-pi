@@ -13,10 +13,15 @@ import type { ModelRequestAgent, ModelRequestPurpose } from "@oh-my-pi/pi-ai/mod
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { CommandController } from "@oh-my-pi/pi-coding-agent/modes/controllers/command-controller";
+import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
 import { loadMnemopiConfig } from "@oh-my-pi/pi-coding-agent/mnemopi/config";
 import { loadMnemopi, loadMnemopiCore, MnemopiSessionState } from "@oh-my-pi/pi-coding-agent/mnemopi/state";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import { createAgentSession, type ExtensionFactory } from "@oh-my-pi/pi-coding-agent/sdk";
+import * as consolidate from "@oh-my-pi/pi-coding-agent/sharpshooter/consolidate";
+import { BUILTIN_LIFECYCLE_SLASH_COMMANDS } from "@oh-my-pi/pi-coding-agent/slash-commands/builtin-lifecycle";
+import type { SlashCommandRuntime } from "@oh-my-pi/pi-coding-agent/slash-commands/types";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import type { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import type { ModelRequestRootAssignment } from "@oh-my-pi/pi-coding-agent/session/model-request-context";
@@ -417,5 +422,72 @@ describe("model request context of an AgentSession", () => {
 			{ hook: "recall", sessionId: sessionIdOf(session), purpose: "memory" },
 			{ hook: "retain", sessionId: sessionIdOf(session), purpose: "memory" },
 		]);
+	});
+	describe("/memory commands, which run with no session context active", () => {
+		/** A consolidation request as the model-request context sees it, in place of the real model call. */
+		function recordConsolidations(): ObservedRequest[] {
+			const seen: ObservedRequest[] = [];
+			vi.spyOn(consolidate, "runSharpshooterConsolidation").mockImplementation(async () => {
+				seen.push(observeRequestContext());
+				return { ran: false, reason: "not_due" };
+			});
+			return seen;
+		}
+
+		function expectedMemoryContext(session: AgentSession): ObservedRequest {
+			return {
+				context: "session",
+				sessionId: sessionIdOf(session),
+				rootSessionId: sessionIdOf(session),
+				purpose: "memory",
+				agent: { kind: "main", id: ROOT_AGENT_ID, name: "main", depth: 0 },
+			};
+		}
+
+		it("runs the interactive /memory sync and /memory rebuild consolidation under the session as memory work", async () => {
+			const session = await createSession({ agentId: ROOT_AGENT_ID });
+			const seen = recordConsolidations();
+			const showStatus = vi.fn();
+			const showError = vi.fn();
+			// The controller only reads the fields below for these actions; the rest of the TUI context is not needed.
+			const ctx = {
+				settings: Settings.isolated({ "memory.backend": "sharpshooter" }),
+				sessionManager: session.sessionManager,
+				session,
+				showStatus,
+				showError,
+			} as unknown as InteractiveModeContext;
+			const controller = new CommandController(ctx);
+
+			expect(getModelRequestExecution()).toBeUndefined();
+			await controller.handleMemoryCommand("/memory sync");
+			await controller.handleMemoryCommand("/memory rebuild");
+
+			expect(showError).not.toHaveBeenCalled();
+			expect(seen).toEqual([expectedMemoryContext(session), expectedMemoryContext(session)]);
+		});
+
+		it("runs the text-mode /memory sync and /memory enqueue consolidation under the session as memory work", async () => {
+			const session = await createSession({ agentId: ROOT_AGENT_ID });
+			const seen = recordConsolidations();
+			const memoryCommand = BUILTIN_LIFECYCLE_SLASH_COMMANDS.find(command => command.name === "memory");
+			if (!memoryCommand?.handle) throw new Error("Expected the /memory builtin to have a text-mode handler");
+			const runtime: SlashCommandRuntime = {
+				session,
+				sessionManager: session.sessionManager,
+				settings: Settings.isolated({ "memory.backend": "sharpshooter" }),
+				cwd: tempDir.path(),
+				output: () => {},
+				refreshCommands: () => {},
+				reloadPlugins: async () => {},
+			};
+
+			expect(getModelRequestExecution()).toBeUndefined();
+			for (const verb of ["sync", "enqueue"]) {
+				await memoryCommand.handle({ name: "memory", args: verb, text: `/memory ${verb}` }, runtime);
+			}
+
+			expect(seen).toEqual([expectedMemoryContext(session), expectedMemoryContext(session)]);
+		});
 	});
 });

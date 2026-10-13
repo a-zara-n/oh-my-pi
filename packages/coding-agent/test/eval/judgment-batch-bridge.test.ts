@@ -3,6 +3,7 @@ import * as path from "node:path";
 import * as vm from "node:vm";
 import type { Api, AssistantMessage, Model } from "@oh-my-pi/pi-ai";
 import * as ai from "@oh-my-pi/pi-ai";
+import * as AIError from "@oh-my-pi/pi-ai/error";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import { $ } from "bun";
 import { AsyncJobManager } from "../../src/async";
@@ -308,6 +309,63 @@ describe("judge_batch bridge", () => {
 		expect(item?.answers).toEqual({ tests: { type: "bool", bool: 1 } });
 		// Three off-format turns exhaust the first judgment; the retry answers on its first turn.
 		expect(attempts).toBe(4);
+	});
+
+	describe("a model request gate denial is terminal", () => {
+		const WORDING = "429 usage limit reached, try again";
+
+		/** Every item of a batch, waiting for the run to finish. */
+		async function drainAll(session: ToolSession, id: string, total: number): Promise<JudgmentBatchItem[]> {
+			const settled: JudgmentBatchItem[] = [];
+			while (settled.length < total) settled.push(...(await drain(session, id, 5_000)));
+			return settled;
+		}
+
+		it("does not retry the item or send the rest of the batch when a request is denied (thrown)", async () => {
+			const spy = vi
+				.spyOn(ai, "completeSimple")
+				.mockRejectedValue(new AIError.ModelRequestDeniedError("over-limit", WORDING));
+			const { session } = makeSession();
+			const created = await create(session, ["state-a", "state-b", "state-c"], { concurrency: 1 });
+
+			const settled = await drainAll(session, created.id, created.total);
+
+			// One question to the model, no retry, and the other items are refused without being sent.
+			expect(spy).toHaveBeenCalledTimes(1);
+			expect(settled.map(item => item.error)).toEqual([WORDING, WORDING, WORDING]);
+			expect((await status(session, created.id)).failed).toBe(3);
+		});
+
+		it("does not retry when the denial arrives as an error message flattened by the provider layer", async () => {
+			const flattened = await AIError.finalize(new AIError.ModelRequestDeniedError("over-limit", WORDING));
+			const spy = vi.spyOn(ai, "completeSimple").mockResolvedValue({
+				...reply(""),
+				content: [],
+				stopReason: "error",
+				errorMessage: flattened.message,
+				errorStatus: flattened.status,
+				errorId: flattened.id,
+			});
+			const { session } = makeSession();
+			const created = await create(session, ["state-a", "state-b"], { concurrency: 1 });
+
+			const settled = await drainAll(session, created.id, created.total);
+
+			expect(spy).toHaveBeenCalledTimes(1);
+			expect(settled.map(item => item.error)).toEqual([WORDING, WORDING]);
+		});
+
+		it("still retries the item for an ordinary failure with the same wording", async () => {
+			const spy = vi.spyOn(ai, "completeSimple").mockRejectedValue(new Error(WORDING));
+			const { session } = makeSession();
+			const created = await create(session, ["state-a"], { concurrency: 1 });
+
+			const settled = await drainAll(session, created.id, created.total);
+
+			// retries defaults to 1: the item is asked twice before it is recorded as failed.
+			expect(spy.mock.calls.length).toBeGreaterThanOrEqual(2);
+			expect(settled.map(item => item.error)).toEqual([`judgment: every judge candidate failed: ${WORDING}`]);
+		});
 	});
 
 	it("raises from drain only after the cursor is exhausted when min_ok is unmet", async () => {
