@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, expect, test } from "bun:test";
 import { buildModelRequestCoverage, MODEL_REQUEST_SITES } from "@oh-my-pi/pi-ai/model-request-coverage";
 import {
@@ -27,13 +28,41 @@ describe("coverage.complete is what a consumer of the inventory is allowed to re
 		expect(buildModelRequestCoverage("failed", covered).complete).toBe(false);
 	});
 
-	test("the inventory version is stable for one table and changes when a site's status changes", () => {
-		const before = [site("a", "uncovered"), site("b", "gated")];
-		const after = [site("a", "gated"), site("b", "gated")];
+	test("the inventory version is the manifest-pinned digest: an independent SHA-256 over the five fields in order, lowercase hex, sensitive to every field and to row order", () => {
+		// Independent of the implementation: the design's formula, spelled out with node:crypto.
+		const expectedOf = (rows: readonly ModelRequestCoverageSite[]): string => {
+			const hash = createHash("sha256");
+			for (const row of rows) {
+				hash.update([row.id, row.location, row.status, row.contextPropagation, row.reason].join("\u0000") + "\n");
+			}
+			return hash.digest("hex");
+		};
+		const table = (): ModelRequestCoverageSite[] => [
+			{ id: "a", location: "loc-a", status: "uncovered", contextPropagation: "inherited", reason: "no hook" },
+			{ id: "b", location: "loc-b", status: "gated", contextPropagation: "explicit-bind", reason: "" },
+		];
+		// A fresh array per call, so the implementation's per-array cache never answers for another table.
+		const versionOf = (rows: ModelRequestCoverageSite[]): string =>
+			buildModelRequestCoverage("passed", rows).inventoryVersion;
 
-		const first = buildModelRequestCoverage("passed", before).inventoryVersion;
-		expect(buildModelRequestCoverage("passed", before).inventoryVersion).toBe(first);
-		expect(buildModelRequestCoverage("passed", after).inventoryVersion).not.toBe(first);
+		const base = versionOf(table());
+		expect(base).toMatch(/^[0-9a-f]{64}$/);
+		expect(base).toBe(expectedOf(table()));
+
+		const changed: Array<[string, (rows: ModelRequestCoverageSite[]) => ModelRequestCoverageSite[]]> = [
+			["id", rows => [{ ...rows[0], id: "a2" }, rows[1]]],
+			["location", rows => [{ ...rows[0], location: "loc-a2" }, rows[1]]],
+			["status", rows => [{ ...rows[0], status: "gated" }, rows[1]]],
+			["contextPropagation", rows => [{ ...rows[0], contextPropagation: "not-carried" }, rows[1]]],
+			["reason", rows => [{ ...rows[0], reason: "other" }, rows[1]]],
+			["row order", rows => [rows[1], rows[0]]],
+		];
+		for (const [field, mutate] of changed) {
+			const rows = mutate(table());
+			const version = versionOf(rows);
+			expect([field, version === base]).toEqual([field, false]);
+			expect([field, version]).toEqual([field, expectedOf(rows)]);
+		}
 	});
 });
 

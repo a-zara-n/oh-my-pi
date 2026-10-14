@@ -5013,6 +5013,119 @@ describe("advisor", () => {
 			expect(failures).toHaveLength(1);
 		});
 
+		// A gate's deny.message is free text. When it reads like a provider content filter, the denial must still
+		// end the turn: the structured terminal bit decides, so the batch is neither resent without reasoning nor
+		// handed to the host's model fallback. The paired case with identical wording but no denial keeps both.
+		const CONTENT_FILTER_WORDING = "content_filter: response blocked";
+		const contentFilterMessages = [
+			{
+				role: "assistant",
+				content: [
+					{ type: "thinking", thinking: "private reasoning" },
+					{ type: "text", text: "answer" },
+				],
+				timestamp: 1,
+			} as AgentMessage,
+		];
+		function createContentFilterAgent(
+			promptInputs: Array<string | AgentMessage[]>,
+			failure: { denied: boolean; thrown: boolean },
+		): AdvisorAgent {
+			const state: { messages: AgentMessage[]; error?: string } = { messages: [] };
+			return {
+				prompt: async input => {
+					promptInputs.push(input);
+					if (failure.thrown) throw new AIError.ModelRequestDeniedError("denied", CONTENT_FILTER_WORDING);
+					state.error = CONTENT_FILTER_WORDING;
+					const failedTurn: AssistantMessage = {
+						role: "assistant",
+						content: [],
+						api: "openai-responses",
+						provider: "openai",
+						model: "content-filter-advisor",
+						usage: {
+							input: 0,
+							output: 0,
+							cacheRead: 0,
+							cacheWrite: 0,
+							totalTokens: 0,
+							cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+						},
+						stopReason: "error",
+						...(failure.denied ? { errorId: AIError.create(AIError.Flag.ModelRequestDenied) } : {}),
+						errorMessage: CONTENT_FILTER_WORDING,
+						timestamp: promptInputs.length + 1,
+					};
+					state.messages.push(failedTurn);
+				},
+				abort: () => {},
+				reset: () => {},
+				rollbackTo: count => {
+					state.messages.length = count;
+					state.error = undefined;
+				},
+				state,
+			};
+		}
+
+		for (const shape of [
+			{ label: "a denial message flattened through agent state", denied: true, thrown: false },
+			{ label: "a denial thrown by the gate", denied: true, thrown: true },
+		]) {
+			it(`ends the turn on ${shape.label} worded like a content filter, with no resend and no model fallback`, async () => {
+				const promptInputs: Array<string | AgentMessage[]> = [];
+				const failures: unknown[] = [];
+				let fallbackCalls = 0;
+				const runtime = new AdvisorRuntime(
+					createContentFilterAgent(promptInputs, shape),
+					{
+						snapshotMessages: () => contentFilterMessages,
+						notifyFailure: error => failures.push(error),
+						onTurnError: async () => {
+							fallbackCalls++;
+							return true;
+						},
+					},
+					0,
+				);
+
+				runtime.onTurnEnd(contentFilterMessages);
+				await settleUntil(() => failures.length === 1 && runtime.backlog === 0);
+
+				expect(promptInputs).toHaveLength(1);
+				expect(fallbackCalls).toBe(0);
+				expect(failures).toHaveLength(1);
+				expect(AIError.isModelRequestDenied(failures[0])).toBe(true);
+			});
+		}
+
+		it("still strips reasoning and asks for a model fallback on an ordinary failure with the same wording", async () => {
+			const promptInputs: Array<string | AgentMessage[]> = [];
+			const failures: unknown[] = [];
+			let fallbackCalls = 0;
+			const runtime = new AdvisorRuntime(
+				createContentFilterAgent(promptInputs, { denied: false, thrown: false }),
+				{
+					snapshotMessages: () => contentFilterMessages,
+					notifyFailure: error => failures.push(error),
+					onTurnError: async () => {
+						fallbackCalls++;
+						return false;
+					},
+				},
+				0,
+			);
+
+			runtime.onTurnEnd(contentFilterMessages);
+			await settleUntil(() => failures.length === 1 && runtime.backlog === 0);
+
+			expect(promptInputs).toHaveLength(2);
+			expect(promptText(promptInputs[0])).toContain("private reasoning");
+			expect(promptText(promptInputs[1])).not.toContain("private reasoning");
+			expect(fallbackCalls).toBe(1);
+			expect(AIError.isModelRequestDenied(failures[0])).toBe(false);
+		});
+
 		it("asks the host to switch models when a refusal outlives the stripped resend", async () => {
 			const promptInputs: Array<string | AgentMessage[]> = [];
 			const failures: unknown[] = [];

@@ -1375,8 +1375,12 @@ export class AdvisorRuntime {
 					// Agent.#runLoop catches provider/stream failures internally and
 					// resolves prompt() cleanly with stopReason: "error". Treat that
 					// as a failed turn so endpoint rejections trip the retry path.
+					// Flattening the message text into an Error drops the structured
+					// errorId, so a gate denial must carry its bit across: the catch
+					// below, and every host hook it calls, decide on the bit and never
+					// on the denial's wording.
 					const promptError = this.agent.state.error;
-					if (promptError) throw new Error(promptError);
+					if (promptError) throw flattenPromptError(promptError, this.#terminalAssistantFailure(messageSnapshot));
 					// A content-less stop is a deliberate silent review — the documented
 					// verifier behavior ("prefer silence when the agent is on track") — and
 					// completes the turn. Sessions can legitimately have nothing to advise
@@ -1422,14 +1426,18 @@ export class AdvisorRuntime {
 					const rawErrorId = AIError.classify(err);
 					const terminalFailureId =
 						terminalFailure === undefined ? undefined : AIError.classifyMessage(terminalFailure);
-					// A gate denial is terminal: no model-fallback hook, no retry of the bounded batch.
+					// A gate denial is terminal: no refusal strip-and-resend, no model-fallback hook,
+					// no retry of the bounded batch. It outranks every text-derived recovery class
+					// below, because a denial message may legitimately read like a content filter
+					// or a quota limit.
 					const gateDenied =
 						AIError.isModelRequestDenied(err) ||
 						(terminalFailure !== undefined && AIError.isModelRequestDenied(terminalFailure));
 					const classifierRefusal =
-						(terminalFailure !== undefined && isClassifierRefusal(terminalFailure)) ||
-						(!AIError.is(rawErrorId, AIError.Flag.AccountPolicy) &&
-							AIError.is(rawErrorId, AIError.Flag.ContentBlocked));
+						!gateDenied &&
+						((terminalFailure !== undefined && isClassifierRefusal(terminalFailure)) ||
+							(!AIError.is(rawErrorId, AIError.Flag.AccountPolicy) &&
+								AIError.is(rawErrorId, AIError.Flag.ContentBlocked)));
 					const contextOverflow =
 						(terminalFailureId !== undefined && AIError.is(terminalFailureId, AIError.Flag.ContextOverflow)) ||
 						AIError.is(rawErrorId, AIError.Flag.ContextOverflow);
@@ -1569,7 +1577,7 @@ export class AdvisorRuntime {
 						});
 						continue;
 					}
-					if (AIError.isUsageLimit(err)) {
+					if (!gateDenied && AIError.isUsageLimit(err)) {
 						// Host recovery (credential switch / fallback chain) declined:
 						// pause on the quota latch instead of burning retries — provider
 						// quota windows (5h/7d) outlast any retry budget. The batch is
@@ -1691,6 +1699,18 @@ export class AdvisorRuntime {
 			}
 		}
 	}
+}
+
+/**
+ * Rebuilds the thrown Error for a failed advisor prompt from `Agent.state.error` text. The text alone
+ * would lose the structured errorId, so a gate denial's terminal bit is copied from the failed
+ * assistant message; every other failure stays a plain Error classified from its text.
+ */
+function flattenPromptError(promptError: string, failure: AssistantMessage | undefined): Error {
+	const error = new Error(promptError);
+	return failure !== undefined && AIError.isModelRequestDenied(failure) && failure.errorId !== undefined
+		? AIError.attach(error, failure.errorId)
+		: error;
 }
 
 /** Mirrors turn recovery's refusal classification without treating account eligibility as a model refusal. */

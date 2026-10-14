@@ -12,6 +12,7 @@
 ### Changed
 
 - A model request gate denial now stops turn auto-retry, model fallback, judge-candidate fallback and compaction fallback instead of retrying.
+- A gate denial of an advisor turn ends that review whatever its wording says: a denial message that reads like a provider content filter no longer triggers the reasoning-stripped resend or the advisor model fallback, and the structured denial is kept when the advisor failure is reported.
 
 ## [18.8.8] - 2026-10-10
 

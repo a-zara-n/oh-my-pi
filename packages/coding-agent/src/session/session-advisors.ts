@@ -2079,6 +2079,16 @@ export class SessionAdvisors {
 		signal: AbortSignal,
 	): Promise<boolean> {
 		if (error instanceof AdvisorOutputQuarantinedError) return false;
+		// A gate denial is terminal whatever its wording says: no credential rotation, no model-fallback switch.
+		// Decided on the structured denial bit of the error or of any failed assistant message, never on text.
+		if (
+			AIError.isModelRequestDenied(error) ||
+			failedMessages.some(
+				message => message.role === "assistant" && message.stopReason === "error" && AIError.isModelRequestDenied(message),
+			)
+		) {
+			return false;
+		}
 
 		const failedMessage = failedMessages.findLast(
 			(message): message is AssistantMessage => message.role === "assistant",

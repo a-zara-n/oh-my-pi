@@ -29,7 +29,12 @@ import { setBedrockProviderModule, setCursorProviderModule } from "@oh-my-pi/pi-
 import { gateFetch } from "@oh-my-pi/pi-ai/utils/model-request-fetch";
 import { transportFetch } from "@oh-my-pi/pi-ai/utils/transport-fetch";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
-import { installFixtureGate, type RecordingLease, recordingLease } from "./helpers/model-request-gate-fixture";
+import {
+	type FixtureGateHandler,
+	installFixtureGate,
+	type RecordingLease,
+	recordingLease,
+} from "./helpers/model-request-gate-fixture";
 import {
 	errorReply,
 	helloContext,
@@ -55,6 +60,14 @@ const gate = installFixtureGate();
 const SECRET = "sk-loopback-secret-0123456789";
 const REPLY_TEXT = "hello from the loopback";
 const APIS: readonly LoopbackApi[] = ["anthropic-messages", "openai-completions", "openai-responses"];
+
+/** Answers a gate can give that break the ModelRequestGate contract; each must end as a `gate-error` denial. */
+const OUT_OF_CONTRACT_ANSWERS: ReadonlyArray<readonly [string, () => Promise<unknown>]> = [
+	["throws", () => Promise.reject(new Error("db locked"))],
+	["resolves an unknown decision type", () => Promise.resolve({ type: "maybe" })],
+	["allows without a usable lease", () => Promise.resolve({ type: "allow", lease: { beginSend() {} } })],
+	["denies without a code", () => Promise.resolve({ type: "deny", message: "no" })],
+];
 
 interface WireOptions {
 	readonly apiKey: string;
@@ -257,6 +270,24 @@ for (const api of APIS) {
 					// Terminal: the denial is not retried, rotated or resent.
 					expect(gate.attempts).toHaveLength(1);
 				});
+
+				test.each(OUT_OF_CONTRACT_ANSWERS)(
+					"a gate that %s: nothing reaches the loopback, the caller gets a terminal gate-error denial, and the gate is asked exactly once",
+					async (_name, answer) => {
+						const loopback = serve(scripted(textReplyFor(api, REPLY_TEXT)));
+						// Intentional: models an out-of-contract gate (the types cannot express a lying implementation).
+						const lying: unknown = answer;
+						gate.setHandler(lying as FixtureGateHandler);
+
+						const result = await entry.run(loopbackModel(api, loopback.origin), helloContext(), { apiKey: SECRET });
+
+						expect(loopback.requests).toHaveLength(0);
+						expect(isDenied(result)).toBe(true);
+						if (result.thrown instanceof AIError.ModelRequestDeniedError) expect(result.thrown.code).toBe("gate-error");
+						// Terminal: a gate failure is not retried or resent.
+						expect(gate.attempts).toHaveLength(1);
+					},
+				);
 
 				test("allow then the caller aborts before any response: the lease settles once as an aborted failure and nothing more is sent", async () => {
 					const release = Promise.withResolvers<void>();
