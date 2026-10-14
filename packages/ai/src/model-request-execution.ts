@@ -24,7 +24,7 @@ export {
 	runInModelRequestRetryChain,
 	runWithModelRequestLineage,
 } from "./model-request-lineage";
-export { authorizeUninstrumentedAttempt, gateFetch } from "./utils/model-request-fetch";
+export { auxiliaryFetch, authorizeUninstrumentedAttempt, gateFetch } from "./utils/model-request-fetch";
 export {
 	ModelRequestProcessClassError,
 	type ModelRequestAuthorizationInput,

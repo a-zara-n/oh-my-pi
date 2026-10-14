@@ -8,6 +8,10 @@ import type { Api, Model } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { runEvalCompletion, getCompletionHandle } from "@oh-my-pi/pi-coding-agent/eval/completion-bridge";
+import { runEvalWait } from "@oh-my-pi/pi-coding-agent/eval/handle-bridge";
+import { cfgRetryFallbackChains } from "@oh-my-pi/pi-coding-agent/session/settings";
+import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { generateCommitMessage } from "@oh-my-pi/pi-coding-agent/utils/commit-message-generator";
 import { installFixtureGate } from "../../ai/test/helpers/model-request-gate-fixture";
 import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
@@ -116,5 +120,54 @@ describe("commit message generation and the model-request gate", () => {
 		expect(message).toBeNull();
 		expect(seenModels).toHaveLength(0);
 		expect(gate.attempts.map(attempt => attempt.model.id)).toEqual([first.id]);
+	});
+});
+
+describe("eval completion and the model-request gate", () => {
+	/** A tool session whose registry has no key for `keyless` and the loopback key for every other model. */
+	function evalSession(models: Model<Api>[], keyless: string[]): ToolSession {
+		const settings = Settings.isolated({ "async.enabled": false, "task.isolation.enabled": false });
+		settings.setModelRole("smol", `${models[0].provider}/${models[0].id}`);
+		cfgRetryFallbackChains.set(settings, { smol: models.slice(1).map(model => `${model.provider}/${model.id}`) });
+		const keyOf = (model: Model<Api>) => (keyless.includes(model.id) ? undefined : "loopback-key");
+		const modelRegistry = {
+			getAvailable: () => models,
+			getApiKey: async (model: Model<Api>) => keyOf(model),
+			resolver: (model: Model<Api>) => async () => keyOf(model),
+		} as unknown as ModelRegistry;
+		return { cwd: process.cwd(), settings, modelRegistry, getActiveModelString: () => undefined } as unknown as ToolSession;
+	}
+
+	async function completeSmol(session: ToolSession): Promise<void> {
+		const handle = await runEvalCompletion({ prompt: "q", model: "smol" }, { session });
+		const waited = await runEvalWait({ items: [{ kind: "completion", id: handle.id }] }, { session });
+		expect(waited.items[0]?.status).toBe("completed");
+		expect(getCompletionHandle(handle.id)?.result?.text).toBe("fix: update a");
+	}
+
+	it("labels a candidate after a rejected one a model-fallback of the rejected attempt", async () => {
+		const first = chatModel("eval-first");
+		const second = chatModel("eval-second");
+		respond = model => (model === first.id ? rejected() : chatAnswer("fix: update a"));
+
+		await completeSmol(evalSession([first, second], []));
+
+		expect(gate.attempts.map(attempt => [attempt.reason, attempt.model.id])).toEqual([
+			["first", first.id],
+			["model-fallback", second.id],
+		]);
+		expect(gate.attempts[1].retryOf).toBe(gate.attempts[0].attemptId);
+	});
+
+	it("does not call a candidate model-fallback when the candidate before it was skipped for lack of a key", async () => {
+		const keyless = chatModel("eval-keyless");
+		const usable = chatModel("eval-usable");
+		respond = () => chatAnswer("fix: update a");
+
+		await completeSmol(evalSession([keyless, usable], [keyless.id]));
+
+		expect(seenModels).toEqual([usable.id]);
+		expect(gate.attempts.map(attempt => [attempt.reason, attempt.model.id])).toEqual([["first", usable.id]]);
+		expect(gate.attempts[0].retryOf).toBeUndefined();
 	});
 });

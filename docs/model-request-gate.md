@@ -95,7 +95,24 @@ reading at the protocol's terminal event, a moment before the transport reports 
 `observeChunk` or `settle` is logged and never replaces the request's own result. The body is only ever held in memory.
 
 `wire` is `undefined` when the body cannot be read without consuming or sending it (a stream, `FormData`, a `Request`
-that carries its own body); the gate decides what to do with it.
+that carries its own body). The core only reports that; it still asks the gate and sends what the gate permits (`pass`,
+or `allow` with a lease), so refusing an unreadable body is the gate's decision (`deny`, conventionally
+`transport-unsupported`). A gate whose `beginSend()` throws is a terminal `gate-error`: nothing is sent, the lease is
+settled as `not-sent`, and no retry layer replays it.
+
+The attempt's `model` is the model the request is addressed to, after the provider definition prepared it (a gateway
+route may rewrite the api and base URL), and its `baseUrl` is redacted like the wire url when it carries a credential.
+The remote summarizer endpoint is named as the base URL of its attempt.
+
+### Requests that are not model requests
+
+A provider receives one gated `options.fetch` for its inference request, but also needs a fetch for requests that are
+not model requests: OAuth and token exchange, credential and metadata lookups (Google ADC, GitLab direct access, Devin
+auth metadata, AWS STS/SSO/IMDS), version probes. They must not use it, or the gate would be shown credential request
+bodies and responses, count them as attempts, and a later real attempt would be labelled a retry of them. They use
+`auxiliaryFetch(options.fetch)`, which returns the same transport (proxy, CA, User-Agent, request recording) without
+the gate; a fetch that is not gated is returned unchanged. A gate denial raised by a lookup is never converted into a
+missing credential.
 
 ### Which kind of attempt
 
@@ -122,12 +139,15 @@ nested in another joins it, so a fallback walk's pending reason survives until t
 ### Transports the core cannot account for
 
 A registered extension provider, and the APIs that do not go through a fetch the core controls (`bedrock-converse-stream`,
-`cursor-agent`, `apple-foundation-models`, `factory-droid-agent`, `gitlab-duo-agent`), cannot be driven through a lease.
+`cursor-agent`, `apple-foundation-models`, `factory-droid-agent`, `gitlab-duo-agent`; including the direct
+`streamSimple` branch of `gitlab-duo-agent`), cannot be driven through a lease.
 The gate is asked once with `wire: undefined` and must answer `pass` or `deny`; an `allow` is released as `not-sent`
 and refused with `transport-unsupported` (a gate cannot permit what the core cannot account for). An on-device
 transport is exempt: `markModelRequestLocalStream(fn)` binds the exemption to that function (the local-inference
-transport), so registering another function under the same API name does not inherit it. The `openai-codex` WebSocket
-path does not call any hook yet.
+transport), so registering another function under the same API name does not inherit it. It is the function that is
+dispatched that must be declared: a local `streamSimple` next to a separately supplied `stream` is exempt for
+`streamSimple` only. The `openai-codex` WebSocket path (also taken by the v2 streaming compaction) does not call any
+hook yet.
 
 ## Denial is terminal
 
@@ -150,7 +170,9 @@ check; `packages/utils` (which cannot import pi-ai) uses the structural `retryab
 `context-inherited` only when a request from that site has been sent through the real code path to a loopback fake
 provider and the gate saw exactly the attempts the provider received (`packages/coding-agent/test/model-request-site-sends.test.ts`,
 the ai transport tests and the judge/recovery tests); the core does not check this, it is the operating rule for editing the
-table. The sites still uncovered are listed in the table with the reason, and the table is not complete.
+table. A site only partly verified stays uncovered with the unverified part in its reason (S-12 until the v2 streaming
+compaction, whose openai-codex branch sends over a WebSocket, is verified; S-14; S-17). The sites still uncovered are
+listed in the table with the reason, and the table is not complete.
 `inventoryVersion` is the hex SHA-256 over every site in table order, each contributing
 `id`, `location`, `status`, `contextPropagation` and `reason` (NUL-separated, one line per site). Editing any of those
 fields of any site, or adding/removing/reordering a site, changes it; `note` text outside `reason` and the table's
@@ -184,6 +206,7 @@ process), `model-request-denial-terminal.test.ts`, `packages/agent/test/agent-ru
 `extensibility/legacy-pi-session-model-request-root`, `cli/standalone-commands`, `judgment-chain-denial`,
 `turn-recovery-denial`, `model-request-site-sends`, `model-request-judge-attempts`, `model-request-recovery-attempts`,
 `model-request-fallback-walk`, `model-request-local-inference`; in packages/ai/test `model-request-transport-hook`,
+`model-request-attempt-contract`, `model-request-local-exemption`, `model-request-auxiliary-fetch`,
 `model-request-retry-reasons` and `packages/agent/test/compaction-remote-gate`. A gate registration cannot be undone, so tests share one fixture gate
 (`packages/ai/test/helpers/model-request-gate-fixture.ts`) that answers `pass` unless a test sets a handler. The
 browser tab Worker's tool-call binding has no test: its dispatch is only reachable through a real browser.

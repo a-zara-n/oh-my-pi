@@ -32,6 +32,7 @@ import { AssistantMessageEventStream } from "../utils/event-stream";
 import { extractGoogleValidationUrl, formatGoogleValidationRequiredMessage } from "../utils/google-validation";
 import type { RawHttpRequestDump } from "../utils/http-inspector";
 import { armPreResponseTimeout, getStreamFirstEventTimeoutMs, iterateWithIdleTimeout } from "../utils/idle-iterator";
+import { auxiliaryFetch } from "../utils/model-request-fetch";
 // Refresh is the sole responsibility of AuthStorage (broker-aware, single-flighted);
 // the stream provider trusts the access token threaded through `options.apiKey`.
 import { normalizeSchemaForCCA } from "../utils/schema";
@@ -580,7 +581,7 @@ export const streamGoogleGeminiCli: StreamFunction<"google-gemini-cli"> = (
 			}
 			// The backend gates newer models on the client version; a process that
 			// skipped discovery (fresh model cache) must still send the current one.
-			if (isAntigravity) await ensureAntigravityVersion(options?.fetch ?? fetch, options?.signal);
+			if (isAntigravity) await ensureAntigravityVersion(auxiliaryFetch(options?.fetch ?? fetch), options?.signal);
 			const headers = isAntigravity ? { "User-Agent": getAntigravityUserAgent() } : getGeminiCliHeaders(model.id);
 
 			const requestHeaders = {

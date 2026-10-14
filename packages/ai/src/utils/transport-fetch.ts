@@ -35,22 +35,28 @@ export function transportFetch(model: Model<Api>, fetchImpl: FetchImpl | undefin
 		given ?? (model.provider === "anthropic" && model.api === "anthropic-messages" ? coworkFetch : globalThis.fetch);
 	const proxyUrl = getProxyForProvider(model.provider);
 
-	const fetch: TransportFetch = async (input, init) => {
+	const prepare = (input: string | URL | Request, init: RequestInit | undefined): RequestInit | undefined => {
 		init = withInferenceUserAgent(input, init);
 		const extraCa = resolveExtraCa();
 		if (extraCa) init = withExtraCaInit(init, extraCa);
 		if (proxyUrl) init = withProxyInit(input, init, proxyUrl);
-		const sentInit = init;
-		const send = async (): Promise<Response> => {
-			if (!isRequestDebugEnabled()) return base(input, sentInit);
-			const session = await createFetchRequestDebugSession(input, sentInit);
-			return session.wrapResponse(await base(input, sentInit));
-		};
-		return gatedSend({ model, kind: "chat", input, init: sentInit, send });
+		return init;
+	};
+	const send = async (input: string | URL | Request, init: RequestInit | undefined): Promise<Response> => {
+		if (!isRequestDebugEnabled()) return base(input, init);
+		const session = await createFetchRequestDebugSession(input, init);
+		return session.wrapResponse(await base(input, init));
+	};
+	/** The same transport with no gate: what a provider's non-inference requests (token exchange, metadata) use. */
+	const ungated: FetchImpl = (input, init) => send(input, prepare(input, init));
+	if (base.preconnect) ungated.preconnect = base.preconnect;
+	const fetch: TransportFetch = async (input, init) => {
+		const sentInit = prepare(input, init);
+		return gatedSend({ model, kind: "chat", input, init: sentInit, send: () => send(input, sentInit) });
 	};
 	if (base.preconnect) fetch.preconnect = base.preconnect;
 	fetch[TRANSPORT_FETCH] = true;
-	return markFetchGated(fetch);
+	return markFetchGated(fetch, ungated);
 }
 
 /** Options-bag form of {@link transportFetch}; returns `options` untouched when its fetch is already built. */

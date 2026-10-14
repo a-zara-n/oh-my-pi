@@ -20,6 +20,7 @@ import { $envpos, isEnoent, logger } from "@oh-my-pi/pi-utils";
 import * as AIError from "../error";
 import type { FetchImpl } from "../types";
 import { raceWithSignal } from "../utils/abort";
+import { auxiliaryFetch } from "../utils/model-request-fetch";
 
 const OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const METADATA_TOKEN_URL = "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token";
@@ -182,7 +183,8 @@ async function fetchMetadataToken(
 		});
 		if (!response.ok) return undefined;
 		return (await response.json()) as TokenResponse;
-	} catch {
+	} catch (error) {
+		if (AIError.isModelRequestDenied(error)) throw error;
 		return undefined;
 	}
 }
@@ -293,7 +295,8 @@ export async function getVertexAccessToken(options?: { signal?: AbortSignal; fet
 	// override var; `GOOGLE_CLOUD_ACCESS_TOKEN` is the omp-facing alias.
 	const explicitToken = Bun.env.GOOGLE_CLOUD_ACCESS_TOKEN || Bun.env.CLOUDSDK_AUTH_ACCESS_TOKEN;
 	if (explicitToken) return explicitToken;
-	const fetchImpl = options?.fetch ?? globalThis.fetch.bind(globalThis);
+	// Token exchange and metadata lookups are not model requests: they never go through a model-request gate.
+	const fetchImpl = auxiliaryFetch(options?.fetch ?? globalThis.fetch.bind(globalThis));
 	const skew = getRefreshSkewMs();
 	const now = Date.now();
 

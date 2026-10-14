@@ -140,6 +140,9 @@ describe("requestRemoteCompaction on behalf of a model", () => {
 		expect(summary.summary).toBe("summary");
 		expect(gate.attempts.map(attempt => [attempt.kind, attempt.model.id])).toEqual([["chat", "gpt-loopback"]]);
 		expect(gate.attempts[0].wire?.method).toBe("POST");
+		// The attempt names where it goes: the summarizer endpoint, not the model's own base URL.
+		expect(gate.attempts[0].model.baseUrl).toBe(`http://127.0.0.1:${server.port}/v1/chat/completions`);
+		expect(gate.attempts[0].wire?.url).toBe(gate.attempts[0].model.baseUrl);
 		expect(seen.map(request => request.path)).toEqual(["/v1/chat/completions"]);
 	});
 

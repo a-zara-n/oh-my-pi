@@ -15,7 +15,7 @@ import {
 } from "@oh-my-pi/pi-catalog/model-thinking";
 import { CODEX_BASE_URL } from "@oh-my-pi/pi-catalog/wire/codex";
 import { $env, getProviderInFlightRoot, isEnoent, logger, untilAborted } from "@oh-my-pi/pi-utils";
-import { getCustomApi } from "./api-registry";
+import { getCustomApi, type RegisteredCustomApi } from "./api-registry";
 import { createAuthRetryKeyState, isApiKeyResolver, resolvedApiKeyBearer, resolveNextAuthRetryKey } from "./auth-retry";
 import type { OAuthRequestIdentity } from "./auth/types";
 import { getEnvApiKey } from "./env-api-key";
@@ -74,7 +74,11 @@ import { isFoundryEnabled } from "./utils/foundry";
 import { applyGlyphCodec } from "./utils/glyph-codec";
 import { wrapLeakedThinkingStream } from "./utils/leaked-thinking-stream";
 import { withThinkingLoopGuard } from "./utils/thinking-loop";
-import { markNextModelRequestAttempt, runWithModelRequestLineage } from "./model-request-lineage";
+import {
+	markNextModelRequestAttempt,
+	runWithModelRequestDestination,
+	runWithModelRequestLineage,
+} from "./model-request-lineage";
 import { isModelRequestLocalStream } from "./model-request-execution";
 import { getModelRequestRuntime } from "./model-request-runtime";
 import { authorizeUninstrumentedAttempt } from "./utils/model-request-fetch";
@@ -964,10 +968,20 @@ function gateUninstrumentedTransport(
 	return outer;
 }
 
-/** Whether `model` is served by a registered custom API that is not an on-device transport. */
+/**
+ * Whether a registered custom API is an on-device transport on the entry that will be called: `streamSimple` for the
+ * simple entry; for `stream()` the function that is actually dispatched, which is the registry's own adapter over
+ * `streamSimple` or a separately supplied `stream` that must itself be declared local.
+ */
+function isLocalCustomApi(custom: RegisteredCustomApi, entry: "stream" | "streamSimple"): boolean {
+	if (!isModelRequestLocalStream(custom.streamSimple)) return false;
+	return entry === "streamSimple" || custom.streamAdaptsSimple || isModelRequestLocalStream(custom.stream);
+}
+
+/** Whether `model` is served by a registered custom API that is not an on-device transport (for `stream()`). */
 function isExternalCustomApi(model: Model<Api>): boolean {
 	const custom = getCustomApi(model.api);
-	return custom !== undefined && !isModelRequestLocalStream(custom.streamSimple);
+	return custom !== undefined && !isLocalCustomApi(custom, "stream");
 }
 
 function streamDispatch<TApi extends Api>(
@@ -1054,6 +1068,22 @@ function streamDispatchRequest<TApi extends Api>(
 			}
 		: { ...preparedOptions, apiKey };
 
+	return runWithModelRequestDestination(providerModel, () =>
+		dispatchPreparedProvider(providerModel, context, providerOptions, limited, requestOptions),
+	);
+}
+
+/**
+ * The provider call for a model already prepared by its provider definition. Runs under the model the request is
+ * actually addressed to (`prepareModel` may change its api and base URL), which is what a request gate is shown.
+ */
+function dispatchPreparedProvider(
+	providerModel: Model<Api>,
+	context: Context,
+	providerOptions: StreamOptions,
+	limited: boolean,
+	requestOptions: StreamOptions,
+): AssistantMessageEventStream {
 	const api: Api = providerModel.api;
 	if (api === "openrouter" && $env.PI_OPENROUTER_RESPONSES !== "0") {
 		return streamOpenAIResponses(
@@ -1554,7 +1584,7 @@ function streamSimpleRequest<TApi extends Api>(
 		return withThinkingLoopGuard(model, requestOptions, opts =>
 			withProviderInFlightLimit(model, opts, limited => {
 				const create = () => customApiProvider.streamSimple(model, context, { ...opts, waitForTerminalDrain: limited });
-				return isModelRequestLocalStream(customApiProvider.streamSimple)
+				return isLocalCustomApi(customApiProvider, "streamSimple")
 					? create()
 					: gateUninstrumentedTransport(model, opts?.signal, create);
 			}),
@@ -1601,14 +1631,17 @@ function streamSimpleRequest<TApi extends Api>(
 
 	// GitLab Duo Workflow - IDE workflow protocol + WebSocket action bridge
 	if (model.api === "gitlab-duo-agent") {
-		// Does not route through withProviderInFlightLimit, so heal explicitly.
+		// Does not route through withProviderInFlightLimit, so heal explicitly. Its REST and WebSocket transport is not
+		// the core's fetch, and this branch does not go through `stream()`, so it is gated here.
 		return withThinkingLoopGuard(model, requestOptions, opts =>
-			healLeakedThinking(
-				model,
-				streamGitLabDuoWorkflow(model as Model<"gitlab-duo-agent">, context, {
-					...opts,
-					apiKey,
-				}),
+			gateUninstrumentedTransport(model, opts?.signal, () =>
+				healLeakedThinking(
+					model,
+					streamGitLabDuoWorkflow(model as Model<"gitlab-duo-agent">, context, {
+						...opts,
+						apiKey,
+					}),
+				),
 			),
 		);
 	}

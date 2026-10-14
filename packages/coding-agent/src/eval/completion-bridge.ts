@@ -326,6 +326,8 @@ async function executeCompletion(
 	let completed = false;
 	// One chain for the whole fallback walk: every candidate after the first is a `model-fallback` re-attempt.
 	const fallbackChain = createModelRequestRetryChain();
+	// Candidates that actually issued a request: a keyless candidate that was skipped is not an attempt to fall back from.
+	let attempted = 0;
 	for (const [index, candidate] of candidates.entries()) {
 		if (index > 0 && retriesUsed >= maxRetries) break;
 		model = candidate.model;
@@ -340,7 +342,9 @@ async function executeCompletion(
 				continue;
 			}
 			if (index > 0) retriesUsed += 1;
-			response = await runInModelRequestRetryChain(fallbackChain, index > 0 ? "model-fallback" : undefined, () =>
+			const reason = attempted > 0 ? "model-fallback" : undefined;
+			attempted += 1;
+			response = await runInModelRequestRetryChain(fallbackChain, reason, () =>
 				instrumentedCompleteSimple(
 					candidate.model,
 					{

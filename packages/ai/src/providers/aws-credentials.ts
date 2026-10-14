@@ -29,6 +29,7 @@ import {
 	resolveAwsRegion,
 	shouldLoadAwsSharedConfig,
 } from "../utils/aws-profile";
+import { auxiliaryFetch } from "../utils/model-request-fetch";
 import { isLocalOrMetadataHost } from "../utils/proxy";
 import { type AwsCredentials, signRequest } from "./aws-sigv4";
 
@@ -104,7 +105,8 @@ export async function resolveAwsCredentials(opts: CredentialResolveOptions = {})
 	const existing = inflight.get(cacheKey);
 	if (existing) return raceWithSignal(existing, opts.signal);
 
-	const fetchImpl = opts.fetch ?? (globalThis.fetch as FetchImpl);
+	// STS/SSO/IMDS/container lookups are not model requests: they never go through a model-request gate.
+	const fetchImpl = auxiliaryFetch(opts.fetch ?? (globalThis.fetch as FetchImpl));
 	const promise = (async () => {
 		try {
 			const creds = await resolveFresh(
@@ -581,6 +583,7 @@ async function refreshSsoToken(
 			signal,
 		});
 	} catch (err) {
+		if (AIError.isModelRequestDenied(err)) throw err;
 		logger.debug("aws-credentials: SSO token refresh request failed", { err: String(err) });
 		return undefined;
 	}
@@ -1117,7 +1120,8 @@ async function readImdsCredentials(
 			sessionToken: body.Token,
 			expiresAt,
 		};
-	} catch {
+	} catch (error) {
+		if (AIError.isModelRequestDenied(error)) throw error;
 		return undefined;
 	}
 }

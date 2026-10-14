@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
 import { Buffer } from "node:buffer";
 import { setImmediate } from "node:timers/promises";
 import { registerCustomApi, unregisterCustomApis } from "@oh-my-pi/pi-ai";
@@ -22,6 +22,10 @@ import type {
 	Usage,
 } from "@oh-my-pi/pi-ai/types";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
+import * as bedrockProvider from "@oh-my-pi/pi-ai/providers/amazon-bedrock";
+import * as cursorProvider from "@oh-my-pi/pi-ai/providers/cursor";
+import * as gitlabWorkflowProvider from "@oh-my-pi/pi-ai/providers/gitlab-duo-workflow";
+import { setBedrockProviderModule, setCursorProviderModule } from "@oh-my-pi/pi-ai/providers/register-builtins";
 import { gateFetch } from "@oh-my-pi/pi-ai/utils/model-request-fetch";
 import { transportFetch } from "@oh-my-pi/pi-ai/utils/transport-fetch";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
@@ -533,7 +537,7 @@ describe("request bodies the core cannot read", () => {
 
 	for (const gated of gates) {
 		for (const body of unreadableBodies()) {
-			test(`${gated.name}: ${body.name} reaches the gate with no wire, and a transport-unsupported denial keeps it off the loopback`, async () => {
+			test(`${gated.name}: ${body.name} is asked about with no wire, and the gate's transport-unsupported denial keeps it off the loopback`, async () => {
 				const loopback = serve(scripted({ status: 200, chunks: ["ok"] }));
 				gate.setHandler(async attempt =>
 					attempt.wire === undefined
@@ -558,7 +562,7 @@ describe("request bodies the core cannot read", () => {
 		}
 	}
 
-	test("a gate that passes an unreadable body sees it once, and the body reaches the loopback intact", async () => {
+	test("with the default fixture gate (pass), an unreadable body is asked about once and reaches the loopback intact", async () => {
 		const loopback = serve(scripted({ status: 200, chunks: ["ok"] }));
 		const fetch = gateFetch(MODEL_REF, "chat", (input, init) => globalThis.fetch(input, init));
 
@@ -569,6 +573,23 @@ describe("request bodies the core cannot read", () => {
 		expect(gate.attempts[0]?.wire).toBeUndefined();
 		expect(loopback.requests).toHaveLength(1);
 		expect(new TextDecoder().decode(loopback.requests[0]?.body)).toBe("streamed");
+	});
+
+	test("a gate that allows an unreadable body gets a lease: it is sent, observed and settled once, and the gate sees only that a body existed", async () => {
+		const loopback = serve(scripted({ status: 200, chunks: ["ok"] }));
+		const fetch = gateFetch(MODEL_REF, "chat", (input, init) => globalThis.fetch(input, init));
+		const leases = allowEachAttempt();
+
+		const response = await unreadableBodies()[0]!.send(fetch, `${loopback.origin}/upload`);
+		expect(await response.text()).toBe("ok");
+		await afterSettling();
+
+		expect(gate.attempts).toHaveLength(1);
+		expect(gate.attempts[0]?.wire).toBeUndefined();
+		expect(loopback.requests).toHaveLength(1);
+		expect(leases).toHaveLength(1);
+		expect(leases[0]?.events.map(event => event.type)).toEqual(["beginSend", "observeResponse", "observeChunk", "settle"]);
+		expect(leases[0]?.settled).toEqual([{ type: "response-ended", status: 200 }]);
 	});
 
 	test("the gate is shown the request without credentials in its url or headers, and the caller still reads the unaltered response", async () => {
@@ -672,13 +693,68 @@ describe("transports the core cannot instrument", () => {
 	});
 
 	afterEach(() => {
+		vi.restoreAllMocks();
+		setBedrockProviderModule(bedrockProvider);
+		setCursorProviderModule(cursorProvider);
 		unregisterCustomApis(CUSTOM_SOURCE);
 	});
 
-	const targets: ReadonlyArray<{ readonly name: string; readonly model: () => Model<Api>; readonly runs: boolean }> = [
-		{ name: "a registered custom API", model: () => uninstrumentedModel(CUSTOM_API, "loopback-provider"), runs: true },
-		{ name: "bedrock-converse-stream", model: () => uninstrumentedModel("bedrock-converse-stream", "amazon-bedrock"), runs: false },
-		{ name: "cursor-agent", model: () => uninstrumentedModel("cursor-agent", "cursor"), runs: false },
+	/** A transport entry that counts how often it is started and answers at once, in place of the provider's own. */
+	function countingTransport(): { readonly start: (model: Model<Api>) => AssistantMessageEventStream; readonly started: () => number } {
+		let count = 0;
+		return {
+			start(model) {
+				count += 1;
+				const events = new AssistantMessageEventStream();
+				const message = customAnswer(model);
+				events.push({ type: "start", partial: message });
+				events.push({ type: "done", reason: "stop", message });
+				return events;
+			},
+			started: () => count,
+		};
+	}
+
+	interface Target {
+		readonly name: string;
+		readonly model: () => Model<Api>;
+		/** Install the probe; the returned function reports how many times the real transport entry was started. */
+		readonly probe: () => () => number;
+	}
+
+	const targets: readonly Target[] = [
+		{
+			name: "a registered custom API",
+			model: () => uninstrumentedModel(CUSTOM_API, "loopback-provider"),
+			probe: () => () => streamFunctionCalls,
+		},
+		{
+			name: "bedrock-converse-stream",
+			model: () => uninstrumentedModel("bedrock-converse-stream", "amazon-bedrock"),
+			probe: () => {
+				const counting = countingTransport();
+				setBedrockProviderModule({ streamBedrock: counting.start });
+				return counting.started;
+			},
+		},
+		{
+			name: "cursor-agent",
+			model: () => uninstrumentedModel("cursor-agent", "cursor"),
+			probe: () => {
+				const counting = countingTransport();
+				setCursorProviderModule({ streamCursor: counting.start });
+				return counting.started;
+			},
+		},
+		{
+			name: "gitlab-duo-agent",
+			model: () => uninstrumentedModel("gitlab-duo-agent", "gitlab-duo-test"),
+			probe: () => {
+				const counting = countingTransport();
+				vi.spyOn(gitlabWorkflowProvider, "streamGitLabDuoWorkflow").mockImplementation(counting.start);
+				return counting.started;
+			},
+		},
 	];
 
 	for (const target of targets) {
@@ -686,6 +762,7 @@ describe("transports the core cannot instrument", () => {
 			for (const entry of ENTRIES) {
 				test(`${entry.name}: the gate is asked once with no wire, and a deny keeps the transport from being started`, async () => {
 					const model = target.model();
+					const started = target.probe();
 					gate.setHandler(async () => ({ type: "deny", code: "loopback-denied", message: "no transport for you" }));
 
 					const result = await entry.run(model, helloContext(), { apiKey: SECRET });
@@ -698,11 +775,12 @@ describe("transports the core cannot instrument", () => {
 					expect(attempt.model).toEqual(modelRefOf(model));
 					expect(isDenied(result)).toBe(true);
 					expect(errorTextOf(result)).toContain("no transport for you");
-					expect(streamFunctionCalls).toBe(0);
+					expect(started()).toBe(0);
 				});
 
 				test(`${entry.name}: an allow with a lease is refused as transport-unsupported and the lease is released as not-sent exactly once`, async () => {
 					const model = target.model();
+					const started = target.probe();
 					const leases = allowEachAttempt();
 
 					const result = await entry.run(model, helloContext(), { apiKey: SECRET });
@@ -711,7 +789,7 @@ describe("transports the core cannot instrument", () => {
 					expect(gate.attempts).toHaveLength(1);
 					expect(gate.attempts[0]?.wire).toBeUndefined();
 					expect(isDenied(result)).toBe(true);
-					expect(streamFunctionCalls).toBe(0);
+					expect(started()).toBe(0);
 					expect(leases).toHaveLength(1);
 					expect(leases[0]?.settled).toEqual([{ type: "not-sent", aborted: false }]);
 					expect(leases[0]?.events.map(event => event.type)).toEqual(["settle"]);
@@ -720,18 +798,21 @@ describe("transports the core cannot instrument", () => {
 		});
 	}
 
-	for (const entry of ENTRIES) {
-		test(`a registered custom API, ${entry.name}: a pass lets the stream function run once for the one authorized attempt`, async () => {
-			const model = uninstrumentedModel(CUSTOM_API, "loopback-provider");
+	for (const target of targets) {
+		for (const entry of ENTRIES) {
+			test(`${target.name}, ${entry.name}: a pass lets the transport start once for the one authorized attempt`, async () => {
+				const model = target.model();
+				const started = target.probe();
 
-			const result = await entry.run(model, helloContext(), { apiKey: SECRET });
+				const result = await entry.run(model, helloContext(), { apiKey: SECRET });
 
-			expect(textOf(result.message)).toBe("custom transport answer");
-			expect(streamFunctionCalls).toBe(1);
-			expect(gate.attempts).toHaveLength(1);
-			expect(gate.attempts[0]?.wire).toBeUndefined();
-			expect(gate.attempts[0]?.model).toEqual(modelRefOf(model));
-		});
+				expect(textOf(result.message)).toBe("custom transport answer");
+				expect(started()).toBe(1);
+				expect(gate.attempts).toHaveLength(1);
+				expect(gate.attempts[0]?.wire).toBeUndefined();
+				expect(gate.attempts[0]?.model).toEqual(modelRefOf(model));
+			});
+		}
 	}
 });
 

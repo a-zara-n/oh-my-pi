@@ -15,7 +15,7 @@
  * @internal Not part of the public pi-ai surface (absent from `index.ts`).
  */
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { ModelRequestReason } from "./model-request-gate";
+import type { ModelRequestModelRef, ModelRequestReason } from "./model-request-gate";
 
 declare const RETRY_CHAIN_BRAND: unique symbol;
 
@@ -38,6 +38,7 @@ interface Lineage {
 }
 
 const lineageStore = new AsyncLocalStorage<Lineage>();
+const destinationStore = new AsyncLocalStorage<ModelRequestModelRef>();
 const chainStore = new AsyncLocalStorage<RetryChainImpl>();
 
 function requireChain(chain: ModelRequestRetryChain): RetryChainImpl {
@@ -131,4 +132,18 @@ export function nextModelRequestAttemptLink(): ModelRequestAttemptLink {
 			chain.nextReason = undefined;
 		},
 	};
+}
+
+/**
+ * Run `fn` for a request addressed to `model`: what the attempt names as its model, rather than the model the
+ * transport was first built for. A provider definition may rewrite a model's api and base URL after the transport
+ * is bound (a gateway route), and the gate must see where the request actually goes.
+ */
+export function runWithModelRequestDestination<T>(model: ModelRequestModelRef, fn: () => T): T {
+	return destinationStore.run(model, fn);
+}
+
+/** The model the current request is addressed to, if a provider declared one. */
+export function currentModelRequestDestination(): ModelRequestModelRef | undefined {
+	return destinationStore.getStore();
 }

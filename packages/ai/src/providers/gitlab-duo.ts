@@ -5,6 +5,7 @@ import * as AIError from "../error";
 import { ANTHROPIC_THINKING, mapAnthropicToolChoice } from "../stream";
 import type { Api, Context, FetchImpl, Model, ModelSpec, SimpleStreamOptions } from "../types";
 import { AssistantMessageEventStream } from "../utils/event-stream";
+import { auxiliaryFetch } from "../utils/model-request-fetch";
 import { createProviderErrorMessage } from "./error-message";
 import type { OpenAICompletionsOptions } from "./openai-completions";
 import type { OpenAIResponsesOptions } from "./openai-responses";
@@ -35,7 +36,8 @@ async function getDirectAccessToken(
 		return cached;
 	}
 
-	const response = await fetchImpl(`${GITLAB_COM_URL}/api/v4/ai/third_party_agents/direct_access`, {
+	// The direct_access lookup carries the account token and returns the gateway credential; it is not a model request.
+	const response = await auxiliaryFetch(fetchImpl)(`${GITLAB_COM_URL}/api/v4/ai/third_party_agents/direct_access`, {
 		method: "POST",
 		headers: {
 			Authorization: `Bearer ${gitlabAccessToken}`,

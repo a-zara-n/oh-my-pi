@@ -9,8 +9,13 @@
 - With a gate registered, every wire attempt of a fetch-based model request (a provider's own retry, a credential rotation, a thinking-loop re-sample, a oneshot retry, a judge attempt) is authorized separately before any I/O, is told to start sending immediately before the first byte, sees the response pass through unaltered, and is settled exactly once; the gate is shown a credential-free view of the request and each attempt names the kind of re-attempt it is.
 - A transport the core cannot account for (a WebSocket, an SDK's own client, an extension-registered provider) is asked once with no readable request, and is sent only if the gate passes it.
 
+- Added `auxiliaryFetch(fetch)`: the same transport without the gate, for requests that are not model requests (token exchange, credential and metadata lookups, version probes). Google ADC, GitLab direct access, Devin auth metadata, AWS credential resolution and the Antigravity version probe use it, so the gate is not shown credential bodies and those lookups are not counted as attempts.
+
 ### Changed
 
+- The model an attempt names is the model the request is addressed to after the provider definition prepared it, and its `baseUrl` is redacted like the wire url when it carries a credential.
+- A gate whose `beginSend()` throws is a terminal `gate-error`: the lease is settled as not sent and no retry layer replays the request.
+- The direct `streamSimple` branch of `gitlab-duo-agent` is gated like the other transports the core cannot account for, and an on-device transport is exempt only for the function that was declared local.
 - Remote and native compaction requests, and the native judge's requests when the caller injects a gated fetch, go through the same per-attempt gate.
 - A gate denial is now terminal: provider backoff, credential rotation, oneshot and thinking-loop retries, and judge retries stop on it instead of retrying, whatever the denial text says.
 

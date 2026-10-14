@@ -57,6 +57,8 @@ export type CustomStreamSimpleFn = (
 export interface RegisteredCustomApi {
 	stream: CustomStreamFn;
 	streamSimple: CustomStreamSimpleFn;
+	/** True when `stream` is the registry's own adapter over `streamSimple` (the caller supplied no `stream`). */
+	streamAdaptsSimple: boolean;
 	sourceId?: string;
 }
 
@@ -81,6 +83,7 @@ export function registerCustomApi(
 	customApiRegistry.set(api, {
 		stream: stream ?? ((model, context, options) => streamSimple(model, context, options as SimpleStreamOptions)),
 		streamSimple,
+		streamAdaptsSimple: stream === undefined,
 		sourceId,
 	});
 }

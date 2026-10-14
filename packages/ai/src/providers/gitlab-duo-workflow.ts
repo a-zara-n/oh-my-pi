@@ -23,6 +23,7 @@ import type {
 } from "../types";
 import { normalizeSystemPrompts } from "../utils";
 import { AssistantMessageEventStream } from "../utils/event-stream";
+import { auxiliaryFetch } from "../utils/model-request-fetch";
 import { toolWireSchema } from "../utils/schema/wire";
 import chatmlHistoryNote from "./gitlab-duo-workflow-chatml-note.md" with { type: "text" };
 import { redactSensitiveCredentials } from "./transform-messages";
@@ -979,7 +980,10 @@ async function runGitLabDuoWorkflow(
 	const apiKey = options.apiKey;
 	if (!apiKey) throw new AIError.MissingApiKeyError("gitlab-duo-agent");
 	const baseUrl = normalizeGitLabBaseUrl(model.baseUrl || DEFAULT_GITLAB_BASE_URL);
-	const fetchImpl = options.fetch ?? fetch;
+	// Every REST/management call this stream makes (settings, project and namespace discovery, direct_access, workflow
+	// create/stop, model catalog) is a credential-bearing setup request, not a model request; the model request itself
+	// rides the websocket.
+	const fetchImpl = auxiliaryFetch(options.fetch ?? fetch);
 	const providerSessionState = getGitLabDuoWorkflowProviderSessionState(
 		options.providerSessionState,
 		baseUrl,
@@ -1209,6 +1213,7 @@ async function runGitLabDuoWorkflow(
 		try {
 			setup = await setupForNamespace(cachedNamespace);
 		} catch (cachedError) {
+			if (AIError.isModelRequestDenied(cachedError)) throw cachedError;
 			// The cached account namespace no longer works (revoked access, deleted
 			// group, membership change). Drop it and re-discover once from scratch.
 			traceGitLabDuoWorkflow("namespace.cache_invalidate", {
@@ -1515,7 +1520,8 @@ async function fetchGitLabDuoWorkflowAvailableModels(
 		const payload: unknown = await response.json();
 		const models = getRecord(getRecord(payload, "data"), "aiChatAvailableModels");
 		return parseGitLabAvailableModelsPayload(models);
-	} catch {
+	} catch (error) {
+		if (AIError.isModelRequestDenied(error)) throw error;
 		// Timeout (AbortSignal.timeout) surfaces as an AbortError here; matches the pre-fix
 		// transient-network behavior (undefined -> caller falls back to defaults), so a
 		// stalled models fetch degrades rather than hanging the whole stream.
@@ -1562,7 +1568,8 @@ async function resolveGitLabDuoWorkflowNumericProjectId(
 		if (!response.ok) return undefined;
 		const payload: unknown = await response.json();
 		return getRecordString(payload, "id");
-	} catch {
+	} catch (error) {
+		if (AIError.isModelRequestDenied(error)) throw error;
 		// Timeout / abort behaves like a transient network fault: undefined leaves the
 		// caller to fall back to the workflow's namespace-only routing rather than block
 		// the stream on a hanging project lookup.
@@ -1612,7 +1619,8 @@ async function discoverGitLabDuoWorkflowProject(
 			const id = getRecordString(first, "id");
 			const path = getRecordString(first, "path_with_namespace");
 			if (id && path) return { id, path };
-		} catch {
+		} catch (error) {
+			if (AIError.isModelRequestDenied(error)) throw error;
 			// Timeout/abort on one endpoint: fall through to the next fallback rather than
 			// aborting discovery. Each endpoint gets its own fresh REST budget.
 		}
@@ -1753,6 +1761,7 @@ async function stopGitLabDuoWorkflow(
 			signal: gitLabDuoWorkflowRestSignal(),
 		});
 	} catch (error) {
+		if (AIError.isModelRequestDenied(error)) throw error;
 		// Server-side stop is best-effort: a timeout / network fault must not reject
 		// the caller (the local stream already emitted its terminal event). Trace and
 		// swallow so the enclosing `finally` never surfaces a spurious rejection.
@@ -1808,6 +1817,7 @@ async function ensureGitLabDuoWorkflowSettings(
 		traceGitLabDuoWorkflow("settings.ensure", { status: response.status, ok: response.ok });
 		return response.status < 500;
 	} catch (error) {
+		if (AIError.isModelRequestDenied(error)) throw error;
 		traceGitLabDuoWorkflow("settings.ensure_error", { error: gitLabDuoWorkflowErrorText(error) });
 		return false;
 	}

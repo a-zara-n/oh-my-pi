@@ -54,6 +54,7 @@ import { normalizeSystemPrompts } from "../utils";
 import { isDemotedThinking } from "../utils/block-symbols";
 import { deterministicUuid } from "../utils/deterministic-id";
 import { AssistantMessageEventStream } from "../utils/event-stream";
+import { auxiliaryFetch } from "../utils/model-request-fetch";
 import { normalizeSchemaForGoogle, toolWireSchema } from "../utils/schema";
 import {
 	CONNECT_COMPRESSED_FLAG,
@@ -224,8 +225,10 @@ export const streamDevin: StreamFunction<"devin-agent"> = (
 
 		try {
 			const fetchImpl = options?.fetch ?? fetch;
+			// Auth metadata and model assignment are not model requests; only the chat message POST is.
+			const auxFetch = auxiliaryFetch(fetchImpl);
 			const baseUrl = (model.baseUrl || DEVIN_API_URL).replace(/\/+$/, "");
-			const auth = await fetchDevinAuthMetadata(options?.apiKey, baseUrl, fetchImpl, options?.signal);
+			const auth = await fetchDevinAuthMetadata(options?.apiKey, baseUrl, auxFetch, options?.signal);
 			const chatBaseUrl = auth.baseUrl ?? baseUrl;
 			const turn: DevinTurn = {
 				apiKey: auth.apiKey,
@@ -238,7 +241,7 @@ export const streamDevin: StreamFunction<"devin-agent"> = (
 			// assignment JWT on the chat request that shares the cascade id.
 			let assignment: ModelAssignment | undefined;
 			if (model.compat.modelRouter) {
-				assignment = await assignDevinModel(model, turn, chatBaseUrl, fetchImpl, options?.signal);
+				assignment = await assignDevinModel(model, turn, chatBaseUrl, auxFetch, options?.signal);
 				output.upstreamModel = assignment.modelUid;
 			}
 			let request = buildDevinChatRequest(model, context, options, turn, assignment);

@@ -1015,7 +1015,8 @@ export async function requestRemoteCompaction(
 	// A bare summarizer endpoint has no model; only a request made on behalf of a model is a model request.
 	const sendFetch: FetchImpl = opts?.model
 		? gateFetch(
-				{ provider: opts.model.provider, id: opts.model.id, api: opts.model.api, baseUrl: opts.model.baseUrl },
+				// The request goes to `endpoint`, which need not be the model's own base URL.
+				{ provider: opts.model.provider, id: opts.model.id, api: opts.model.api, baseUrl: endpoint },
 				"chat",
 				customFetch,
 			)

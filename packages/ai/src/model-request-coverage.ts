@@ -70,7 +70,7 @@ const SITE_ROWS: readonly ModelRequestSiteRow[] = [
 	row("S-09", "packages/coding-agent/src/judgment/index.ts: ChainJudge", "inherited", "per-attempt", ""),
 	row("S-10", "packages/coding-agent/src/sdk.ts: session stream functions (main, subagent)", "installed", "per-attempt", ""),
 	row("S-11", "packages/coding-agent/src/session/cache-warmer.ts: cache warm-up replay", "installed", "per-attempt", ""),
-	row("S-12", "packages/coding-agent/src/session: compaction, handoff, branch summary, side-channel requests", "installed", "per-attempt", ""),
+	row("S-12", "packages/coding-agent/src/session: compaction, handoff, branch summary, side-channel requests", "installed", "missing", "manual compaction summaries, the /responses/compact remote compaction, branch summary, handoff, advisor and side-channel requests are verified with a real fake send; the v2 streaming compaction (requestCompactionV2Streaming) is not, and its openai-codex branch sends over a WebSocket that calls no hook (see S-06)"),
 	row("S-13", "packages/coding-agent/src/session/turn-recovery.ts: turn retry and model fallback", "inherited", "per-attempt", ""),
 	row("S-14", "packages/coding-agent/src/commit, utils/commit-message-generator.ts: commit message generation", "unverified", "missing", "commit message generation is verified; changelog generation and conventional inference are not, and the omp commit command is not marked standalone"),
 	row("S-15", "packages/coding-agent/src/utils/title-generator.ts: title generation", "installed", "per-attempt", ""),

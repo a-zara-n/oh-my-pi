@@ -22,12 +22,15 @@ import type {
 	ModelRequestOutcome,
 	ModelRequestWire,
 } from "../model-request-gate";
-import { nextModelRequestAttemptLink } from "../model-request-lineage";
+import { currentModelRequestDestination, nextModelRequestAttemptLink } from "../model-request-lineage";
 import { getModelRequestRuntime } from "../model-request-runtime";
 import { copyResponseMetadata } from "./request-debug";
 
-/** Stamped on a fetch that already authorizes each of its calls, so wrapping layers never authorize twice. */
-const GATED_FETCH = Symbol("omp.modelRequestGatedFetch");
+/**
+ * Every fetch that authorizes each of its calls, mapped to the same transport without the gate. Membership is how
+ * wrapping layers avoid authorizing twice; the twin is for requests that are not model requests.
+ */
+const ungatedTwins = new WeakMap<object, FetchImpl>();
 
 /** Header and query names whose values are credentials (or may carry one) and are never shown to a gate. */
 const CREDENTIAL_NAME = /auth|key|token|secret|cookie|credential|signature|password|passwd|bearer|^sig$/i;
@@ -47,6 +50,16 @@ function stripUrl(raw: string): string {
 		if (CREDENTIAL_NAME.test(name)) parsed.searchParams.delete(name);
 	}
 	return parsed.toString();
+}
+
+/** A model's base URL as the gate sees it: unchanged unless it carries a credential, so equality with the model still holds. */
+function redactBaseUrl(raw: string): string {
+	const stripped = stripUrl(raw);
+	try {
+		return stripped === new URL(raw).toString() ? raw : stripped;
+	} catch {
+		return stripped;
+	}
 }
 
 function wireHeaders(headers: Headers): Record<string, string> {
@@ -136,7 +149,7 @@ function modelRef(model: ModelRequestModelRef): ModelRequestModelRef {
 		provider: model.provider,
 		id: model.id,
 		api: model.api,
-		...(model.baseUrl === undefined ? {} : { baseUrl: model.baseUrl }),
+		...(model.baseUrl === undefined ? {} : { baseUrl: redactBaseUrl(model.baseUrl) }),
 	};
 }
 
@@ -261,7 +274,7 @@ export async function gatedSend(args: GatedSendArgs): Promise<Response> {
 		reason: link.reason,
 		...(link.retryOf === undefined ? {} : { retryOf: link.retryOf }),
 		kind: args.kind,
-		model: modelRef(args.model),
+		model: modelRef(currentModelRequestDestination() ?? args.model),
 		wire: buildModelRequestWire(input, init),
 		...(signal === undefined || signal === null ? {} : { signal }),
 	});
@@ -273,7 +286,14 @@ export async function gatedSend(args: GatedSendArgs): Promise<Response> {
 		await settleQuietly(lease, { type: "not-sent", aborted: true });
 		throw effectiveSignal.reason ?? new Error("model request aborted before it was sent");
 	}
-	lease.beginSend();
+	try {
+		lease.beginSend();
+	} catch (error) {
+		// Nothing was sent. A gate whose bookkeeping fails must not leak the lease, and the failure is the gate's:
+		// terminal, not a transport error a retry layer would replay.
+		await settleQuietly(lease, { type: "not-sent", aborted: false });
+		throw new ModelRequestDeniedError("gate-error", "model request gate failed while starting to send", { cause: error });
+	}
 	let response: Response;
 	try {
 		response = await args.send();
@@ -294,16 +314,31 @@ export async function gatedSend(args: GatedSendArgs): Promise<Response> {
  * calls. With no gate registered, a call goes straight to `base`.
  */
 export function gateFetch(model: ModelRequestModelRef, kind: ModelRequestKind, base: FetchImpl): FetchImpl {
-	if (Reflect.has(base, GATED_FETCH)) return base;
+	if (ungatedTwins.has(base)) return base;
 	const gated: FetchImpl = (input, init) => gatedSend({ model, kind, input, init, send: () => base(input, init) });
 	if (base.preconnect) gated.preconnect = base.preconnect;
-	return markFetchGated(gated);
+	return markFetchGated(gated, base);
 }
 
-/** Mark a fetch the caller has already built around {@link gatedSend}, so {@link gateFetch} leaves it alone. */
-export function markFetchGated<T extends FetchImpl>(fetch: T): T {
-	Object.defineProperty(fetch, GATED_FETCH, { value: true });
+/**
+ * Mark a fetch the caller has already built around {@link gatedSend}, so {@link gateFetch} leaves it alone, and record
+ * `ungated`: the same transport without the gate, which {@link auxiliaryFetch} hands to requests that are not model
+ * requests.
+ */
+export function markFetchGated<T extends FetchImpl>(fetch: T, ungated: FetchImpl): T {
+	ungatedTwins.set(fetch, ungated);
 	return fetch;
+}
+
+/**
+ * The fetch for a request that is NOT a model request: an OAuth/token exchange, a credential or metadata lookup, a
+ * version probe, a model catalog fetch. A provider receives one gated `options.fetch` for its inference request; these
+ * auxiliary requests must not use it, or the gate would be shown credential bodies and responses and would count them
+ * as attempts (and a later real attempt would look like a retry of them). Returns the same transport without the gate;
+ * a fetch that is not gated is returned as is.
+ */
+export function auxiliaryFetch(fetch: FetchImpl): FetchImpl {
+	return ungatedTwins.get(fetch) ?? fetch;
 }
 
 /**
