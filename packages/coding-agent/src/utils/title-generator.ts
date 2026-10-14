@@ -15,7 +15,11 @@ import {
 	retryTransientCompletion,
 } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
-import { runWithModelRequestPurpose } from "@oh-my-pi/pi-ai/model-request-execution";
+import {
+	createModelRequestRetryChain,
+	runInModelRequestRetryChain,
+	runWithModelRequestPurpose,
+} from "@oh-my-pi/pi-ai/model-request-execution";
 import { StreamMarkupHealing } from "@oh-my-pi/pi-ai/utils/stream-markup-healing";
 import { writeTerminalSequence } from "@oh-my-pi/pi-tui";
 import { isNativeRendering, onNativeRenderingChange } from "@oh-my-pi/pi-tui/native/state";
@@ -286,6 +290,9 @@ async function generateTitleOnlineWithModels(
 	const systemPrompt = titleSystemPrompt ? [titleSystemPrompt, TITLE_MARKER_INSTRUCTION] : [TITLE_SYSTEM_PROMPT];
 	const userMessage = formatTitleUserMessage(firstMessage);
 
+	// One chain for the whole walk: every candidate attempted after the first is a `model-fallback` re-attempt.
+	const walk = createModelRequestRetryChain();
+	let attempted = 0;
 	for (const model of models) {
 		const modelName = `${model.provider}/${model.id}`;
 		const modelContext = {
@@ -338,30 +345,32 @@ async function generateTitleOnlineWithModels(
 			const messages: Message[] = [{ role: "user", content: userMessage, timestamp: Date.now() }];
 			if (model.supportsAssistantPrefill) messages.push(titlePrefill(model));
 
-			const response = await runWithModelRequestPurpose("title", () =>
-				retryTransientCompletion(
-					() =>
-						completeSimple(
-							model,
-							{
-								systemPrompt,
-								messages,
-							},
-							{
-								apiKey: registry.resolver(model, sessionId),
-								sessionId,
-								maxTokens,
-								disableReasoning: true,
-								// Greedy decode: titling is extraction, not generation. Backends that
-								// default temperature high (e.g. Ollama's 0.8) otherwise garble names
-								// from the message ("hashline" → "HasHroshi"). Providers whose models
-								// reject sampling params drop this via `supportsSamplingParams`.
-								temperature: 0,
-								metadata,
-								signal,
-							},
-						),
-					{ signal, provider: model.provider },
+			const response = await runInModelRequestRetryChain(walk, attempted++ > 0 ? "model-fallback" : undefined, () =>
+				runWithModelRequestPurpose("title", () =>
+					retryTransientCompletion(
+						() =>
+							completeSimple(
+								model,
+								{
+									systemPrompt,
+									messages,
+								},
+								{
+									apiKey: registry.resolver(model, sessionId),
+									sessionId,
+									maxTokens,
+									disableReasoning: true,
+									// Greedy decode: titling is extraction, not generation. Backends that
+									// default temperature high (e.g. Ollama's 0.8) otherwise garble names
+									// from the message ("hashline" → "HasHroshi"). Providers whose models
+									// reject sampling params drop this via `supportsSamplingParams`.
+									temperature: 0,
+									metadata,
+									signal,
+								},
+							),
+						{ signal, provider: model.provider },
+					),
 				),
 			);
 

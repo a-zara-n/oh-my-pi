@@ -14,6 +14,7 @@
  */
 import { escapeXmlAttribute, escapeXmlText, prompt } from "@oh-my-pi/pi-utils";
 import { YAML } from "bun";
+import { markNextModelRequestAttempt, runWithModelRequestLineage } from "../model-request-lineage";
 import type { Usage } from "../types";
 import textJudgeRetryTemplate from "./text-judge-retry.md" with { type: "text" };
 import textJudgeStateTemplate from "./text-judge-state.md" with { type: "text" };
@@ -262,10 +263,12 @@ export class TextJudge implements Judge {
 		this.label = `${backend.provider}/${backend.model}`;
 	}
 
-	async judge<Q extends Questions>(
-		request: JudgmentRequest<Q>,
-		options: JudgeOptions = {},
-	): Promise<JudgmentResult<Q>> {
+	/** One judgment, including its parse/format re-asks, is one logical request. */
+	judge<Q extends Questions>(request: JudgmentRequest<Q>, options: JudgeOptions = {}): Promise<JudgmentResult<Q>> {
+		return runWithModelRequestLineage(() => this.#judge(request, options));
+	}
+
+	async #judge<Q extends Questions>(request: JudgmentRequest<Q>, options: JudgeOptions): Promise<JudgmentResult<Q>> {
 		const ids = Object.keys(request.questions);
 		if (ids.length === 0) throw new Error("judgment request has no questions");
 		const rendered = renderJudgmentPrompt(request, { guardState: this.#backend.guardState });
@@ -282,6 +285,7 @@ export class TextJudge implements Judge {
 							user: rendered.user,
 							retry: true,
 						};
+			if (attempt > 0) markNextModelRequestAttempt("judge-attempt");
 			const completion = await this.#backend.complete(textPrompt, options);
 			try {
 				const replies =

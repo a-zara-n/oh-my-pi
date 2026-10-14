@@ -16,6 +16,7 @@
  */
 
 import { attach, create, Flag, ProviderHttpError } from "@oh-my-pi/pi-ai/error";
+import { gateFetch, runWithModelRequestLineage } from "@oh-my-pi/pi-ai/model-request-execution";
 import { getCodexAttestationHeader } from "@oh-my-pi/pi-ai/providers/openai-codex-attestation";
 import { createOpenAICodexCompactionRequestContext } from "@oh-my-pi/pi-ai/providers/openai-codex-compaction";
 import { applyCodexResponsesLiteShape } from "@oh-my-pi/pi-ai/providers/openai-codex/request-transformer";
@@ -817,7 +818,11 @@ export async function requestOpenAiRemoteCompaction(
 		codexCompaction?: CodexCompactionContext;
 	},
 ): Promise<OpenAiRemoteCompactionResponse> {
-	let fetchImpl: FetchImpl = opts?.fetch ?? fetch;
+	let fetchImpl: FetchImpl = gateFetch(
+		{ provider: model.provider, id: model.id, api: model.api, baseUrl: model.baseUrl },
+		"chat",
+		opts?.fetch ?? fetch,
+	);
 	if (isBedrockOpenAIUrl(model.baseUrl)) {
 		({ model, apiKey, fetch: fetchImpl } = await prepareBedrockCompactionRequest(model, apiKey, opts?.fetch, signal));
 	}
@@ -905,12 +910,14 @@ export async function requestOpenAiRemoteCompaction(
 		}
 	}
 
-	const response = await fetchImpl(endpoint, {
-		method: "POST",
-		headers,
-		body: stringifyJson(request),
-		signal: ptree.combineSignals(signal, opts?.timeoutMs ?? REMOTE_COMPACTION_TIMEOUT_MS),
-	});
+	const response = await runWithModelRequestLineage(() =>
+		fetchImpl(endpoint, {
+			method: "POST",
+			headers,
+			body: stringifyJson(request),
+			signal: ptree.combineSignals(signal, opts?.timeoutMs ?? REMOTE_COMPACTION_TIMEOUT_MS),
+		}),
+	);
 
 	if (!response.ok) {
 		const cause = await captureOpenAIHttpError(response);
@@ -1004,12 +1011,23 @@ export async function requestRemoteCompaction(
 			}
 		: { systemPrompt: request.systemPrompt, prompt: request.prompt, maxTokens: request.maxTokens };
 
-	const response = await (opts?.fetch ?? fetch)(endpoint, {
-		method: "POST",
-		headers,
-		body: stringifyJson(body),
-		signal: ptree.combineSignals(signal, opts?.timeoutMs ?? REMOTE_COMPACTION_TIMEOUT_MS),
-	});
+	const customFetch = opts?.fetch ?? fetch;
+	// A bare summarizer endpoint has no model; only a request made on behalf of a model is a model request.
+	const sendFetch: FetchImpl = opts?.model
+		? gateFetch(
+				{ provider: opts.model.provider, id: opts.model.id, api: opts.model.api, baseUrl: opts.model.baseUrl },
+				"chat",
+				customFetch,
+			)
+		: customFetch;
+	const response = await runWithModelRequestLineage(() =>
+		sendFetch(endpoint, {
+			method: "POST",
+			headers,
+			body: stringifyJson(body),
+			signal: ptree.combineSignals(signal, opts?.timeoutMs ?? REMOTE_COMPACTION_TIMEOUT_MS),
+		}),
+	);
 
 	if (!response.ok) {
 		const errorText = await response.text().catch(() => "");

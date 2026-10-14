@@ -3,6 +3,7 @@ import { coworkFetch } from "../providers/cowork-fetch";
 import { withInferenceUserAgent } from "../providers/inference-headers";
 import type { Api, FetchImpl, Model } from "../types";
 import { getProxyForProvider, withProxyInit } from "./proxy";
+import { gatedSend, markFetchGated } from "./model-request-fetch";
 import { createFetchRequestDebugSession, isRequestDebugEnabled } from "./request-debug";
 
 /** Stamped on a fetch already built by {@link transportFetch}. */
@@ -16,6 +17,11 @@ type TransportFetch = FetchImpl & { [TRANSPORT_FETCH]?: true };
  * per-provider proxy, and `PI_REQ_DEBUG` request/response recording — then
  * calls `fetchImpl` (or the model's default fetch) exactly once. Providers
  * never layer transport concerns themselves.
+ *
+ * That one call is the wire attempt: with a ModelRequestGate registered it is
+ * authorized first (and settled afterwards), so a provider's own retry, a
+ * credential rotation or a fallback each reach the gate as a separate attempt.
+ * With no gate registered the call goes straight through, unchanged.
  *
  * Idempotent: the built fetch is stamped and returned as-is on later passes.
  * `streamSimple` re-enters `stream`, and `streamSimpleRequest` re-enters itself
@@ -34,13 +40,17 @@ export function transportFetch(model: Model<Api>, fetchImpl: FetchImpl | undefin
 		const extraCa = resolveExtraCa();
 		if (extraCa) init = withExtraCaInit(init, extraCa);
 		if (proxyUrl) init = withProxyInit(input, init, proxyUrl);
-		if (!isRequestDebugEnabled()) return base(input, init);
-		const session = await createFetchRequestDebugSession(input, init);
-		return session.wrapResponse(await base(input, init));
+		const sentInit = init;
+		const send = async (): Promise<Response> => {
+			if (!isRequestDebugEnabled()) return base(input, sentInit);
+			const session = await createFetchRequestDebugSession(input, sentInit);
+			return session.wrapResponse(await base(input, sentInit));
+		};
+		return gatedSend({ model, kind: "chat", input, init: sentInit, send });
 	};
 	if (base.preconnect) fetch.preconnect = base.preconnect;
 	fetch[TRANSPORT_FETCH] = true;
-	return fetch;
+	return markFetchGated(fetch);
 }
 
 /** Options-bag form of {@link transportFetch}; returns `options` untouched when its fetch is already built. */

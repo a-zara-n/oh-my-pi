@@ -4,13 +4,13 @@
  * (an emitter that fires a listener from outside, a timer armed outside any session) the gate sees `unclassified`
  * instead of silently inheriting a session. Nothing an extension passes to pi-ai can pick the trusted fields.
  *
- * The model is a fake provider that asks the gate right before it "sends", exactly where a transport hook does.
+ * The model is a fake provider registered as a custom API; the core itself asks the gate before such a transport is
+ * invoked, so what the gate sees is what a real request from that call site would present.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { EventEmitter } from "node:events";
 import { type Context, type SimpleStreamOptions, streamSimple } from "@oh-my-pi/pi-ai";
 import { unregisterCustomApis } from "@oh-my-pi/pi-ai/api-registry";
-import { authorizeModelRequest } from "@oh-my-pi/pi-ai/model-request-execution";
 import { createMockModel, type MockModel, registerMockApi } from "@oh-my-pi/pi-ai/providers/mock";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -39,21 +39,9 @@ const gate = installFixtureGate();
 
 const PROMPT: Context = { messages: [{ role: "user", content: "hello", timestamp: Date.now() }] };
 
-/** A model whose provider asks the gate before it answers, as a real transport hook does. */
+/** A model served by a fake custom-API provider that answers at once. */
 function createGatedModel(): MockModel {
-	return createMockModel({
-		handler: async (_context, options) => {
-			await authorizeModelRequest({
-				requestId: crypto.randomUUID(),
-				reason: "first",
-				kind: "chat",
-				model: { provider: "mock", id: "mock-model", api: "mock" },
-				wire: undefined,
-				signal: options?.signal,
-			});
-			return { content: ["ok"] };
-		},
-	});
+	return createMockModel({ handler: async () => ({ content: ["ok"] }) });
 }
 
 async function ask(model: MockModel, options?: SimpleStreamOptions): Promise<void> {

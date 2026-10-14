@@ -26,6 +26,7 @@ import {
 	type SimpleStreamOptions,
 	type Usage,
 } from "@oh-my-pi/pi-ai";
+import { createModelRequestRetryChain, runInModelRequestRetryChain } from "@oh-my-pi/pi-ai/model-request-execution";
 import { calculateCost } from "@oh-my-pi/pi-catalog/models";
 import { isAnthropicOAuthToken } from "@oh-my-pi/pi-catalog/utils";
 import type { CacheWarmingDecisionEvent, CacheWarmingDecisionEventResult } from "../extensibility/shared-events";
@@ -562,7 +563,10 @@ export class CacheWarmer {
 			replayOptions.thinkingBudgets = thinkingBudgets;
 		}
 		try {
-			stream = await this.#deps.stream(run.model, run.context, replayOptions);
+			// The warm-up replays a request already made; it is its own chain, never a re-attempt of the live turn.
+			stream = await runInModelRequestRetryChain(createModelRequestRetryChain(), "replay", () =>
+				this.#deps.stream(run.model, run.context, replayOptions),
+			);
 		} catch {
 			return undefined;
 		}

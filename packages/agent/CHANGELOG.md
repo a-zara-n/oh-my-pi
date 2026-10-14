@@ -6,6 +6,8 @@
 
 - Added `AgentOptions.runInScope` so a host can run every agent run (turns, tool executions, retries and subscriber callbacks) inside a scope it provides.
 
+- Remote and native compaction requests are authorized by a registered model request gate per wire attempt.
+
 ### Changed
 
 - Compaction and loop retry paths treat a model request gate denial as terminal instead of retrying or falling back.

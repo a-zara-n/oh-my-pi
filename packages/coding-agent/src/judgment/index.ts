@@ -38,7 +38,12 @@ import {
 	type Usage,
 } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
-import { runWithModelRequestPurpose } from "@oh-my-pi/pi-ai/model-request-execution";
+import {
+	createModelRequestRetryChain,
+	gateFetch,
+	runInModelRequestRetryChain,
+	runWithModelRequestPurpose,
+} from "@oh-my-pi/pi-ai/model-request-execution";
 import type { ModelRequestPurpose } from "@oh-my-pi/pi-ai/model-request-gate";
 import { calculateCost } from "@oh-my-pi/pi-catalog/models";
 import { logger, prompt } from "@oh-my-pi/pi-utils";
@@ -262,6 +267,9 @@ export class ChainJudge implements Judge {
 		let lastUnavailable: string | undefined;
 		const candidates = this.#resolveCandidates();
 		const rejections = this.#rejections();
+		// One chain per call: every candidate attempted after the first is a `judge-candidate` re-attempt.
+		const chain = createModelRequestRetryChain();
+		let attempted = 0;
 		for (const candidate of candidates) {
 			if (signal?.aborted) {
 				throw signal.reason instanceof Error ? signal.reason : new AIError.AbortError("judgment aborted");
@@ -281,8 +289,9 @@ export class ChainJudge implements Judge {
 					lastUnavailable = `no API key for ${candidate.model.provider}/${candidate.model.id}`;
 					continue;
 				}
-				return await runWithModelRequestPurpose(this.#deps.requestPurpose ?? "judge", () =>
-					run(judge, kindOf(candidate)),
+				const reason = attempted++ > 0 ? "judge-candidate" : undefined;
+				return await runInModelRequestRetryChain(chain, reason, () =>
+					runWithModelRequestPurpose(this.#deps.requestPurpose ?? "judge", () => run(judge, kindOf(candidate))),
 				);
 			} catch (error) {
 				if (signal?.aborted) {
@@ -353,6 +362,11 @@ export class ChainJudge implements Judge {
 				model: model.id,
 				baseUrl: model.baseUrl,
 				headers,
+				fetch: gateFetch(
+					{ provider: model.provider, id: model.id, api: model.api, baseUrl: model.baseUrl },
+					"judgment",
+					fetch,
+				),
 			});
 			return nativeJudge(judge, model, this.#deps.cache, attempt => this.#report(attempt));
 		}

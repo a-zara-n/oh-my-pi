@@ -4,6 +4,11 @@ import * as AIError from "./error";
 import { isAuthRetryableError, isInvalidatedOAuthTokenError } from "./error/auth-classify";
 import { isAccountPolicyError, isModelRequestDenied, isUsageLimit } from "./error/flags";
 import { isConcurrencyCapExclusion, isUsageLimitOutcome } from "./error/rate-limit";
+import {
+	createModelRequestRetryChain,
+	markNextModelRequestAttempt,
+	runInModelRequestRetryChain,
+} from "./model-request-lineage";
 
 /**
  * Context passed to an {@link ApiKeyResolver} on each resolution attempt.
@@ -303,26 +308,30 @@ export async function withAuth<T>(
 	if (initialKey === undefined) throw missingKey();
 
 	const state = createAuthRetryKeyState(initialKey);
-	let lastError: unknown;
-	try {
-		return await attempt(initialKey);
-	} catch (error) {
-		if (isModelRequestDenied(error) || !isAuthError(error)) throw error;
-		lastError = error;
-	}
-
-	while (true) {
-		const nextKey = await resolveNextAuthRetryKey(state, resolver, lastError, signal);
-		if (nextKey === undefined) break;
+	// One chain across the rotation re-attempts: each `attempt` may be its own logical request.
+	return runInModelRequestRetryChain(createModelRequestRetryChain(), undefined, async () => {
+		let lastError: unknown;
 		try {
-			return await attempt(nextKey);
+			return await attempt(initialKey);
 		} catch (error) {
 			if (isModelRequestDenied(error) || !isAuthError(error)) throw error;
 			lastError = error;
 		}
-	}
 
-	throw lastError;
+		while (true) {
+			const nextKey = await resolveNextAuthRetryKey(state, resolver, lastError, signal);
+			if (nextKey === undefined) break;
+			markNextModelRequestAttempt("auth-rotation");
+			try {
+				return await attempt(nextKey);
+			} catch (error) {
+				if (isModelRequestDenied(error) || !isAuthError(error)) throw error;
+				lastError = error;
+			}
+		}
+
+		throw lastError;
+	});
 }
 
 /**
@@ -377,6 +386,18 @@ export async function withOAuthAccess<T>(
 	attempt: (access: OAuthAccess) => Promise<T>,
 	opts?: WithOAuthAccessOptions,
 ): Promise<T> {
+	// One chain across the rotation re-attempts: each `attempt` may be its own logical request.
+	return runInModelRequestRetryChain(createModelRequestRetryChain(), undefined, () =>
+		runOAuthAccessAttempts(storage, provider, attempt, opts),
+	);
+}
+
+async function runOAuthAccessAttempts<T>(
+	storage: OAuthAccessSource,
+	provider: string,
+	attempt: (access: OAuthAccess) => Promise<T>,
+	opts: WithOAuthAccessOptions | undefined,
+): Promise<T> {
 	const isAuthError = opts?.isAuthError ?? isAuthRetryableError;
 	const { sessionId, signal } = opts ?? {};
 
@@ -417,6 +438,7 @@ export async function withOAuthAccess<T>(
 			attemptedBearers.add(bearer);
 			attemptCount += 1;
 			lastAccess = next;
+			markNextModelRequestAttempt("auth-rotation");
 			attemptResult = await runOAuthAttempt(next, attempt, isAuthError);
 			if (attemptResult.ok) return attemptResult.result;
 			lastError = attemptResult.error;
@@ -444,6 +466,7 @@ export async function withOAuthAccess<T>(
 						attemptedBearers.add(bearer);
 						attemptCount += 1;
 						lastAccess = next;
+						markNextModelRequestAttempt("auth-rotation");
 						attemptResult = await runOAuthAttempt(next, attempt, isAuthError);
 						if (attemptResult.ok) return attemptResult.result;
 						lastError = attemptResult.error;
@@ -482,6 +505,7 @@ export async function withOAuthAccess<T>(
 		attemptCount += 1;
 		lastAccess = next;
 		refreshedCurrent = !directRotation;
+		markNextModelRequestAttempt("auth-rotation");
 		attemptResult = await runOAuthAttempt(next, attempt, isAuthError);
 		if (attemptResult.ok) return attemptResult.result;
 		lastError = attemptResult.error;

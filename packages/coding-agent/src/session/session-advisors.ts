@@ -107,6 +107,7 @@ import type { ClientBridge } from "./client-bridge";
 import { resolveCompactionMethodOrder, resolveMethodSettings } from "./compaction-methods";
 import { type CustomMessage, type CustomMessagePayload, isUserAuthoredMessage, isUserTurnInitiator } from "./messages";
 import { withModelRequestExecution } from "./model-request-context";
+import { ModelRequestReattempts } from "./model-request-reattempt";
 import { isAdvisorCard, isTerminalTextAssistantAnswer } from "./queued-messages";
 import {
 	calculateRetryBackoffDelayMs,
@@ -350,6 +351,8 @@ interface ActiveAdvisor {
 	retryFallbackPendingSuccess: boolean;
 	/** Count of consecutive usage-limit block waits, bounded by retry.maxRetries; reset on turn success. */
 	usageLimitRetries: number;
+	/** Links a recovered review's re-issued request to the failed one. */
+	readonly reattempts: ModelRequestReattempts;
 	signature: string;
 }
 /** First index whose provider usage may anchor the advisor's context estimate. */
@@ -1412,10 +1415,14 @@ export class SessionAdvisors {
 			});
 			const advisorExecution = this.#modelRequestExecution;
 			const rawAdvisorStreamFn = this.#advisorStreamFn ?? streamSimple;
-			const baseAdvisorStreamFn =
+			// A recovered review re-issues its request from a fresh context; the tracker links it to the failed one.
+			const advisorReattempts = new ModelRequestReattempts();
+			const scopedAdvisorStreamFn =
 				advisorExecution === undefined
 					? rawAdvisorStreamFn
 					: withModelRequestExecution(rawAdvisorStreamFn, advisorExecution);
+			const baseAdvisorStreamFn: StreamFn = (requestModel, context, streamOptions) =>
+				advisorReattempts.run(() => scopedAdvisorStreamFn(requestModel, context, streamOptions));
 			const advisorStreamFn: StreamFn = (requestModel, context, streamOptions) => {
 				// Read per request so a mid-session `providers.openaiWebsockets` change reaches advisors.
 				const options = {
@@ -1613,7 +1620,10 @@ export class SessionAdvisors {
 						role: fallback.role,
 					});
 				},
-				onTurnAbandoned: () => advisorRef.recorder.abandonTurn(),
+				onTurnAbandoned: () => {
+					advisorRef.reattempts.clear();
+					advisorRef.recorder.abandonTurn();
+				},
 				notifyFailure: error => {
 					this.#advisorStatuses.set(slug, { name: advisorName, status: "error" });
 					const message = error instanceof Error ? error.message : String(error);
@@ -1663,6 +1673,7 @@ export class SessionAdvisors {
 				pendingCoveredTurn: 0,
 				retryFallbackPendingSuccess: false,
 				usageLimitRetries: 0,
+				reattempts: advisorReattempts,
 				signature,
 			};
 			this.#refreshAdvisorProviderIdentity(advisorRef);
@@ -2103,7 +2114,10 @@ export class SessionAdvisors {
 				advisor.providerSessionId,
 				{ error: message, modelId: currentModel.id, signal },
 			);
-			if (rotation.switched) return true;
+			if (rotation.switched) {
+				advisor.reattempts.declare("auth-rotation");
+				return true;
+			}
 		}
 
 		const retryAfterMs = extractProviderRetryHint(currentModel.provider, message);
@@ -2128,7 +2142,10 @@ export class SessionAdvisors {
 					signal,
 				},
 			);
-			if (outcome.switched) return true;
+			if (outcome.switched) {
+				advisor.reattempts.declare("auth-rotation");
+				return true;
+			}
 			usageRetryAtMs = outcome.retryAtMs;
 			usageBlockedUntilMs = outcome.blockedUntilMs;
 			usageRequestedBlockedUntilMs = outcome.requestedBlockedUntilMs;
@@ -2211,6 +2228,7 @@ export class SessionAdvisors {
 					role,
 					reason: `Advisor request failed: ${message}`,
 				});
+				advisor.reattempts.declare("model-fallback");
 				return true;
 			}
 		}
@@ -2266,6 +2284,7 @@ export class SessionAdvisors {
 		// An aborted pause/reset did not reach a provider retry and must not
 		// consume budget in the resumed/reset conversation.
 		advisor.usageLimitRetries = attempt;
+		advisor.reattempts.declare("turn-retry");
 		return true;
 	}
 

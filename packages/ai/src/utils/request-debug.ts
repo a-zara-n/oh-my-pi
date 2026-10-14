@@ -193,7 +193,8 @@ class FileRequestDebugResponseLog implements RequestDebugResponseLog {
 	}
 }
 
-function copyResponseMetadata(target: Response, source: Response): void {
+/** Carry `Response.url` over to a response rebuilt around a wrapped body (the property is not constructor-settable). */
+export function copyResponseMetadata(target: Response, source: Response): void {
 	const sourceUrl = source.url;
 	if (!sourceUrl) return;
 	try {

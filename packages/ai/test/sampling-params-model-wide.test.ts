@@ -79,10 +79,13 @@ describe("sampling params are gated by model, on every provider", () => {
 		expect(payload.temperature).toBe(0);
 	});
 
-	test("a custom API adapter receives no sampling options, including frequencyPenalty", () => {
+	test("a custom API adapter receives no sampling options, including frequencyPenalty", async () => {
 		let received: SimpleStreamOptions | undefined;
+		// With a request gate registered in the process the adapter is invoked after the gate answers, not inline.
+		const invoked = Promise.withResolvers<void>();
 		registerCustomApi("sampling-gate-test", (_model, _context, options) => {
 			received = options;
+			invoked.resolve();
 			return new AssistantMessageEventStream();
 		});
 		const model = bundled("amazon-bedrock", "global.openai.gpt-6-luna");
@@ -92,6 +95,7 @@ describe("sampling params are gated by model, on every provider", () => {
 			frequencyPenalty: 1,
 			presencePenalty: 1,
 		});
+		await invoked.promise;
 		expect(received).toBeDefined();
 		expect(received).not.toHaveProperty("temperature");
 		expect(received).not.toHaveProperty("topP");

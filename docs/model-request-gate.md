@@ -5,8 +5,7 @@ process. The core does not know what the owner decides on. With no gate register
 every request path behaves exactly as it did before.
 
 This document covers the gate API, the core-owned execution context that identifies who is asking, the denial's
-non-retry contract, and the coverage inventory. The per-attempt transport/judge hook that calls the gate on each wire
-attempt is a separate layer (see [Scope of this layer](#scope-of-this-layer)).
+non-retry contract, the per-attempt hook that asks the gate before each wire attempt, and the coverage inventory.
 
 ## Public API (`@oh-my-pi/pi-ai`, `packages/ai/src/model-request-gate.ts`)
 
@@ -76,6 +75,60 @@ explicitly or listed as uncovered.
 session-capable; a unit test fails when a command is unclassified. Only the real process entry marks the process, so
 importers of `runCli` can still create sessions. A command that is marked but creates a session fails loudly.
 
+## Per-attempt hook
+
+A wire attempt is one HTTP request (or connection). With a gate registered, every call of the fetch the core controls is
+authorized on its own: `transportFetch` for everything that goes through `stream` / `streamSimple` / `complete` /
+`completeSimple`, `gateFetch` for the callers that build their own fetch (the native judge, remote compaction). With no
+gate registered those calls go straight to the underlying fetch, unchanged.
+
+For each attempt the core: (1) builds the attempt (`origin` and `scope` from the execution context, never from the
+caller; `kind`; the model's provider/id/api/baseUrl) and a credential-free `wire` (method, url without userinfo or
+credential-looking query parameters, headers without credential-looking names, `bodyBytes`, and an in-memory
+`readBody()`); (2) awaits `gate.authorize`; a denial, a failing or malformed gate, or a gate that does not answer in time
+is a `ModelRequestDeniedError` and nothing is sent; (3) on `allow`, calls `lease.beginSend()` synchronously immediately
+before the first I/O; (4) hands the response head to `observeResponse` and every body chunk to `observeChunk` while the
+body passes to the caller unaltered; (5) settles the lease exactly once (`response-ended`, `response-failed`,
+`request-failed`, or `not-sent`), including on a caller abort or when the caller stops reading. A consumer that stops
+reading at the protocol's terminal event, a moment before the transport reports the end of the body, is still settled as
+`response-ended` if that read was already in flight (bounded to one macrotask). A gate error in `observeResponse`,
+`observeChunk` or `settle` is logged and never replaces the request's own result. The body is only ever held in memory.
+
+`wire` is `undefined` when the body cannot be read without consuming or sending it (a stream, `FormData`, a `Request`
+that carries its own body); the gate decides what to do with it.
+
+### Which kind of attempt
+
+Each attempt carries a `requestId` (one `stream` / `complete` / judgment call), a core-generated `attemptId`, a `reason`
+and `retryOf` (the previous attempt's id when it is a re-attempt):
+
+| reason | when |
+| --- | --- |
+| `first` | the first attempt of a request, and any request that merely follows another one |
+| `provider-retry` | a second wire attempt inside the same logical request (a provider re-sending) |
+| `auth-rotation` | the credential was rotated and the request re-sent (`streamSimple` loop, `withAuth`, `withOAuthAccess`, turn-level switch) |
+| `thinking-loop-retry` | `complete` / `completeSimple` re-sampled a stalled thinking loop |
+| `oneshot-retry` | `retryTransientCompletion` re-ran the request |
+| `turn-retry` | the session's automatic retry of a turn (also malformed-call, stall and empty-stop continuations) |
+| `model-fallback` | the next model of a fallback walk (turn recovery, compaction candidates, completion/title/commit/memory walks) |
+| `judge-candidate`, `judge-attempt` | the next judge-role candidate; a judge's own re-attempt (native retry, a further prompted turn) |
+| `replay` | the cache warmer's replay of the last request |
+
+The link is a lineage (the logical request) and a retry chain (consecutive attempts, possibly across logical requests);
+both are internal (`packages/ai/src/model-request-lineage.ts`) and a retry loop declares its reason with
+`markNextModelRequestAttempt` / `runInModelRequestRetryChain`. Nothing there can influence `origin` or `scope`. A chain
+nested in another joins it, so a fallback walk's pending reason survives until the first inner attempt consumes it.
+
+### Transports the core cannot account for
+
+A registered extension provider, and the APIs that do not go through a fetch the core controls (`bedrock-converse-stream`,
+`cursor-agent`, `apple-foundation-models`, `factory-droid-agent`, `gitlab-duo-agent`), cannot be driven through a lease.
+The gate is asked once with `wire: undefined` and must answer `pass` or `deny`; an `allow` is released as `not-sent`
+and refused with `transport-unsupported` (a gate cannot permit what the core cannot account for). An on-device
+transport is exempt: `markModelRequestLocalStream(fn)` binds the exemption to that function (the local-inference
+transport), so registering another function under the same API name does not inherit it. The `openai-codex` WebSocket
+path does not call any hook yet.
+
 ## Denial is terminal
 
 A denial carries `AIError.Flag.ModelRequestDenied` (an exclusive classification: `AIError.classify` returns only that
@@ -93,8 +146,11 @@ check; `packages/utils` (which cannot import pi-ai) uses the structural `retryab
 - `context-inherited`: its requests reach a shared per-attempt hook with the context intact;
 - `uncovered`: anything else, including every site whose context is not carried or not verified.
 
-`coverage.complete` is true only when the context self-check passed and **no** site is uncovered. In this layer no
-per-attempt hook exists yet, so the shipped table is not complete, and a consumer must not treat it as such.
+`coverage.complete` is true only when the context self-check passed and **no** site is uncovered. A site is moved to
+`context-inherited` only when a request from that site has been sent through the real code path to a loopback fake
+provider and the gate saw exactly the attempts the provider received (`packages/coding-agent/test/model-request-site-sends.test.ts`,
+the ai transport tests and the judge/recovery tests); the core does not check this, it is the operating rule for editing the
+table. The sites still uncovered are listed in the table with the reason, and the table is not complete.
 `inventoryVersion` is the hex SHA-256 over every site in table order, each contributing
 `id`, `location`, `status`, `contextPropagation` and `reason` (NUL-separated, one line per site). Editing any of those
 fields of any site, or adding/removing/reordering a site, changes it; `note` text outside `reason` and the table's
@@ -109,12 +165,15 @@ reach the host and are re-bound explicitly (S-37, S-38).
 ## Scope of this layer
 
 Included: the API, latch, context and origin/scope derivation, root hand-over, purposes, deferred-job binding,
-standalone classification, denial classification and non-retry across the retry/fallback sites, and the inventory.
+standalone classification, denial classification and non-retry, the per-attempt hook for fetch-based requests (chat,
+judgments, remote compaction), the retry/fallback reasons, refusal of transports whose request cannot be read or
+accounted for, and the inventory.
 
-Not included (next layers): the per-attempt hook in `transportFetch` and the judges (`authorize → beginSend → observe
-→ settle`, credential-free wire, per-retry-kind `reason`/`attemptId`), refusing transports whose body cannot be read,
-and the uncovered-path proofs plus the static check that fails when a new request path is not in the inventory. Until
-those land, `authorizeModelRequest` is the call a transport makes and no shipped transport calls it.
+Not included: proof that the direct provider paths (S-27..S-36: `providers/*` imported directly, the legacy shim's
+`anthropicMessagesApi().stream`, Bedrock/Cursor/pi-native/devin/factory-droid transports, image and other kinds), the
+`openai-codex` WebSocket, memory/mnemopi/sharpshooter jobs, changelog and conventional-commit generation, the
+Worker/native context boundaries and the entry handlers go through the hook; and the static check that fails when a new
+request path is missing from the inventory. They stay `uncovered`.
 
 ## Tests
 
@@ -123,6 +182,8 @@ process), `model-request-denial-terminal.test.ts`, `packages/agent/test/agent-ru
 `packages/coding-agent/test/` `model-request-context-session`, `task/model-request-root-handover`,
 `eval/model-request-bridge-context`, `tools/computer-model-request-context`, `extensibility/extension-model-request-context`,
 `extensibility/legacy-pi-session-model-request-root`, `cli/standalone-commands`, `judgment-chain-denial`,
-`turn-recovery-denial`. A gate registration cannot be undone, so tests share one fixture gate
+`turn-recovery-denial`, `model-request-site-sends`, `model-request-judge-attempts`, `model-request-recovery-attempts`,
+`model-request-fallback-walk`, `model-request-local-inference`; in packages/ai/test `model-request-transport-hook`,
+`model-request-retry-reasons` and `packages/agent/test/compaction-remote-gate`. A gate registration cannot be undone, so tests share one fixture gate
 (`packages/ai/test/helpers/model-request-gate-fixture.ts`) that answers `pass` unless a test sets a handler. The
 browser tab Worker's tool-call binding has no test: its dispatch is only reachable through a real browser.

@@ -16,6 +16,7 @@ import { type } from "@oh-my-pi/omptype";
 import { instrumentedCompleteSimple, resolveTelemetry, type ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import { type Api, type AssistantMessage, Effort, type Model, type Tool } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
+import { createModelRequestRetryChain, runInModelRequestRetryChain } from "@oh-my-pi/pi-ai/model-request-execution";
 import { clampThinkingLevelForModel, getSupportedEfforts } from "@oh-my-pi/pi-catalog/model-thinking";
 import { Snowflake } from "@oh-my-pi/pi-utils";
 import { extractTextContent, extractToolCall, parseJsonPayload } from "../commit/utils";
@@ -323,6 +324,8 @@ async function executeCompletion(
 	let lastError: unknown;
 	let retriesUsed = 0;
 	let completed = false;
+	// One chain for the whole fallback walk: every candidate after the first is a `model-fallback` re-attempt.
+	const fallbackChain = createModelRequestRetryChain();
 	for (const [index, candidate] of candidates.entries()) {
 		if (index > 0 && retriesUsed >= maxRetries) break;
 		model = candidate.model;
@@ -337,21 +340,23 @@ async function executeCompletion(
 				continue;
 			}
 			if (index > 0) retriesUsed += 1;
-			response = await instrumentedCompleteSimple(
-				model,
-				{
-					systemPrompt,
-					messages: [{ role: "user", content: [{ type: "text", text: prompt }], timestamp: Date.now() }],
-					tools,
-				},
-				{
-					apiKey: registry.resolver(model, session.getSessionId?.() ?? undefined),
-					signal,
-					reasoning: candidate.reasoning,
-					disableReasoning: candidate.disableReasoning,
-					toolChoice: schema ? { type: "tool", name: STRUCTURED_TOOL_NAME } : undefined,
-				},
-				{ telemetry, oneshotKind: "eval_completion" },
+			response = await runInModelRequestRetryChain(fallbackChain, index > 0 ? "model-fallback" : undefined, () =>
+				instrumentedCompleteSimple(
+					candidate.model,
+					{
+						systemPrompt,
+						messages: [{ role: "user", content: [{ type: "text", text: prompt }], timestamp: Date.now() }],
+						tools,
+					},
+					{
+						apiKey: registry.resolver(candidate.model, session.getSessionId?.() ?? undefined),
+						signal,
+						reasoning: candidate.reasoning,
+						disableReasoning: candidate.disableReasoning,
+						toolChoice: schema ? { type: "tool", name: STRUCTURED_TOOL_NAME } : undefined,
+					},
+					{ telemetry, oneshotKind: "eval_completion" },
+				),
 			);
 		} catch (error) {
 			lastError = error;

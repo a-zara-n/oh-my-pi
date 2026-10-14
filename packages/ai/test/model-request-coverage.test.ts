@@ -53,6 +53,21 @@ describe("the shipped inventory cannot report an unproven path as covered", () =
 	});
 });
 
+describe("the shipped inventory after the per-attempt hook", () => {
+	const statusOf = (id: string) => MODEL_REQUEST_SITES.find(entry => entry.id === id)?.status;
+
+	test("sites verified by a fake send through the hook are context-inherited", () => {
+		const verified = ["S-01", "S-02", "S-03", "S-04", "S-07", "S-08", "S-09", "S-10", "S-11", "S-12", "S-13", "S-15", "S-16", "S-18", "S-20"];
+		expect(verified.map(id => [id, statusOf(id)])).toEqual(verified.map(id => [id, "context-inherited"]));
+	});
+
+	test("sites that only some of their paths have verified, and the direct-provider paths, stay uncovered, so complete stays false", () => {
+		const unproven = ["S-05", "S-06", "S-14", "S-17", "S-19", "S-27", "S-28", "S-30", "S-31", "S-32", "S-33", "S-34", "S-35"];
+		expect(unproven.map(id => [id, statusOf(id)])).toEqual(unproven.map(id => [id, "uncovered"]));
+		expect(buildModelRequestCoverage("passed").complete).toBe(false);
+	});
+});
+
 describe("getModelRequestGateInfo", () => {
 	test("reports the latched registration and the verified context mechanism through the public API", async () => {
 		installFixtureGate();

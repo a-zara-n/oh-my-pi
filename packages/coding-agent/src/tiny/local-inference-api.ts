@@ -9,6 +9,7 @@ import {
 } from "@oh-my-pi/pi-ai";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { registerCustomApi } from "@oh-my-pi/pi-ai/api-registry";
+import { markModelRequestLocalStream } from "@oh-my-pi/pi-ai/model-request-execution";
 import { isTinyLocalModelKey } from "./models";
 import { tinyModelClient } from "./title-client";
 import type { TinyChatMessage } from "./title-protocol";
@@ -162,6 +163,11 @@ export function streamLocalInferenceSimple(
 }
 
 /** Register the local-inference transport with the shared API registry. */
+/**
+ * Register the local-inference transport with the shared API registry. It runs on-device, so the core's
+ * non-fetch-transport guard exempts this exact stream function.
+ */
 export function registerLocalInferenceApi(): void {
+	markModelRequestLocalStream(streamLocalInferenceSimple);
 	registerCustomApi(LOCAL_INFERENCE_API, streamLocalInferenceSimple, LOCAL_INFERENCE_SOURCE);
 }

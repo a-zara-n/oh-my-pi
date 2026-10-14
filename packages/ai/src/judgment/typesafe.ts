@@ -18,6 +18,7 @@ import type { Api, FetchImpl } from "@oh-my-pi/pi-catalog/types";
 import { $env } from "@oh-my-pi/pi-utils";
 import { type ApiKey, withAuth } from "../auth-retry";
 import * as AIError from "../error";
+import { markNextModelRequestAttempt, runWithModelRequestLineage } from "../model-request-lineage";
 import { getRetryAfterMsFromHeaders } from "../utils/retry-after";
 import {
 	type Answer,
@@ -120,7 +121,12 @@ export class TypeSafeJudge implements Judge {
 		this.label = `${this.provider}/${this.model}`;
 	}
 
-	async judge<Q extends Questions>(request: JudgmentRequest<Q>, options?: JudgeOptions): Promise<JudgmentResult<Q>> {
+	/** One judgment call is one logical request, however many wire attempts it takes. */
+	judge<Q extends Questions>(request: JudgmentRequest<Q>, options?: JudgeOptions): Promise<JudgmentResult<Q>> {
+		return runWithModelRequestLineage(() => this.#judge(request, options));
+	}
+
+	async #judge<Q extends Questions>(request: JudgmentRequest<Q>, options?: JudgeOptions): Promise<JudgmentResult<Q>> {
 		const body = JSON.stringify({ state: request.state, model: this.model, questions: request.questions });
 		const signal = options?.signal;
 		const response = await withAuth(
@@ -167,6 +173,7 @@ export class TypeSafeJudge implements Judge {
 				});
 			} catch (error) {
 				if (AIError.isModelRequestDenied(error) || signal?.aborted || attempt + 1 >= MAX_ATTEMPTS) throw error;
+				markNextModelRequestAttempt("judge-attempt");
 				await Bun.sleep(backoffMs(attempt, undefined));
 				continue;
 			}
@@ -177,6 +184,7 @@ export class TypeSafeJudge implements Judge {
 			});
 			const transient = response.status === 408 || response.status === 429 || response.status >= 500;
 			if (!transient || attempt + 1 >= MAX_ATTEMPTS) throw error;
+			markNextModelRequestAttempt("judge-attempt");
 			await Bun.sleep(backoffMs(attempt, response.headers));
 		}
 	}

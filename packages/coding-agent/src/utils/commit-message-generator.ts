@@ -6,7 +6,11 @@ import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { Api, Model } from "@oh-my-pi/pi-ai";
 import { completeSimple, retryTransientCompletion } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
-import { runWithModelRequestPurpose } from "@oh-my-pi/pi-ai/model-request-execution";
+import {
+	createModelRequestRetryChain,
+	runInModelRequestRetryChain,
+	runWithModelRequestPurpose,
+} from "@oh-my-pi/pi-ai/model-request-execution";
 import { logger, prompt } from "@oh-my-pi/pi-utils";
 
 import type { ModelRegistry } from "../config/model-registry";
@@ -102,29 +106,34 @@ export async function generateCommitMessage(
 	}
 	const userMessage = `<diff>\n${truncatedDiff}\n</diff>`;
 
+	// One chain for the whole walk: every candidate attempted after the first is a `model-fallback` re-attempt.
+	const walk = createModelRequestRetryChain();
+	let attempted = 0;
 	for (const candidate of candidates) {
 		const apiKey = await registry.getApiKey(candidate.model, sessionId);
 		if (!apiKey) continue;
 
 		try {
 			const maxTokens = COMMIT_MAX_TOKENS;
-			const response = await runWithModelRequestPurpose("commit", () =>
-				retryTransientCompletion(
-					() =>
-						completeSimple(
-							candidate.model,
-							{
-								systemPrompt: [COMMIT_SYSTEM_PROMPT],
-								messages: [{ role: "user", content: userMessage, timestamp: Date.now() }],
-							},
-							{
-								apiKey: registry.resolver(candidate.model, sessionId),
-								sessionId,
-								maxTokens,
-								reasoning: toReasoningEffort(candidate.thinkingLevel),
-							},
-						),
-					{ provider: candidate.model.provider },
+			const response = await runInModelRequestRetryChain(walk, attempted++ > 0 ? "model-fallback" : undefined, () =>
+				runWithModelRequestPurpose("commit", () =>
+					retryTransientCompletion(
+						() =>
+							completeSimple(
+								candidate.model,
+								{
+									systemPrompt: [COMMIT_SYSTEM_PROMPT],
+									messages: [{ role: "user", content: userMessage, timestamp: Date.now() }],
+								},
+								{
+									apiKey: registry.resolver(candidate.model, sessionId),
+									sessionId,
+									maxTokens,
+									reasoning: toReasoningEffort(candidate.thinkingLevel),
+								},
+							),
+						{ provider: candidate.model.provider },
+					),
 				),
 			);
 

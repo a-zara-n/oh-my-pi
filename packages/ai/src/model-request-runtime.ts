@@ -232,6 +232,7 @@ function assertTimeout(timeoutMs: number | undefined): void {
 export class ModelRequestRuntime {
 	readonly #als = new AsyncLocalStorage<object>();
 	readonly #executions = new WeakSet<object>();
+	readonly #localStreams = new WeakSet<object>();
 	readonly #deps: ModelRequestRuntimeDeps;
 	#registration: GateRegistration | undefined;
 	#standalone = false;
@@ -263,6 +264,11 @@ export class ModelRequestRuntime {
 		void this.verifyContext();
 	}
 
+	/** Whether a gate is registered. Request paths check this first so an ungated process does no extra work. */
+	hasGate(): boolean {
+		return this.#registration !== undefined;
+	}
+
 	gateInfo(): ModelRequestGateInfo {
 		if (this.#contextCheck === "pending") void this.verifyContext();
 		return {
@@ -270,6 +276,21 @@ export class ModelRequestRuntime {
 			registered: this.#registration !== undefined,
 			coverage: buildModelRequestCoverage(this.#contextCheck),
 		};
+	}
+
+	// ---- in-process transports ----
+
+	/**
+	 * Declare that `stream` is a transport that never leaves the process (an on-device model). Identified by the
+	 * function itself, not by the API name it is registered under, so registering a different function under the
+	 * same name does not inherit the exemption.
+	 */
+	markLocalStream(stream: (...args: never[]) => unknown): void {
+		this.#localStreams.add(stream);
+	}
+
+	isLocalStream(stream: (...args: never[]) => unknown): boolean {
+		return this.#localStreams.has(stream);
 	}
 
 	// ---- process classification ----

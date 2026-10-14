@@ -1,14 +1,14 @@
 /**
  * A child session created on behalf of a host session reaches the model-request gate under the HOST's root,
  * never as a free root of its own. The children here are real spawns (executor -> createAgentSession -> agent
- * loop); the model is a fake provider that asks the gate before it "sends", exactly where a transport hook does.
+ * loop); the model is a fake custom-API provider; the core asks the gate before such a transport is invoked.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { unregisterCustomApis } from "@oh-my-pi/pi-ai/api-registry";
-import { authorizeModelRequest, runWithModelRequestExecution } from "@oh-my-pi/pi-ai/model-request-execution";
+import { runWithModelRequestExecution } from "@oh-my-pi/pi-ai/model-request-execution";
 import { createMockModel, registerMockApi } from "@oh-my-pi/pi-ai/providers/mock";
 import { closeModelCache } from "@oh-my-pi/pi-catalog/model-cache";
 import { AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async/job-manager";
@@ -130,17 +130,8 @@ async function createSpawnEnvironment(): Promise<SpawnEnvironment> {
 	closers.push(() => authStorage.close());
 	const modelRegistry = new ModelRegistry(authStorage);
 	const mock = createMockModel({
-		handler: async (context, options) => {
-			// Only the child's own agent loop (the one carrying the yield tool) is gated here.
+		handler: async context => {
 			if (!(context.tools ?? []).some(tool => tool.name === "yield")) return { content: ["label"] };
-			await authorizeModelRequest({
-				requestId: crypto.randomUUID(),
-				reason: "first",
-				kind: "chat",
-				model: { provider: "mock", id: "mock-model", api: "mock" },
-				wire: undefined,
-				signal: options?.signal,
-			});
 			if (context.messages.at(-1)?.role === "toolResult") return { content: ["ok"] };
 			return { content: [{ type: "toolCall", name: "yield", arguments: { type: "result", data: "done" } }] };
 		},

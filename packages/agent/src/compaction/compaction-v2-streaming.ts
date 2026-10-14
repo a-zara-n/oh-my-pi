@@ -9,6 +9,7 @@
 
 import type { Api, CodexCompactionContext, FetchImpl, Model, ProviderSessionState } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
+import { gateFetch, runWithModelRequestLineage } from "@oh-my-pi/pi-ai/model-request-execution";
 import { createOpenAICodexCompactionRequestContext } from "@oh-my-pi/pi-ai/providers/openai-codex-compaction";
 import { applyCodexResponsesLiteShape } from "@oh-my-pi/pi-ai/providers/openai-codex/request-transformer";
 import {
@@ -259,7 +260,11 @@ export async function requestCompactionV2Streaming(
 		preferWebsockets?: boolean;
 	},
 ): Promise<CompactionV2Response> {
-	let fetchImpl: FetchImpl = options?.fetch ?? globalThis.fetch;
+	let fetchImpl: FetchImpl = gateFetch(
+		{ provider: model.provider, id: model.id, api: model.api, baseUrl: model.baseUrl },
+		"chat",
+		options?.fetch ?? globalThis.fetch,
+	);
 	if (isBedrockOpenAIUrl(model.baseUrl)) {
 		({
 			model,
@@ -288,36 +293,39 @@ export async function requestCompactionV2Streaming(
 			: undefined;
 	let lastError: Error | undefined;
 
-	for (let attempt = 0; attempt <= V2_COMPACTION_MAX_RETRIES; attempt++) {
-		const timeoutSignal = ptree.combineSignals(signal, options?.timeoutMs ?? V2_COMPACTION_TIMEOUT_MS);
-		try {
-			return await attemptCompactionV2Streaming(endpoint, apiKey, model, request, fetchImpl, timeoutSignal, {
-				codexMetadata,
-				providerSessionState: options?.providerSessionState,
-				codexCompaction: options?.codexCompaction,
-				preferWebsockets: options?.preferWebsockets,
-			});
-		} catch (err) {
-			const error = err instanceof Error ? err : new Error(String(err));
-			if (signal?.aborted) throw error;
-
-			if (isRetryableCompactionError(error) && attempt < V2_COMPACTION_MAX_RETRIES) {
-				lastError = error;
-				const backoffMs = 2 ** attempt * 1000;
-				logger.warn(`V2 compaction attempt ${attempt + 1} failed, retrying in ${backoffMs}ms`, {
-					error: error.message,
-					model: model.id,
+	// The in-loop retries are wire attempts of one logical request.
+	return runWithModelRequestLineage(async () => {
+		for (let attempt = 0; attempt <= V2_COMPACTION_MAX_RETRIES; attempt++) {
+			const timeoutSignal = ptree.combineSignals(signal, options?.timeoutMs ?? V2_COMPACTION_TIMEOUT_MS);
+			try {
+				return await attemptCompactionV2Streaming(endpoint, apiKey, model, request, fetchImpl, timeoutSignal, {
+					codexMetadata,
+					providerSessionState: options?.providerSessionState,
+					codexCompaction: options?.codexCompaction,
+					preferWebsockets: options?.preferWebsockets,
 				});
-				await retryWait(backoffMs, signal);
+			} catch (err) {
+				const error = err instanceof Error ? err : new Error(String(err));
 				if (signal?.aborted) throw error;
-				continue;
+
+				if (isRetryableCompactionError(error) && attempt < V2_COMPACTION_MAX_RETRIES) {
+					lastError = error;
+					const backoffMs = 2 ** attempt * 1000;
+					logger.warn(`V2 compaction attempt ${attempt + 1} failed, retrying in ${backoffMs}ms`, {
+						error: error.message,
+						model: model.id,
+					});
+					await retryWait(backoffMs, signal);
+					if (signal?.aborted) throw error;
+					continue;
+				}
+
+				throw error;
 			}
-
-			throw error;
 		}
-	}
 
-	throw lastError ?? new Error("V2 compaction failed after max retries");
+		throw lastError ?? new Error("V2 compaction failed after max retries");
+	});
 }
 
 async function attemptCompactionV2Streaming(

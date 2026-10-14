@@ -7,6 +7,8 @@
 - Added the core execution context for model requests: sessions, agent runs, extension handlers/tools/commands, child sessions, advisors and background jobs now carry a session, root and purpose, and child sessions receive their spawner's root explicitly (`modelRequestRoot`).
 - Session-less CLI commands are marked as such at process entry so their model requests are classified as standalone.
 
+- Retries, credential rotations, model fallbacks, judge candidates, turn recovery, cache-warm replays and compaction walks now tell a registered model request gate which kind of re-attempt each wire attempt is.
+
 ### Changed
 
 - A model request gate denial now stops turn auto-retry, model fallback, judge-candidate fallback and compaction fallback instead of retrying.

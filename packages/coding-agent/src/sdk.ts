@@ -4417,10 +4417,12 @@ async function createAgentSessionScoped(
 						? {}
 						: { toolNamespacesInfo: codeModeState.namespacesInfo }),
 				};
-				const stream = sessionStreamFn(streamModel, context, {
-					...merged,
-					...(fallbackCreditRedemption !== undefined ? { fallbackCreditRedemption } : {}),
-				});
+				const stream = session.runModelRequestAttempt(() =>
+					sessionStreamFn(streamModel, context, {
+						...merged,
+						...(fallbackCreditRedemption !== undefined ? { fallbackCreditRedemption } : {}),
+					}),
+				);
 				// Every request through this streamFn is this session's own main
 				// loop (side-channel, advisor, and maintenance requests use
 				// dedicated wrappers), so it owns the warmer. The replay omits the

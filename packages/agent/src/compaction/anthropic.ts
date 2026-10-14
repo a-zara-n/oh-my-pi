@@ -18,6 +18,7 @@ import type {
 	Usage,
 } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
+import { runWithModelRequestLineage } from "@oh-my-pi/pi-ai/model-request-execution";
 import { resolveAnthropicCompactionEffort } from "@oh-my-pi/pi-ai/providers/anthropic";
 import { supportsAnthropicCompaction } from "@oh-my-pi/pi-ai/providers/anthropic-compaction";
 import { isRecord, prompt } from "@oh-my-pi/pi-utils";
@@ -230,29 +231,31 @@ export async function requestAnthropicNativeCompaction(
 	signal: AbortSignal | undefined,
 	options: AnthropicNativeCompactionOptions,
 ): Promise<AnthropicNativeCompactionResponse> {
-	const response = await instrumentedCompleteSimple(
-		model,
-		request.context,
-		{
-			apiKey,
-			signal,
-			maxTokens: request.maxTokens,
-			reasoning: resolveAnthropicCompactionEffort(model, request.context.messages, request.reasoning),
-			initiatorOverride: options.initiatorOverride,
-			metadata: options.metadata,
-			fetch: options.fetch,
-			sessionId: options.sessionId,
-			promptCacheKey: options.promptCacheKey,
-			providerSessionState: options.providerSessionState,
-			maxInFlightRequests: options.maxInFlightRequests,
-			anthropicCompaction: { instructions: request.instructions, filesDueBefore: request.filesDueBefore },
-		},
-		{
-			telemetry: options.telemetry,
-			oneshotKind: "compaction_native",
-			completeImpl: options.completeImpl,
-			retry: options.retry,
-		},
+	const response = await runWithModelRequestLineage(() =>
+		instrumentedCompleteSimple(
+			model,
+			request.context,
+			{
+				apiKey,
+				signal,
+				maxTokens: request.maxTokens,
+				reasoning: resolveAnthropicCompactionEffort(model, request.context.messages, request.reasoning),
+				initiatorOverride: options.initiatorOverride,
+				metadata: options.metadata,
+				fetch: options.fetch,
+				sessionId: options.sessionId,
+				promptCacheKey: options.promptCacheKey,
+				providerSessionState: options.providerSessionState,
+				maxInFlightRequests: options.maxInFlightRequests,
+				anthropicCompaction: { instructions: request.instructions, filesDueBefore: request.filesDueBefore },
+			},
+			{
+				telemetry: options.telemetry,
+				oneshotKind: "compaction_native",
+				completeImpl: options.completeImpl,
+				retry: options.retry,
+			},
+		),
 	);
 	if (response.stopReason === "aborted") {
 		throw new AIError.AbortError("Anthropic compaction aborted", { cause: signal?.reason });

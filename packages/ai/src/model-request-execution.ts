@@ -18,6 +18,14 @@ import {
 } from "./model-request-runtime";
 
 export {
+	createModelRequestRetryChain,
+	type ModelRequestRetryChain,
+	markNextModelRequestAttempt,
+	runInModelRequestRetryChain,
+	runWithModelRequestLineage,
+} from "./model-request-lineage";
+export { authorizeUninstrumentedAttempt, gateFetch } from "./utils/model-request-fetch";
+export {
 	ModelRequestProcessClassError,
 	type ModelRequestAuthorizationInput,
 	type ModelRequestExecution,
@@ -78,4 +86,17 @@ export function markModelRequestProcessStandalone(): void {
  */
 export function authorizeModelRequest(input: ModelRequestAuthorizationInput): Promise<ModelRequestPermit> {
 	return getModelRequestRuntime().authorize(input);
+}
+
+/**
+ * Declare that `stream` is an on-device transport (nothing leaves the process), so it is not an external request.
+ * The exemption is bound to the function itself: a different function registered under the same API name is not exempt.
+ */
+export function markModelRequestLocalStream(stream: (...args: never[]) => unknown): void {
+	getModelRequestRuntime().markLocalStream(stream);
+}
+
+/** Whether `stream` was declared an on-device transport with {@link markModelRequestLocalStream}. */
+export function isModelRequestLocalStream(stream: (...args: never[]) => unknown): boolean {
+	return getModelRequestRuntime().isLocalStream(stream);
 }

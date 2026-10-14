@@ -74,6 +74,10 @@ import { isFoundryEnabled } from "./utils/foundry";
 import { applyGlyphCodec } from "./utils/glyph-codec";
 import { wrapLeakedThinkingStream } from "./utils/leaked-thinking-stream";
 import { withThinkingLoopGuard } from "./utils/thinking-loop";
+import { markNextModelRequestAttempt, runWithModelRequestLineage } from "./model-request-lineage";
+import { isModelRequestLocalStream } from "./model-request-execution";
+import { getModelRequestRuntime } from "./model-request-runtime";
+import { authorizeUninstrumentedAttempt } from "./utils/model-request-fetch";
 import { withTransportFetch } from "./utils/transport-fetch";
 
 function isGoogleVertexAuthenticatedModel(model: Model<Api>): boolean {
@@ -896,6 +900,14 @@ export function stream<TApi extends Api>(
 	context: Context,
 	options?: OptionsForApi<TApi>,
 ): AssistantMessageEventStream {
+	return runWithModelRequestLineage(() => streamInLineage(model, context, options));
+}
+
+function streamInLineage<TApi extends Api>(
+	model: Model<TApi>,
+	context: Context,
+	options?: OptionsForApi<TApi>,
+): AssistantMessageEventStream {
 	if (model.resolveHeaders) {
 		return withResolvedModelHeaders(model, options?.signal, resolvedModel => stream(resolvedModel, context, options));
 	}
@@ -915,7 +927,62 @@ export function stream<TApi extends Api>(
 	);
 }
 
+/** APIs whose requests never go through the `fetch` the core controls (WebSocket, an SDK's own client). */
+const UNINSTRUMENTED_APIS: ReadonlySet<Api> = new Set<Api>([
+	"bedrock-converse-stream",
+	"cursor-agent",
+	"apple-foundation-models",
+	"factory-droid-agent",
+	"gitlab-duo-agent",
+]);
+
+/**
+ * A model request gate must be able to account for a request it permits. Where the transport is not a core-controlled
+ * `fetch`, the gate is asked once with no readable wire and the request is sent only if it answers `pass`; a gate
+ * that allows is refused (see {@link authorizeUninstrumentedAttempt}). With no gate registered this is `create()`.
+ */
+function gateUninstrumentedTransport(
+	model: Model<Api>,
+	signal: AbortSignal | undefined,
+	create: () => AssistantMessageEventStream,
+): AssistantMessageEventStream {
+	if (!getModelRequestRuntime().hasGate()) return create();
+	const outer = new AssistantMessageEventStream();
+	void (async () => {
+		try {
+			await authorizeUninstrumentedAttempt(model, "chat", signal);
+			const inner = create();
+			for await (const event of inner) {
+				outer.push(event);
+				if (outer.done) return;
+			}
+			if (!outer.done) outer.end(await inner.result());
+		} catch (error) {
+			outer.fail(error);
+		}
+	})();
+	return outer;
+}
+
+/** Whether `model` is served by a registered custom API that is not an on-device transport. */
+function isExternalCustomApi(model: Model<Api>): boolean {
+	const custom = getCustomApi(model.api);
+	return custom !== undefined && !isModelRequestLocalStream(custom.streamSimple);
+}
+
 function streamDispatch<TApi extends Api>(
+	model: Model<TApi>,
+	context: Context,
+	options: OptionsForApi<TApi> | undefined,
+	limited: boolean,
+): AssistantMessageEventStream {
+	if (UNINSTRUMENTED_APIS.has(model.api) || isExternalCustomApi(model)) {
+		return gateUninstrumentedTransport(model, options?.signal, () => streamDispatchRequest(model, context, options, limited));
+	}
+	return streamDispatchRequest(model, context, options, limited);
+}
+
+function streamDispatchRequest<TApi extends Api>(
 	model: Model<TApi>,
 	context: Context,
 	options: OptionsForApi<TApi> | undefined,
@@ -1110,6 +1177,7 @@ async function resolveWithThinkingLoopRetries(
 		signal?.throwIfAborted();
 		const delay = Math.min(THINKING_LOOP_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1), THINKING_LOOP_RETRY_MAX_DELAY_MS);
 		await scheduler.wait(delay, { signal });
+		markNextModelRequestAttempt("thinking-loop-retry");
 		message = await dispatchAttempt();
 		thinkingLoopRetry = isRetryableThinkingLoop(message);
 	}
@@ -1122,7 +1190,9 @@ export async function complete<TApi extends Api>(
 	context: Context,
 	options?: OptionsForApi<TApi>,
 ): Promise<AssistantMessage> {
-	return resolveWithThinkingLoopRetries(options?.signal, () => stream(model, context, options));
+	return runWithModelRequestLineage(() =>
+		resolveWithThinkingLoopRetries(options?.signal, () => stream(model, context, options)),
+	);
 }
 
 type AuthRetryFailure = {
@@ -1235,6 +1305,14 @@ function withSupportedSamplingParams<T extends SamplingOptions>(model: Model<Api
 }
 
 export function streamSimple<TApi extends Api>(
+	model: Model<TApi>,
+	context: Context,
+	options?: SimpleStreamOptions,
+): AssistantMessageEventStream {
+	return runWithModelRequestLineage(() => streamSimpleInLineage(model, context, options));
+}
+
+function streamSimpleInLineage<TApi extends Api>(
 	model: Model<TApi>,
 	context: Context,
 	options?: SimpleStreamOptions,
@@ -1421,6 +1499,7 @@ function streamSimpleRequest<TApi extends Api>(
 					},
 				);
 				if (nextKey === undefined) break;
+				markNextModelRequestAttempt("auth-rotation");
 				const next = await runAttempt(nextKey, nextCredentialId, nextOAuthIdentity);
 				if (!next) return;
 				failure = next;
@@ -1473,9 +1552,12 @@ function streamSimpleRequest<TApi extends Api>(
 	const customApiProvider = getCustomApi(model.api);
 	if (customApiProvider) {
 		return withThinkingLoopGuard(model, requestOptions, opts =>
-			withProviderInFlightLimit(model, opts, limited =>
-				customApiProvider.streamSimple(model, context, { ...opts, waitForTerminalDrain: limited }),
-			),
+			withProviderInFlightLimit(model, opts, limited => {
+				const create = () => customApiProvider.streamSimple(model, context, { ...opts, waitForTerminalDrain: limited });
+				return isModelRequestLocalStream(customApiProvider.streamSimple)
+					? create()
+					: gateUninstrumentedTransport(model, opts?.signal, create);
+			}),
 		);
 	}
 
@@ -1580,10 +1662,8 @@ export async function completeSimple<TApi extends Api>(
 ): Promise<AssistantMessage> {
 	const { onAttempt, ...streamOptions } = options ?? {};
 	const sessionOptions = withInferenceSessionId(streamOptions);
-	return resolveWithThinkingLoopRetries(
-		options?.signal,
-		() => streamSimple(model, context, sessionOptions),
-		onAttempt,
+	return runWithModelRequestLineage(() =>
+		resolveWithThinkingLoopRetries(options?.signal, () => streamSimple(model, context, sessionOptions), onAttempt),
 	);
 }
 

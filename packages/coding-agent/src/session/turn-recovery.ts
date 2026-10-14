@@ -20,6 +20,7 @@ import type {
 } from "@oh-my-pi/pi-ai";
 import { calculateRateLimitBackoffMs, parseRateLimitReason } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
+import type { ModelRequestReason } from "@oh-my-pi/pi-ai/model-request-gate";
 import { extractProviderRetryHint } from "@oh-my-pi/pi-ai/utils/retry-after";
 import { fallbackCreditTargets } from "@oh-my-pi/pi-catalog/compat/fallback-credit";
 import { resolveModelPolicy } from "@oh-my-pi/pi-catalog/compat/resolve";
@@ -51,6 +52,7 @@ import type {
 	UsageFallbackConfirmation,
 	UsageFallbackConfirmer,
 } from "./agent-session-types";
+import { ModelRequestReattempts } from "./model-request-reattempt";
 import { assistantTurnProducedOutput, isEmptyAssistantStop, isEmptyErrorTurn } from "./messages";
 import {
 	type ActiveRetryFallbackState,
@@ -319,6 +321,7 @@ export class TurnRecovery {
 	#emptyStopRetryCount = 0;
 	#unexpectedStopRetryCount = 0;
 	#malformedFunctionCallRetryCount = 0;
+	readonly #reattempts = new ModelRequestReattempts();
 	#streamStallContinueCount = 0;
 	#acceptTerminalEmptyStopForPrompt = false;
 	// Three fields sit near the word "serve" and are deliberately distinct:
@@ -481,6 +484,20 @@ export class TurnRecovery {
 	}
 
 	/**
+	 * Run one model request of the session's main loop. A request issued by a recovery (automatic retry, credential
+	 * rotation, fallback model, corrective continuation) joins the retry chain of the request it follows and declares
+	 * why it is made; every other request starts a chain of its own, so consecutive turns of one prompt never link.
+	 */
+	runModelRequestAttempt<T>(fn: () => T): T {
+		return this.#reattempts.run(fn, this.#host.promptGeneration());
+	}
+
+	/** The next request is a re-attempt of the one that just failed, of the given kind. */
+	#declareReattempt(reason: ModelRequestReason): void {
+		this.#reattempts.declare(reason, this.#host.promptGeneration());
+	}
+
+	/**
 	 * Records which model produced this turn, marks an active fallback as having
 	 * served, then closes a successful retry saga and annotates recovered
 	 * persisted errors.
@@ -613,6 +630,7 @@ export class TurnRecovery {
 			attribution: "agent",
 			timestamp: Date.now(),
 		});
+		this.#declareReattempt("turn-retry");
 		this.#host.scheduleAgentContinue({
 			source: "malformed-function-call-retry",
 			generation: this.#host.promptGeneration(),
@@ -684,6 +702,7 @@ export class TurnRecovery {
 			attribution: "agent",
 			timestamp: Date.now(),
 		});
+		this.#declareReattempt("turn-retry");
 		this.#host.scheduleAgentContinue({
 			source: "stream-stall-continue",
 			generation: this.#host.promptGeneration(),
@@ -1020,6 +1039,7 @@ export class TurnRecovery {
 			attribution: "agent",
 			timestamp: Date.now(),
 		});
+		this.#declareReattempt("turn-retry");
 		this.#host.scheduleAgentContinue({
 			source: "empty-stop-retry",
 			generation: this.#host.promptGeneration(),
@@ -1106,6 +1126,7 @@ export class TurnRecovery {
 			attribution: "agent",
 			timestamp: Date.now(),
 		});
+		this.#declareReattempt("turn-retry");
 		this.#host.scheduleAgentContinue({
 			source: "unexpected-stop-retry",
 			generation: this.#host.promptGeneration(),
@@ -2856,6 +2877,7 @@ export class TurnRecovery {
 		// continuation that still fails locally must close the retry saga —
 		// otherwise auto_retry_end never fires, retryPromise stays pending, and
 		// the in-flight prompt() (and the TUI retry indicator) hang forever.
+		this.#declareReattempt(switchedModel ? "model-fallback" : switchedCredential ? "auth-rotation" : "turn-retry");
 		this.#host.scheduleAgentContinue({
 			source: "automatic-retry",
 			delayMs: 1,

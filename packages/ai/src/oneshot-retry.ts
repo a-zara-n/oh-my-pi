@@ -1,4 +1,5 @@
 import * as AIError from "./error";
+import { createModelRequestRetryChain, runInModelRequestRetryChain } from "./model-request-lineage";
 import type { AssistantMessage } from "./types";
 import {
 	extractProviderRetryHint,
@@ -165,12 +166,15 @@ export async function retryTransientCompletion(
 	const baseDelayMs = options?.baseDelayMs ?? DEFAULT_BASE_DELAY_MS;
 	const maxDelayMs = options?.maxDelayMs ?? DEFAULT_MAX_DELAY_MS;
 	const signal = options?.signal;
+	const chain = createModelRequestRetryChain();
 
 	for (let attempt = 1; ; attempt++) {
 		let message: AssistantMessage | undefined;
 		let thrown: unknown;
 		try {
-			message = await run(attempt);
+			message = await runInModelRequestRetryChain(chain, attempt > 1 ? "oneshot-retry" : undefined, () =>
+				run(attempt),
+			);
 			if (message.stopReason !== "error") return message;
 		} catch (error) {
 			thrown = error;

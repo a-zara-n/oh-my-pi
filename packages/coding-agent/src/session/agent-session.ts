@@ -13646,4 +13646,9 @@ export class AgentSession implements SettingsScope {
 	consumeActiveFallbackCreditRedemption(targetModel?: Model): AnthropicFallbackCreditHandle | undefined {
 		return this.#recovery.consumeActiveFallbackCreditRedemption(targetModel);
 	}
+
+	/** Run one main-loop model request so a recovery re-attempt is linked to the request it follows. */
+	runModelRequestAttempt<T>(fn: () => T): T {
+		return this.#recovery.runModelRequestAttempt(fn);
+	}
 }
