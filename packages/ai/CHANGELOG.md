@@ -9,10 +9,11 @@
 - With a gate registered, every wire attempt of a fetch-based model request (a provider's own retry, a credential rotation, a thinking-loop re-sample, a oneshot retry, a judge attempt) is authorized separately before any I/O, is told to start sending immediately before the first byte, sees the response pass through unaltered, and is settled exactly once; the gate is shown a credential-free view of the request and each attempt names the kind of re-attempt it is.
 - A transport the core cannot account for (a WebSocket, an SDK's own client, an extension-registered provider) is asked once with no readable request, and is sent only if the gate passes it.
 
-- Added `auxiliaryFetch(fetch)`: the same transport without the gate, for requests that are not model requests (token exchange, credential and metadata lookups, version probes). Google ADC, GitLab direct access, Devin auth metadata, AWS credential resolution and the Antigravity version probe use it, so the gate is not shown credential bodies and those lookups are not counted as attempts.
+- Added `auxiliaryFetch(fetch)`: the same transport without the gate, for requests that carry no prompt and run no model (token exchange, credential and metadata lookups, version probes). Google ADC, GitLab direct access, Devin auth metadata, AWS credential resolution and the Antigravity version probe use it, so the gate is not shown credential bodies and those lookups are not counted as attempts.
 
 ### Changed
 
+- Devin's router assignment (`AssignModel`), which sends the user's prompt to the provider before the chat message, is a gated model request of its own instead of an auxiliary lookup: a gate that refuses it sends nothing of the turn. The gate is shown the wire with the credentials recognisable by name removed; a credential the provider's own protocol puts in the request body (Devin's message metadata) is not redacted.
 - The model an attempt names is the model the request is addressed to after the provider definition prepared it, and its `baseUrl` is redacted like the wire url when it carries a credential.
 - A gate whose `beginSend()` throws is a terminal `gate-error`: the lease is settled as not sent and no retry layer replays the request.
 - The direct `streamSimple` branch of `gitlab-duo-agent` is gated like the other transports the core cannot account for, and an on-device transport is exempt only for the function that was declared local.

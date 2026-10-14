@@ -63,6 +63,16 @@ export function runWithModelRequestLineage<T>(fn: () => T): T {
 }
 
 /**
+ * Run `fn` as a model request of its own, even from inside another logical request: its own `requestId` and its own
+ * retry chain, so it is a `first` attempt that neither consumes the reason the enclosing request declared for its next
+ * attempt nor makes that request's next attempt look like a retry of it. For a provider that makes a second, distinct
+ * model request before the one the caller asked for (a router assignment that scores the prompt).
+ */
+export function runAsIndependentModelRequest<T>(fn: () => T): T {
+	return lineageStore.run({ requestId: crypto.randomUUID(), chain: new RetryChainImpl() }, fn);
+}
+
+/**
  * Declare that the next wire attempt of the current logical request is a re-attempt of kind `reason`. A no-op outside
  * a logical request and outside a retry chain, so call sites need no guard.
  */

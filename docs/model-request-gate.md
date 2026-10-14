@@ -83,9 +83,10 @@ authorized on its own: `transportFetch` for everything that goes through `stream
 gate registered those calls go straight to the underlying fetch, unchanged.
 
 For each attempt the core: (1) builds the attempt (`origin` and `scope` from the execution context, never from the
-caller; `kind`; the model's provider/id/api/baseUrl) and a credential-free `wire` (method, url without userinfo or
+caller; `kind`; the model's provider/id/api/baseUrl) and a `wire` with the credentials the core can recognise by name removed (method, url without userinfo or
 credential-looking query parameters, headers without credential-looking names, `bodyBytes`, and an in-memory
-`readBody()`); (2) awaits `gate.authorize`; a denial, a failing or malformed gate, or a gate that does not answer in time
+`readBody()`; the body is not redacted, and a provider whose own protocol puts a credential in the request body, as
+Devin does in its message metadata, shows it there to a gate that decodes the body); (2) awaits `gate.authorize`; a denial, a failing or malformed gate, or a gate that does not answer in time
 is a `ModelRequestDeniedError` and nothing is sent; (3) on `allow`, calls `lease.beginSend()` synchronously immediately
 before the first I/O; (4) hands the response head to `observeResponse` and every body chunk to `observeChunk` while the
 body passes to the caller unaltered; (5) settles the lease exactly once (`response-ended`, `response-failed`,
@@ -106,13 +107,22 @@ The remote summarizer endpoint is named as the base URL of its attempt.
 
 ### Requests that are not model requests
 
-A provider receives one gated `options.fetch` for its inference request, but also needs a fetch for requests that are
-not model requests: OAuth and token exchange, credential and metadata lookups (Google ADC, GitLab direct access, Devin
-auth metadata, AWS STS/SSO/IMDS), version probes. They must not use it, or the gate would be shown credential request
-bodies and responses, count them as attempts, and a later real attempt would be labelled a retry of them. They use
-`auxiliaryFetch(options.fetch)`, which returns the same transport (proxy, CA, User-Agent, request recording) without
-the gate; a fetch that is not gated is returned unchanged. A gate denial raised by a lookup is never converted into a
-missing credential.
+A provider receives one gated `options.fetch` for its model request, but also needs a fetch for requests around it. Only
+a request that **carries no prompt or user content and runs no model** may bypass the gate: OAuth and token exchange,
+credential and identity lookups, account and model-catalog metadata, version probes (Google ADC, GitLab direct access,
+Devin `GetUserJwt`, AWS STS/SSO/IMDS, the Antigravity version manifest). Such a request must not use the gated fetch, or
+the gate would be shown credential request bodies and responses, count them as attempts, and a later real attempt would
+be labelled a retry of them. It uses `auxiliaryFetch(options.fetch)`, which returns the same transport (proxy, CA,
+User-Agent, request recording) without the gate; a fetch that is not gated is returned unchanged. A gate denial raised
+by a lookup is never converted into a missing credential.
+
+Anything that sends the user's prompt, or makes the provider run a model on it, is a model request and stays on the
+gated fetch, as an attempt of its own. Devin's router assignment (`AssignModel`) is one: it scores the current user turn
+on the provider's side before the chat message is sent, so it is authorized first (`runAsIndependentModelRequest` gives
+it its own `requestId` and retry chain, so it is a `first` attempt and the chat attempt that follows is not labelled a
+retry of it), and a refusal sends nothing of the turn. The setup calls of a transport the core cannot account for (the
+GitLab Duo workflow's REST calls, one of which carries the goal) are not asked again: the gate was asked once for that
+whole transport before any of them (see below).
 
 ### Which kind of attempt
 

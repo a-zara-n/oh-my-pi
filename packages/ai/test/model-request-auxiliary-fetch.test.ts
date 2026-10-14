@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { Buffer } from "node:buffer";
 import * as AIError from "@oh-my-pi/pi-ai/error";
-import { runWithModelRequestLineage } from "@oh-my-pi/pi-ai/model-request-execution";
+import { markNextModelRequestAttempt, runWithModelRequestLineage } from "@oh-my-pi/pi-ai/model-request-execution";
 import { ModelRequestDeniedError } from "@oh-my-pi/pi-ai/model-request-gate";
 import { streamBedrock } from "@oh-my-pi/pi-ai/providers/amazon-bedrock";
 import { clearAwsCredentialCache, resolveAwsCredentials } from "@oh-my-pi/pi-ai/providers/aws-credentials";
@@ -601,43 +601,52 @@ function connectFrame(payload: Uint8Array): Uint8Array {
 	return out;
 }
 
-const devinModel: Model<"devin-agent"> = buildModel({
-	id: "devin-auxiliary-test",
-	name: "Devin Auxiliary Test",
-	api: "devin-agent",
-	provider: "devin",
-	baseUrl: "https://server.codeium.com",
-	requestModelId: "adaptive",
-	reasoning: false,
-	input: ["text"],
-	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-	contextWindow: 200_000,
-	maxTokens: 64_000,
-	compat: { modelRouter: true },
-});
+const DEVIN_ASSIGN_MODEL_URL_PART = "/exa.api_server_pb.ApiServerService/AssignModel";
+const DEVIN_GET_USER_JWT_URL_PART = "/exa.auth_pb.AuthService/GetUserJwt";
+const DEVIN_CHAT_URL_PART = "/exa.api_server_pb.ApiServerService/GetChatMessage";
+
+function devinTestModel(router: boolean): Model<"devin-agent"> {
+	return buildModel({
+		id: router ? "devin-router-test" : "devin-auxiliary-test",
+		name: router ? "Devin Router Test" : "Devin Auxiliary Test",
+		api: "devin-agent",
+		provider: "devin",
+		baseUrl: "https://server.codeium.com",
+		...(router ? { requestModelId: "adaptive" } : {}),
+		reasoning: false,
+		input: ["text"],
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: 200_000,
+		maxTokens: 64_000,
+		compat: { modelRouter: router },
+	});
+}
+
+/** The provider's three answers: the user JWT, a router assignment, and a one-message chat reply. */
+function devinResponder(request: SeenRequest): Response {
+	if (request.url.includes("GetUserJwt")) {
+		return new Response(
+			toBinary(GetUserJwtResponseSchema, create(GetUserJwtResponseSchema, { userJwt: DEVIN_USER_JWT })),
+		);
+	}
+	if (request.url.includes("AssignModel")) {
+		const assignment = create(ModelAssignmentSchema, { assignmentJwt: "assign-jwt", modelUid: "claude-sonnet-4-5" });
+		return new Response(toBinary(AssignModelResponseSchema, create(AssignModelResponseSchema, { assignment })));
+	}
+	const chat = create(GetChatMessageResponseSchema, { messageId: "msg-1", stopReason: StopReason.STOP_PATTERN });
+	return new Response(connectFrame(toBinary(GetChatMessageResponseSchema, chat)));
+}
+
+const devinModel = devinTestModel(false);
+const devinRouterModel = devinTestModel(true);
 
 const devinScenario: Scenario = {
-	name: "devin provider: GetUserJwt and AssignModel before GetChatMessage",
+	name: "devin provider: GetUserJwt before GetChatMessage",
 	model: devinModel,
-	auxiliary: ["/exa.auth_pb.AuthService/GetUserJwt", "/exa.api_server_pb.ApiServerService/AssignModel"],
+	auxiliary: [DEVIN_GET_USER_JWT_URL_PART],
 	leaks: [],
-	isInference: url => url.endsWith("/exa.api_server_pb.ApiServerService/GetChatMessage"),
-	respond: request => {
-		if (request.url.includes("GetUserJwt")) {
-			return new Response(
-				toBinary(GetUserJwtResponseSchema, create(GetUserJwtResponseSchema, { userJwt: DEVIN_USER_JWT })),
-			);
-		}
-		if (request.url.includes("AssignModel")) {
-			const assignment = create(ModelAssignmentSchema, {
-				assignmentJwt: "assign-jwt",
-				modelUid: "claude-sonnet-4-5",
-			});
-			return new Response(toBinary(AssignModelResponseSchema, create(AssignModelResponseSchema, { assignment })));
-		}
-		const chat = create(GetChatMessageResponseSchema, { messageId: "msg-1", stopReason: StopReason.STOP_PATTERN });
-		return new Response(connectFrame(toBinary(GetChatMessageResponseSchema, chat)));
-	},
+	isInference: url => url.endsWith(DEVIN_CHAT_URL_PART),
+	respond: devinResponder,
 	arrange: async () => ({}),
 	run: h => succeeded(streamDevin(devinModel, textContext, { apiKey: DEVIN_KEY, fetch: h.gated }).result()),
 };
@@ -1009,5 +1018,92 @@ describe("a gate denial raised inside a credential lookup is surfaced, never swa
 		expect(result.stopReason).toBe("error");
 		expect(result.errorMessage).toContain(DENIAL_MESSAGE);
 		expect(socketOpened).toBe(false);
+	});
+});
+
+describe("devin router assignment is a model request: it carries the user's prompt", () => {
+	const routerRun = (h: Harness) =>
+		succeeded(streamDevin(devinRouterModel, textContext, { apiKey: DEVIN_KEY, fetch: h.gated }).result());
+
+	test("the gate is asked about AssignModel and then about the chat message, each a first attempt of its own; only GetUserJwt skips it", async () => {
+		const h = harness(devinRouterModel, devinResponder);
+
+		await runWithModelRequestLineage(() => routerRun(h));
+
+		expect(h.seen.map(request => request.url.slice(request.url.indexOf("/exa.")))).toEqual([
+			DEVIN_GET_USER_JWT_URL_PART,
+			DEVIN_ASSIGN_MODEL_URL_PART,
+			DEVIN_CHAT_URL_PART,
+		]);
+		expect(gate.attempts).toHaveLength(2);
+		const [assign, chat] = gate.attempts;
+		expect(assign?.wire?.url.endsWith(DEVIN_ASSIGN_MODEL_URL_PART)).toBe(true);
+		expect(chat?.wire?.url.endsWith(DEVIN_CHAT_URL_PART)).toBe(true);
+		for (const attempt of gate.attempts) {
+			expect(attempt.kind).toBe("chat");
+			expect(attempt.reason).toBe("first");
+			expect(attempt.retryOf).toBeUndefined();
+		}
+		expect(assign?.requestId).not.toBe(chat?.requestId);
+		expect(h.leases).toHaveLength(2);
+		// The user's JWT comes from the lookup that is not a model request and never appears on the gate's side.
+		for (const lease of h.leases) expect(textOf(lease.observedBytes())).not.toContain(DEVIN_USER_JWT);
+		for (const attempt of gate.attempts) {
+			expect(Object.values(attempt.wire?.headers ?? {}).join("\n")).not.toContain(DEVIN_USER_JWT);
+		}
+	});
+
+	test("a gate that refuses AssignModel sends nothing of the turn: no AssignModel, no chat message, the denial is surfaced", async () => {
+		const h = harness(devinRouterModel, devinResponder);
+		gate.setHandler(async () => ({ type: "deny", code: "test-denied", message: DENIAL_MESSAGE }));
+
+		const error = await runWithModelRequestLineage(() => routerRun(h)).then(
+			() => undefined,
+			(thrown: unknown) => thrown,
+		);
+
+		expect(AIError.isModelRequestDenied(error)).toBe(true);
+		expect(gate.attempts).toHaveLength(1);
+		expect(gate.attempts[0]?.wire?.url.endsWith(DEVIN_ASSIGN_MODEL_URL_PART)).toBe(true);
+		// Only the credential lookup reached the provider.
+		expect(h.seen.map(request => request.url.slice(request.url.indexOf("/exa.")))).toEqual([
+			DEVIN_GET_USER_JWT_URL_PART,
+		]);
+		expect(h.leases).toHaveLength(0);
+	});
+
+	test("a gate that allows AssignModel and refuses the chat message stops the turn at the chat message", async () => {
+		const h = harness(devinRouterModel, devinResponder);
+		gate.setHandler(async attempt => {
+			if (attempt.wire?.url.endsWith(DEVIN_CHAT_URL_PART)) {
+				return { type: "deny", code: "test-denied", message: DENIAL_MESSAGE };
+			}
+			const lease = recordingLease();
+			h.leases.push(lease);
+			return { type: "allow", lease: lease.lease };
+		});
+
+		const error = await runWithModelRequestLineage(() => routerRun(h)).then(
+			() => undefined,
+			(thrown: unknown) => thrown,
+		);
+
+		expect(AIError.isModelRequestDenied(error)).toBe(true);
+		expect(gate.attempts.map(attempt => attempt.wire?.url.slice(attempt.wire.url.indexOf("/exa.")))).toEqual([
+			DEVIN_ASSIGN_MODEL_URL_PART,
+			DEVIN_CHAT_URL_PART,
+		]);
+		expect(h.seen.some(request => request.url.endsWith(DEVIN_CHAT_URL_PART))).toBe(false);
+	});
+
+	test("the reason a retrying caller declared for the next attempt stays with the chat message, not the assignment", async () => {
+		const h = harness(devinRouterModel, devinResponder);
+
+		await runWithModelRequestLineage(() => {
+			markNextModelRequestAttempt("auth-rotation");
+			return routerRun(h);
+		});
+
+		expect(gate.attempts.map(attempt => attempt.reason)).toEqual(["first", "auth-rotation"]);
 	});
 });

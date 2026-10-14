@@ -33,6 +33,7 @@ import { DEVIN_DEFAULT_BASE_URL, devinCliMetadata, devinWireMetadata } from "@oh
 import { decodeDevinUnaryMessage } from "@oh-my-pi/pi-catalog/wire/devin-proto";
 import { isRecord, logger, parseStreamingJsonThrottled, sanitizeText } from "@oh-my-pi/pi-utils";
 import * as AIError from "../error";
+import { runAsIndependentModelRequest } from "../model-request-lineage";
 import { parseToolCallArguments } from "../utils/tool-call-arguments";
 
 import type {
@@ -225,10 +226,10 @@ export const streamDevin: StreamFunction<"devin-agent"> = (
 
 		try {
 			const fetchImpl = options?.fetch ?? fetch;
-			// Auth metadata and model assignment are not model requests; only the chat message POST is.
-			const auxFetch = auxiliaryFetch(fetchImpl);
+			// The auth metadata lookup is not a model request (credentials only); the router assignment and the chat
+			// message POST are: both carry the user's prompt to the provider and both are asked of the gate.
 			const baseUrl = (model.baseUrl || DEVIN_API_URL).replace(/\/+$/, "");
-			const auth = await fetchDevinAuthMetadata(options?.apiKey, baseUrl, auxFetch, options?.signal);
+			const auth = await fetchDevinAuthMetadata(options?.apiKey, baseUrl, auxiliaryFetch(fetchImpl), options?.signal);
 			const chatBaseUrl = auth.baseUrl ?? baseUrl;
 			const turn: DevinTurn = {
 				apiKey: auth.apiKey,
@@ -241,7 +242,11 @@ export const streamDevin: StreamFunction<"devin-agent"> = (
 			// assignment JWT on the chat request that shares the cascade id.
 			let assignment: ModelAssignment | undefined;
 			if (model.compat.modelRouter) {
-				assignment = await assignDevinModel(model, turn, chatBaseUrl, auxFetch, options?.signal);
+				// AssignModel runs the router on the prompt, so it is a model request of its own, authorized before it
+				// is sent; when the gate refuses it nothing of the turn is sent at all.
+				assignment = await runAsIndependentModelRequest(() =>
+					assignDevinModel(model, turn, chatBaseUrl, fetchImpl, options?.signal),
+				);
 				output.upstreamModel = assignment.modelUid;
 			}
 			let request = buildDevinChatRequest(model, context, options, turn, assignment);
