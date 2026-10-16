@@ -134,6 +134,7 @@ async function expectRejectedWithoutMutation(manager: SessionManager, operation:
 	await manager.flush();
 	expect(JSON.stringify(manager.getEntries())).not.toContain(rejectedCanary);
 	if (file) {
+		if (bytes === undefined) throw new Error("Missing original File snapshot.");
 		expect(await readFile(file, "utf8")).toBe(bytes);
 		expect(await readFile(file, "utf8")).not.toContain(rejectedCanary);
 	}

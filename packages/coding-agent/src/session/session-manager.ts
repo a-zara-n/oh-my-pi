@@ -1,6 +1,9 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { resolveModelRequestScope, type ModelRequestExecution } from "@oh-my-pi/pi-ai";
+import {
+	resolveModelRequestScope,
+	type ModelRequestExecution,
+} from "@oh-my-pi/pi-ai/model-request-execution";
 import {
 	type ModelRequestJournalLeaseBinding,
 	type ModelRequestJournalRootLeaseScope,
@@ -2222,9 +2225,9 @@ export class SessionManager {
 
 	#assertModelRequestJournalWritable(): void {
 		if (!this.#persist || !this.#sessionFile || this.#released || this.#entriesReleased ||
-			this.#diskFailure || this.#loadedMalformedRecords !== 0 ||
+			this.#diskFailure || this.#loadedMalformedRecords !== 0 || this.#storage.defersSyncPublish ||
 			!(this.#storage instanceof FileSessionStorage) ||
-			this.#storage.modelRequestJournal !== "process-crash-reader-visible" || this.#storage.defersSyncPublish) {
+			this.#storage.modelRequestJournal !== "process-crash-reader-visible") {
 			journalUnavailable();
 		}
 	}
