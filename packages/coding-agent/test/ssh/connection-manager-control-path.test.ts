@@ -19,12 +19,11 @@ import {
 let binDir: string;
 let fakeSsh: string;
 let logPath: string;
+let userMaster: string;
 
-// Fake `ssh`: `-G` reports a configured ControlPath for `cfg-host` and
-// `idle-host`. `cfg-host` has a live master that answers `-O check` only when
-// omp left ControlPath to the config, and refuses new masters like a
-// keyboard-interactive-only host. `idle-host` has no master yet and accepts
-// `-M`. Remote commands run locally so the host probe succeeds.
+// Fake `ssh`: `-G` reports configured ControlPaths for `cfg-host` and
+// `idle-host`. `cfg-host` already has a master; `idle-host` has none until
+// the test simulates a user starting one. Remote probes run locally.
 const FAKE_SSH = `#!/usr/bin/env bash
 echo "$*" >> "__LOG__"
 case " $* " in
@@ -37,10 +36,13 @@ case " $* " in
 		echo "batchmode no"
 		exit 0 ;;
 	*" -O check "*)
-		case " $* " in *ControlPath=*|*" idle-host "*) exit 255 ;; esac
+		case " $* " in
+			*ControlPath=*) exit 255 ;;
+			*" idle-host "*) if [ ! -f "__USER_MASTER__" ]; then exit 255; fi ;;
+		esac
 		echo "Master running" >&2
 		exit 0 ;;
-	*" -O exit "*) exit 0 ;;
+	*" -O exit "*) if [ "\${!#}" = idle-host ]; then rm -f "__USER_MASTER__"; fi; exit 0 ;;
 	*" -M "*)
 		case " $* " in *" idle-host "*) exit 0 ;; esac
 		echo "Permission denied (keyboard-interactive)." >&2; exit 255 ;;
@@ -57,7 +59,10 @@ beforeAll(async () => {
 	binDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-ssh-control-path-"));
 	fakeSsh = path.join(binDir, "ssh");
 	logPath = path.join(binDir, "calls.log");
-	await fs.writeFile(fakeSsh, FAKE_SSH.replace("__LOG__", logPath), { mode: 0o755 });
+	userMaster = path.join(binDir, "user-master");
+	await fs.writeFile(fakeSsh, FAKE_SSH.replace("__LOG__", logPath).replaceAll("__USER_MASTER__", userMaster), {
+		mode: 0o755,
+	});
 	await Bun.write(logPath, "");
 });
 
@@ -92,17 +97,18 @@ describe.skipIf(process.platform === "win32")("ssh_config ControlPath (#15974)",
 		expect(args).toContain("BatchMode=yes");
 	});
 
-	it("starts a master on the configured socket under the user's ControlPersist and exits it on close", async () => {
+	it("leaves a new user-owned master running after the configured socket had no master", async () => {
 		const host = { name: "omp-test-15974-idle-host", host: "idle-host" };
 		await ensureConnection(host);
+		// The configured socket was empty at check time. Its owner later
+		// authenticates and starts a master before omp closes the host.
+		await Bun.write(userMaster, "");
 		await closeConnection(host.name);
 
 		const calls = await callsFor("idle-host");
-		const start = calls.find(call => call.startsWith("-M "));
-		expect(start).toBeDefined();
-		expect(start).not.toContain("ControlPath=");
-		expect(start).not.toContain("ControlPersist=");
-		expect(calls.some(call => call.includes("-O exit"))).toBe(true);
+		expect(calls.some(call => call.includes("-O check"))).toBe(true);
+		expect(calls.some(call => call.startsWith("-M "))).toBe(false);
+		expect(calls.some(call => call.includes("-O exit"))).toBe(false);
 	});
 
 	it("keeps omp's socket when ssh_config sets no ControlPath or `none`", async () => {

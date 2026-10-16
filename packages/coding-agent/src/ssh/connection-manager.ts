@@ -722,9 +722,6 @@ const CONNECTION_VERIFY_TTL_MS = 30_000;
 /** Per host: when the connection was last verified, and the target it was verified for. */
 const verifiedConnections = new Map<string, { at: number; fingerprint: string }>();
 
-/** Host names whose master omp itself started on a config-owned ControlPath; only these are exited on close. */
-const startedConfigMasters = new Set<string>();
-
 export async function ensureConnection(host: SSHConnectionTarget): Promise<void> {
 	const key = host.name;
 	const fingerprint = `${host.username ?? ""}@${host.host}:${host.port ?? ""}\0${host.keyPath ?? ""}`;
@@ -771,7 +768,9 @@ export async function ensureConnection(host: SSHConnectionTarget): Promise<void>
 		const owner = await resolveControlPathOwner(host);
 		const commonArgs = buildCommonArgs(host, owner);
 		const check = await runSshSync(["-O", "check", ...commonArgs, target]);
-		if (check.exitCode === 0) {
+		if (check.exitCode === 0 || owner === "config") {
+			// Only omp-owned sockets need an explicit master. Configured sockets
+			// use ssh_config's normal connection and ControlPersist policy.
 			activeHosts.set(key, host);
 			if (!hostInfoCache.has(key) && !(await loadHostInfoFromDisk(host))) {
 				await probeHostInfo(host);
@@ -785,7 +784,6 @@ export async function ensureConnection(host: SSHConnectionTarget): Promise<void>
 			throw new Error(`Failed to start SSH master for ${target}${detail}`);
 		}
 
-		if (owner === "config") startedConfigMasters.add(key);
 		activeHosts.set(key, host);
 		if (!hostInfoCache.has(key) && !(await loadHostInfoFromDisk(host))) {
 			await probeHostInfo(host);
@@ -823,9 +821,9 @@ async function closeConnectionInternal(host: SSHConnectionTarget): Promise<void>
 	if (!supportsSshControlMaster()) return;
 	const target = buildSshTarget(host.username, host.host);
 	const owner = await resolveControlPathOwner(host);
-	// A master on the user's configured socket that omp did not start is shared
-	// with their own ssh sessions; leave its lifetime to ssh_config.
-	if (owner === "config" && !startedConfigMasters.delete(host.name)) return;
+	// Configured sockets may have been replaced by a user's master since the
+	// last check. Never exit a socket that omp doesn't own.
+	if (owner === "config") return;
 	await runSshSync(["-O", "exit", ...buildCommonArgs(host, owner), target]);
 }
 
