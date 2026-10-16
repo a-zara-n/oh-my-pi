@@ -1,6 +1,11 @@
 import { beforeAll, describe, expect, it, vi } from "bun:test";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
+import { pathToFileURL } from "node:url";
 import { ReadToolGroupComponent } from "@oh-my-pi/pi-tui/chat/read-tool-group";
 import { ToolExecutionComponent } from "@oh-my-pi/pi-tui/chat/tool-execution";
+import type { ReadToolDetails } from "@oh-my-pi/pi-tui/tools/read";
 import { initTheme } from "@oh-my-pi/pi-tui/theme";
 
 /**
@@ -63,5 +68,84 @@ describe("tool result details with raw control sequences", () => {
 		const rendered = group.render(120).join("\n");
 		expect(rendered).toContain("needle");
 		expect(privateModeSequences(rendered)).toEqual([]);
+	});
+
+	it("keeps a control-byte filename as the hyperlink target while cleaning its label", async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-read-link-"));
+		const filename = path.join(dir, `fixture${FILE_ESCAPES}.txt`);
+		try {
+			await Bun.write(filename, "needle");
+			const cases: Array<[string, ReadToolDetails]> = [
+				[
+					"target",
+					{ displayTarget: filename, resolvedPath: "/wrong", meta: { source: { type: "path", value: "/wrong" } } },
+				],
+				["resolved", { resolvedPath: filename, meta: { source: { type: "path", value: "/wrong" } } }],
+				["source", { meta: { source: { type: "path", value: filename } } }],
+			];
+			for (const [id, details] of cases) {
+				const group = new ReadToolGroupComponent({ showContentPreview: true });
+				group.updateArgs({ path: filename }, id);
+				group.updateResult(
+					{
+						content: [{ type: "text", text: "needle" }],
+						details: { ...details, displayContent: { text: LINE, startLine: 1 } },
+					},
+					false,
+					id,
+				);
+				const view = group.describe({
+					cols: 120,
+					reduceMotion: false,
+					dark: true,
+					supports: kind => kind === "tool",
+					feature: () => true,
+				});
+				if (view.k !== "tool") throw new Error("Expected read tool node");
+				const href = view.p?.href;
+				expect(href).toBe(pathToFileURL(filename).href);
+				expect(view.p?.target).not.toContain("\x1b");
+				expect(group.render(120).join("\n")).not.toContain(FILE_ESCAPES);
+				if (!href) throw new Error("Missing file link");
+				expect(await Bun.file(new URL(href)).text()).toBe("needle");
+			}
+		} finally {
+			await fs.rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("keeps each grouped read target link on its original control-byte filename", () => {
+		const first = `/tmp/a${FILE_ESCAPES}.txt`;
+		const second = `/tmp/b${FILE_ESCAPES}.txt`;
+		const group = new ReadToolGroupComponent();
+		group.updateArgs({ path: `${first}\n${second}` }, "a");
+		group.updateResult(
+			{
+				content: [{ type: "text", text: "needle" }],
+				details: {
+					displayReadTargets: [first, second],
+					displayReadTargetLinks: [first, second],
+					displayContent: { text: LINE, startLine: 1 },
+				},
+			},
+			false,
+			"a",
+		);
+		const view = group.describe({
+			cols: 120,
+			reduceMotion: false,
+			dark: true,
+			supports: kind => kind === "tool",
+			feature: () => true,
+		});
+		if (view.k !== "tool") throw new Error("Expected read tool node");
+		const rows = (view.c ?? []).filter(child => "k" in child && child.k === "row");
+		const links = rows.flatMap(row =>
+			(row.c ?? []).flatMap(child =>
+				"k" in child && child.k === "text" ? (child.p?.spans ?? []).flatMap(span => span.href ?? []) : [],
+			),
+		);
+		expect(links).toEqual([pathToFileURL(first).href, pathToFileURL(second).href]);
+		expect(group.render(120).join("\n")).not.toContain(FILE_ESCAPES);
 	});
 });
