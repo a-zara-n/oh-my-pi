@@ -6,6 +6,7 @@
 
 - Exported `sqliteFileIdentity()`, so a caller holding a long-lived SQLite connection can tell when its path now names a different file (e.g. after a corrupt store was quarantined and replaced) ([#14361](https://github.com/can1357/oh-my-pi/pull/14361) by [@F0Rextasy](https://github.com/F0Rextasy))
 - Added `slugify()`, the shared lowercase ASCII kebab-case helper with an optional `maxLength` ([#14283](https://github.com/can1357/oh-my-pi/pull/14283) by [@jaredlyon](https://github.com/jaredlyon))
+- Added `sanitizeTextDeep()`, which applies `sanitizeText()` to every string in a JSON-shaped value without mutating it ([#15963](https://github.com/can1357/oh-my-pi/issues/15963))
 
 ### Fixed
 

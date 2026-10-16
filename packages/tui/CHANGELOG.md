@@ -9,6 +9,7 @@
 
 ### Fixed
 
+- Fixed grep/read previews and other tool cards passing raw escape sequences from file contents to the terminal, which could switch it to the alternate screen with mouse reporting on, live and again on every resume ([#15963](https://github.com/can1357/oh-my-pi/issues/15963))
 - Fixed double-clicking an extension switched off in `/extensions` in Tern not switching it back on
 - Fixed the queued-messages badge in Tern showing a bare count that read as the first message's number; it now reads `N queued`
 - Fixed table charts on TSP terminals to use SVG fences and respect terminal palette

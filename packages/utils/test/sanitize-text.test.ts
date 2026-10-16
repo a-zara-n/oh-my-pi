@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { sanitizeText } from "@oh-my-pi/pi-utils/sanitize-text";
+import { sanitizeText, sanitizeTextDeep } from "@oh-my-pi/pi-utils/sanitize-text";
+import { isRecord } from "@oh-my-pi/pi-utils/type-guards";
 
 describe("sanitizeText", () => {
 	it("strips ANSI CSI and removes C0/C1 control chars while keeping tab + LF", () => {
@@ -49,5 +50,30 @@ describe("sanitizeText", () => {
 
 	it("strips DEL and normalizes lone CR", () => {
 		expect(sanitizeText("a\x7fb\rc")).toBe("abc");
+	});
+});
+
+describe("sanitizeTextDeep", () => {
+	it("sanitizes nested strings into copies and leaves the input and clean branches untouched", () => {
+		const clean = { path: "src/a.ts", lines: [1, 2] };
+		const input = { clean, display: { text: "needle \x1b[?1049h" }, rows: ["ok", "\x1b]52;c;cHduZWQ=\x07x"] };
+		const output = sanitizeTextDeep(input);
+		expect(output).toEqual({ clean, display: { text: "needle " }, rows: ["ok", "x"] });
+		expect(input.display.text).toBe("needle \x1b[?1049h");
+		expect(input.rows[1]).toBe("\x1b]52;c;cHduZWQ=\x07x");
+		expect(isRecord(output) && output.clean).toBe(clean);
+	});
+
+	it("returns the same reference when nothing needs sanitizing", () => {
+		const input = { a: ["x", { b: "y" }], n: 1, missing: undefined };
+		expect(sanitizeTextDeep(input)).toBe(input);
+	});
+
+	it("terminates on cyclic values", () => {
+		const input: Record<string, unknown> = { text: "a\x1b[2Jb" };
+		input.self = input;
+		const output = sanitizeTextDeep(input);
+		expect(isRecord(output) && output.text).toBe("ab");
+		expect(isRecord(output) && output.self).toBe(input);
 	});
 });

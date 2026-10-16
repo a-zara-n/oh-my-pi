@@ -12,6 +12,8 @@
  * string after the control probe.
  */
 
+import { isRecord } from "./type-guards";
+
 const ESC_CHAR = "\x1b";
 
 // Well-formed strings only need control/ANSI detection: C0 (excl. \t \n),
@@ -35,6 +37,47 @@ function sanitizeWellFormedText(text: string): string {
 	const stripped = text.indexOf(ESC_CHAR) === -1 ? text : Bun.stripANSI(text);
 	CONTROL_RE.lastIndex = 0;
 	return stripped.replace(CONTROL_RE, "");
+}
+
+/**
+ * Apply {@link sanitizeText} to every string value inside a JSON-shaped value.
+ * Only plain objects and arrays are walked; class instances, typed arrays, and
+ * cyclic back-references pass through untouched. Object keys are kept as-is.
+ *
+ * Returns the input reference when nothing changed, so reference-keyed caches
+ * stay warm; changed containers are copied and the input is never mutated.
+ * Display layers use it on structured payloads (tool-result `details`) whose
+ * strings carry untrusted file or command text.
+ */
+export function sanitizeTextDeep(value: unknown): unknown {
+	return sanitizeValue(value, new Set());
+}
+
+function sanitizeValue(value: unknown, ancestors: Set<object>): unknown {
+	if (typeof value === "string") return sanitizeText(value);
+	if (typeof value !== "object" || value === null || ancestors.has(value)) return value;
+	if (Array.isArray(value)) {
+		ancestors.add(value);
+		let copy: unknown[] | undefined;
+		for (let index = 0; index < value.length; index++) {
+			const item: unknown = value[index];
+			const clean = sanitizeValue(item, ancestors);
+			if (clean !== item) (copy ??= value.slice())[index] = clean;
+		}
+		ancestors.delete(value);
+		return copy ?? value;
+	}
+	const proto: unknown = Object.getPrototypeOf(value);
+	if (!isRecord(value) || (proto !== Object.prototype && proto !== null)) return value;
+	ancestors.add(value);
+	let copy: Record<string, unknown> | undefined;
+	for (const key in value) {
+		const item = value[key];
+		const clean = sanitizeValue(item, ancestors);
+		if (clean !== item) (copy ??= { ...value })[key] = clean;
+	}
+	ancestors.delete(value);
+	return copy ?? value;
 }
 
 /**

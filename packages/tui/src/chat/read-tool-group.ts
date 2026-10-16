@@ -22,7 +22,7 @@ import { canonicalizeMessage } from "./thinking-display";
 import { internalUrlSchemeSpec, splitUrlScheme } from "../tools/url-scheme-host";
 import type { ToolExecutionHandle } from "./tool-execution";
 import { formatUsageRow } from "../overlays/usage-row";
-import { formatCount } from "@oh-my-pi/pi-utils";
+import { formatCount, sanitizeTextDeep } from "@oh-my-pi/pi-utils";
 import type { TspCardStatus, TspSpan, TspText } from "@oh-my-pi/pi-wire";
 import type { NativeToolHead } from "../tools/renderer";
 import { card, code, keyed, md, node, span, text, withHidden } from "../native/describe";
@@ -484,7 +484,9 @@ export class ReadToolGroupComponent extends Container implements ToolExecutionHa
 		if (!entry) return;
 		if (isPartial) return;
 		this.#blockVersion++;
-		const details = result.details as ReadToolDetails | undefined;
+		// Raw file text rides in `details.displayContent`; strip control sequences
+		// before it can reach the terminal (see ToolExecutionComponent.updateResult).
+		const details = sanitizeTextDeep(result.details) as ReadToolDetails | undefined;
 		const suffixResolution = getSuffixResolution(details);
 		const displayPaths = getDisplayReadTargets(details);
 		entry.linkPath = readResultLinkPath(details);

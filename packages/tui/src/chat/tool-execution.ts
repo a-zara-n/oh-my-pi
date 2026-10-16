@@ -8,7 +8,7 @@ import { Text } from "../components/text";
 import { getImageDimensions, ImageProtocol, imageFallback, TERMINAL } from "../terminal-capabilities";
 import { type Component, Container, type TUI } from "../tui";
 import { truncateToWidth } from "../utils";
-import { getProjectDir, isRecord, logger, sanitizeText } from "@oh-my-pi/pi-utils";
+import { getProjectDir, isRecord, logger, sanitizeText, sanitizeTextDeep } from "@oh-my-pi/pi-utils";
 import type { Theme } from "../theme/theme";
 import { ensureThemeSync, getThemeEpoch, theme } from "../theme/theme";
 import {
@@ -632,7 +632,11 @@ export class ToolExecutionComponent extends Container {
 		const partialResultPainted = this.#partialResultShapePainted;
 		this.#firstResultViewportRepaintShapePainted = false;
 		this.#partialResultShapePainted = false;
-		this.#result = result;
+		// `details` reaches renderers verbatim (live and on transcript replay) and
+		// carries raw file/command text (grep/read `displayContent`, diffs, paths);
+		// strip control sequences once here so no renderer can emit them.
+		const details = sanitizeTextDeep(result.details);
+		this.#result = details === result.details ? result : { ...result, details };
 		this.#resultVersion++;
 		this.#blockVersion++;
 		this.#isPartial = isPartial;
