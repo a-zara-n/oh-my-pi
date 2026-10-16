@@ -110,6 +110,9 @@ function titleUpdateForIndex(entry: IndexEntry): SessionTitleUpdate | undefined 
 }
 
 export class IndexedSessionStorage implements SessionStorage {
+	/** Remote commit/CAS does not establish the managed journal contract. */
+	readonly modelRequestJournal = "unsupported";
+
 	/**
 	 * Sync writes only update {@link #index} and queue the remote publish, so a
 	 * caller tracking a durable byte size must wait for {@link drain}.

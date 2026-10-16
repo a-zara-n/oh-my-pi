@@ -211,6 +211,22 @@ describe("RedisSessionStorage", () => {
 		redis = createFakeRedis();
 	});
 
+	it("keeps managed durability unsupported after ordinary Redis writes and drain", async () => {
+		const storage = await RedisSessionStorage.create({ client: redis });
+		expect(storage.modelRequestJournal).toBe("unsupported");
+		await storage.writeTextAtomic("/sessions/ordinary.jsonl", "ordinary\n");
+		const writer = storage.openWriter("/sessions/ordinary.jsonl");
+		try {
+			await writer.append("append\n");
+			await writer.flush();
+			await storage.drain();
+			expect(await storage.readText("/sessions/ordinary.jsonl")).toBe("ordinary\nappend\n");
+			expect(storage.modelRequestJournal).toBe("unsupported");
+		} finally {
+			await writer.close();
+		}
+	});
+
 	it("indexes writeText metadata and reads content asynchronously", async () => {
 		const storage = await RedisSessionStorage.create({ client: redis });
 		await storage.writeText("/sessions/p/a.jsonl", "line1\nline2\n");

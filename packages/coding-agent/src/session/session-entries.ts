@@ -2,6 +2,9 @@ import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type {
 	ImageContent,
 	MessageAttribution,
+	ModelRequestModelRef,
+	ModelRequestOutcome,
+	ModelRequestPurpose,
 	ServiceTierByFamily,
 	StopReason,
 	TextContent,
@@ -34,6 +37,103 @@ export interface SessionTitleSlotEntry {
 
 export const EPHEMERAL_MODEL_CHANGE_ROLE = "fallback";
 
+export interface ModelRequestJournalDescriptor {
+	readonly schemaVersion: 1;
+	readonly journalId: string;
+	readonly sessionId: string;
+	readonly epochs: readonly Readonly<{ journalOwnerId: string; journalEpoch: string }>[];
+}
+
+/** Safe projection only: no URL, headers, body, status, or exception text. */
+export type ModelRequestJournalModelRef = Readonly<Pick<ModelRequestModelRef, "provider" | "id" | "api">>;
+
+export type ModelRequestJournalTransportOutcome =
+	| Readonly<{ kind: Extract<ModelRequestOutcome, { type: "not-sent" }>["type"] }>
+	| Readonly<{
+			kind: Extract<ModelRequestOutcome, { type: "request-failed" }>["type"];
+			sent: "no" | "maybe";
+			transportClosed: boolean;
+	  }>
+	| Readonly<{ kind: Extract<ModelRequestOutcome, { type: "response-ended" }>["type"] }>
+	| Readonly<{
+			kind: Extract<ModelRequestOutcome, { type: "response-failed" }>["type"];
+			transportClosed: boolean;
+	  }>;
+
+interface ModelRequestWireRecordBase {
+	readonly schemaVersion: 1;
+	readonly coreAttemptId: string;
+	readonly requestId: string;
+	readonly coreRetryOf: string | null;
+	readonly rootSessionId: string;
+	readonly sessionId: string;
+	readonly purpose: ModelRequestPurpose;
+	readonly modelRef: ModelRequestJournalModelRef;
+	readonly atMs: number;
+}
+
+export type ModelRequestLifecycleRecord =
+	| (ModelRequestWireRecordBase & Readonly<{ event: "decision"; decision: "pass" | "deny" | "allow" }>)
+	| (ModelRequestWireRecordBase & Readonly<{ event: "send-intent" }>)
+	| (ModelRequestWireRecordBase &
+			Readonly<{ event: "transport-outcome"; outcome: ModelRequestJournalTransportOutcome }>)
+	| Readonly<{
+			schemaVersion: 1;
+			event: "logical-result";
+			requestId: string;
+			resultId: string;
+			sessionId: string;
+			journalOwnerId: string;
+			usageAttemptIds: readonly string[];
+			sourceDisposition: "expected" | "none";
+	  }>;
+
+export type ModelRequestSourceProvenance =
+	| Readonly<{
+			kind: "wire";
+			requestIds: readonly string[];
+			attemptIds: readonly string[];
+			usageAttemptIds: readonly string[];
+	  }>
+	| Readonly<{ kind: "non-wire"; reason: "cache" | "local" }>
+	| Readonly<{ kind: "unresolved" }>;
+
+export interface ModelRequestSourceLinkInput {
+	readonly schemaVersion: 1;
+	readonly sourceKind: "assistant" | "model_usage";
+	readonly resultId: string | null;
+	readonly provenance: ModelRequestSourceProvenance;
+}
+
+export interface ModelRequestSourceLink extends ModelRequestSourceLinkInput {
+	readonly sourceSessionId: string;
+	readonly sourceEntryId: string;
+}
+
+export interface ModelRequestJournalAck {
+	readonly schemaVersion: 1;
+	readonly journalId: string;
+	readonly sessionId: string;
+	readonly journalOwnerId: string;
+	readonly journalEpoch: string;
+	readonly throughSeq: number;
+	readonly metadataEntryId: string;
+	readonly sourceEntryId: string | null;
+}
+
+/** Canonical append history, deliberately outside the conversation tree. */
+export interface ModelRequestMetadataEntry extends SessionEntryBase {
+	readonly type: "model_request_metadata";
+	readonly parentId: null;
+	readonly schemaVersion: 1;
+	readonly journalId: string;
+	readonly sessionId: string;
+	readonly journalOwnerId: string;
+	readonly journalEpoch: string;
+	readonly seq: number;
+	readonly record: ModelRequestLifecycleRecord | ModelRequestSourceLink;
+}
+
 export interface SessionHeader {
 	type: "session";
 	version?: number; // v1 sessions don't have this
@@ -53,6 +153,8 @@ export interface SessionHeader {
 	previousSessionFiles?: string[];
 	/** Provider prompt-cache identity inherited by exact-route full forks. */
 	providerPromptCacheKey?: string;
+	/** Optional canonical, non-transcript model-request journal identity. */
+	modelRequestJournal?: ModelRequestJournalDescriptor;
 }
 
 export interface NewSessionOptions {
@@ -204,6 +306,7 @@ declare module "@oh-my-pi/pi-agent-core/compaction/entries" {
 		titleChange: TitleChangeEntry;
 		credentialPin: CredentialPinEntry;
 		modelUsage: ModelUsageEntry;
+		modelRequestMetadata: ModelRequestMetadataEntry;
 	}
 }
 
@@ -306,6 +409,7 @@ export interface CustomMessageEntry<T = unknown> extends SessionEntryBase {
 export type SessionEntry =
 	| SessionMessageEntry
 	| ModelUsageEntry
+	| ModelRequestMetadataEntry
 	| ThinkingLevelChangeEntry
 	| ModelChangeEntry
 	| ServiceTierChangeEntry

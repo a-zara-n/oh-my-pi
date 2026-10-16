@@ -1305,6 +1305,7 @@ export class SessionAnonymizer {
 
 	/** Anonymize one session record (header or entry). */
 	entry(value: unknown): unknown {
+		if (isObject(value) && value.type === "model_request_metadata") return undefined;
 		return isObject(value) ? this.#struct(value) : this.#opaque(value);
 	}
 
@@ -1378,6 +1379,7 @@ export class SessionAnonymizer {
 		}
 		const out: JsonObject = {};
 		for (const [key, value] of Object.entries(object)) {
+			if (object.type === "session" && key === "modelRequestJournal") continue;
 			const rule = Object.hasOwn(FIELD_RULES, key) ? FIELD_RULES[key] : undefined;
 			if (rule === undefined) out[this.placeholder(key)] = this.#opaque(value);
 			else out[key] = this.#field(rule, value, object, key, fromTool);
@@ -1748,7 +1750,8 @@ export interface AnonymizedTranscripts {
 export async function anonymizeSessionTranscripts(session: AnonymizeSessionInput): Promise<AnonymizedTranscripts> {
 	const anonymizer = new SessionAnonymizer();
 	const toJsonl = (header: SessionHeader | null, entries: readonly SessionEntry[]): string => {
-		const records: unknown[] = header ? [header, ...entries] : [...entries];
+		const transcriptEntries = entries.filter(entry => entry.type !== "model_request_metadata");
+		const records: unknown[] = header ? [header, ...transcriptEntries] : [...transcriptEntries];
 		return `${records.map(record => JSON.stringify(anonymizer.entry(record))).join("\n")}\n`;
 	};
 	const files: Array<readonly [string, string]> = [["session.jsonl", toJsonl(session.header, session.entries)]];

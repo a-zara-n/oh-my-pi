@@ -12,6 +12,7 @@ import {
 	resolveImageDataUrlSync,
 } from "./blob-store";
 import { buildSessionContext } from "./session-context";
+import { validateModelRequestJournal, type ModelRequestJournalValidation } from "./model-request-journal";
 import type { FileEntry, RawFileEntry, SessionEntry, SessionHeader } from "./session-entries";
 import { migrateToCurrentVersion } from "./session-migrations";
 import { isExternalizableImagePosition, isPersistenceTruncatedString } from "./session-persistence";
@@ -464,6 +465,15 @@ export async function loadSessionFile(
 	}
 }
 
+/** Managed readers validate the complete raw snapshot, including skipped JSONL diagnostics. */
+export async function loadModelRequestJournalFromFile(
+	filePath: string,
+	storage: SessionStorage = new FileSessionStorage(),
+): Promise<ModelRequestJournalValidation> {
+	const loaded = await loadSessionFile(filePath, storage, { throwIfMissing: true });
+	return validateModelRequestJournal(loaded.entries, loaded);
+}
+
 /**
  * Load the valid entries from a session file, skipping malformed records.
  * Each call returns freshly parsed entries owned by the caller.
@@ -625,7 +635,7 @@ async function resolveBlobRefs(values: readonly unknown[], blobStore: BlobStore)
 
 /** The non-header entries, with legacy truncated snapcompact frames repaired before their blobs resolve. */
 function entriesForBlobResolution(entries: FileEntry[]): FileEntry[] {
-	const sessionEntries = entries.filter(entry => entry.type !== "session");
+	const sessionEntries = entries.filter(entry => entry.type !== "session" && entry.type !== "model_request_metadata");
 	for (const entry of sessionEntries) repairTruncatedSnapcompactFrames(entry);
 	return sessionEntries;
 }
@@ -665,7 +675,9 @@ export async function loadSessionMessagesReadOnly(filePath: string): Promise<Age
 	migrateToCurrentVersion(entries);
 	for (const entry of entries) repairTruncatedSnapcompactFrames(entry);
 	const blobs = new BlobStore(getBlobsDir());
-	const sessionEntries = entries.filter((e): e is SessionEntry => e.type !== "session");
+	const sessionEntries = entries.filter(
+		(e): e is SessionEntry => e.type !== "session" && e.type !== "model_request_metadata",
+	);
 	const { messages } = buildSessionContext(sessionEntries, undefined, undefined, {
 		transcript: true,
 		collapseCompactedHistory: true,

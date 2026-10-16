@@ -92,6 +92,126 @@ class ControlledTitleUpdateBackend implements SessionStorageBackend {
 		this.#firstUpdate.reject(error);
 	}
 }
+
+describe("FileSessionStorage managed journal durability", () => {
+	let tempDir: string;
+	let storage: FileSessionStorage;
+	let reader: FileSessionStorage;
+
+	beforeEach(async () => {
+		tempDir = await fsp.mkdtemp(path.join(os.tmpdir(), "omp-managed-journal-storage-"));
+		storage = new FileSessionStorage();
+		reader = new FileSessionStorage();
+	});
+
+	afterEach(async () => {
+		vi.restoreAllMocks();
+		await fsp.rm(tempDir, { recursive: true, force: true });
+	});
+
+	it("advertises reader visibility and exposes flushed appends to a separate reader", async () => {
+		expect(storage.modelRequestJournal).toBe("process-crash-reader-visible");
+		const sessionPath = path.join(tempDir, "session.jsonl");
+		const writer = storage.openWriter(sessionPath, { flags: "w" });
+		try {
+			await writer.append('{"type":"session","id":"session"}\n');
+			await writer.flush();
+			await storage.drain();
+			expect(await reader.readText(sessionPath)).toBe('{"type":"session","id":"session"}\n');
+		} finally {
+			await writer.close();
+		}
+	});
+
+	for (const streaming of [false, true]) {
+		it(`publishes a complete ${streaming ? "streamed" : "text"} batch to a separate reader`, async () => {
+			const sessionPath = path.join(tempDir, "session.jsonl");
+			const old = '{"type":"session","id":"session"}\n';
+			const source = '{"type":"message","id":"source"}\n';
+			const link = '{"type":"model_request_metadata","id":"link"}\n';
+			storage.writeTextSync(sessionPath, old);
+			const beforePublish: string[] = [];
+			const renameSync = storage.renameSync.bind(storage);
+			vi.spyOn(storage, "renameSync").mockImplementation((from, to) => {
+				if (to === sessionPath) beforePublish.push(reader.readTextSync(sessionPath));
+				renameSync(from, to);
+			});
+			const options = { requireAtomicReplace: true, expectedSize: Buffer.byteLength(old) };
+			if (streaming) {
+				await storage.writeLinesAtomic(sessionPath, [old, source, link], options);
+			} else {
+				await storage.writeTextAtomic(sessionPath, old + source + link, options);
+			}
+			await storage.drain();
+			expect(beforePublish).toEqual([old]);
+			expect(await reader.readText(sessionPath)).toBe(old + source + link);
+		});
+	}
+
+	it("preserves the old batch when an asynchronous staging write fails after writing a partial body", async () => {
+		const sessionPath = path.join(tempDir, "session.jsonl");
+		const old = '{"type":"session","id":"session"}\n';
+		storage.writeTextSync(sessionPath, old);
+		const writeFile = fs.promises.writeFile;
+		vi.spyOn(fs.promises, "writeFile").mockImplementation(async (file, content, options) => {
+			if (typeof file === "string" && file.endsWith(".tmp")) {
+				await writeFile(file, "partial staged source\n", options);
+				throw new Error("staging failed");
+			}
+			await writeFile(file, content, options);
+		});
+
+		await expect(
+			storage.writeTextAtomic(sessionPath, "complete replacement\n", { requireAtomicReplace: true }),
+		).rejects.toThrow("staging failed");
+		await storage.drain();
+		expect(await reader.readText(sessionPath)).toBe(old);
+		expect(fs.readdirSync(tempDir).filter(name => name.endsWith(".tmp"))).toEqual([]);
+	});
+
+	for (const synchronous of [false, true]) {
+		for (const streaming of [false, true]) {
+			it(`rejects EPERM without moving the old batch aside (${synchronous ? "sync" : "async"}, ${streaming ? "lines" : "text"})`, async () => {
+				const sessionPath = path.join(tempDir, "session.jsonl");
+				const old = '{"type":"session","id":"session"}\n';
+				storage.writeTextSync(sessionPath, old);
+				const renameSpy = vi.spyOn(storage, "renameSync").mockImplementation(() => {
+					throw Object.assign(new Error("atomic replacement denied"), { code: "EPERM" });
+				});
+				const options = { requireAtomicReplace: true, expectedSize: Buffer.byteLength(old) };
+				if (synchronous) {
+					expect(() => {
+						if (streaming) storage.writeLinesSync(sessionPath, ["source\n", "link\n"], options);
+						else storage.writeTextSync(sessionPath, "source\nlink\n", options);
+					}).toThrow("atomic replacement denied");
+				} else {
+					const write = streaming
+						? storage.writeLinesAtomic(sessionPath, ["source\n", "link\n"], options)
+						: storage.writeTextAtomic(sessionPath, "source\nlink\n", options);
+					await expect(write).rejects.toThrow("atomic replacement denied");
+				}
+				await storage.drain();
+				expect(renameSpy).toHaveBeenCalledTimes(1);
+				expect(await reader.readText(sessionPath)).toBe(old);
+				expect(fs.readdirSync(tempDir).filter(name => name.endsWith(".tmp") || name.endsWith(".bak"))).toEqual(
+					[],
+				);
+			});
+		}
+	}
+
+	it("does not publish a strict batch superseded before commit", async () => {
+		const sessionPath = path.join(tempDir, "session.jsonl");
+		storage.writeTextSync(sessionPath, "old\n");
+		await storage.writeTextAtomic(sessionPath, "source\nlink\n", {
+			requireAtomicReplace: true,
+			commitGuard: () => false,
+		});
+		await storage.drain();
+		expect(await reader.readText(sessionPath)).toBe("old\n");
+		expect(fs.readdirSync(tempDir).filter(name => name.endsWith(".tmp"))).toEqual([]);
+	});
+});
 describe("FileSessionStorage writer", () => {
 	let tempDir: string;
 	let storage: FileSessionStorage;
@@ -632,6 +752,25 @@ describe("FileSessionStorage.updateSessionTitle", () => {
 });
 
 describe("IndexedSessionStorage.updateSessionTitle", () => {
+	it("explicitly rejects managed durability while preserving normal indexed writes", async () => {
+		const sessionPath = "/sessions/session.jsonl";
+		const backend = new ControlledTitleUpdateBackend(sessionPath, "old\n");
+		const storage = new IndexedSessionStorage(backend);
+		await storage.initialize();
+		expect(storage.modelRequestJournal).toBe("unsupported");
+		await storage.writeTextAtomic(sessionPath, "ordinary\n");
+		const writer = storage.openWriter(sessionPath);
+		try {
+			await writer.append("append\n");
+			await writer.flush();
+			await storage.drain();
+			expect(await storage.readText(sessionPath)).toBe("ordinary\nappend\n");
+			expect(storage.modelRequestJournal).toBe("unsupported");
+		} finally {
+			await writer.close();
+		}
+	});
+
 	it("does not roll a newer optimistic title back when an older backend write fails", async () => {
 		const sessionPath = "/sessions/session.jsonl";
 		const content = `${serializeTitleSlot({ title: "Old", source: "auto", updatedAt: "t0" })}${JSON.stringify({

@@ -8,6 +8,8 @@
 - Session-less CLI commands are marked as such at process entry so their model requests are classified as standalone.
 
 - Retries, credential rotations, model fallbacks, judge candidates, turn recovery, cache-warm replays and compaction walks now tell a registered model request gate which kind of re-attempt each wire attempt is.
+- Added closed model-request journal metadata and optional epoch descriptors to canonical session/RPC history without changing conversation leaves, model context or usage totals. HTML/share/anonymized copies omit this noncanonical bookkeeping. The reader/storage cutover has passed typechecking and 148 focused tests (644 assertions); owner issuance and typed append acknowledgements remain pending the issuer-composition design amendment.
+- Verified the real-File fixture-prefix smoke: throughSeq 2, three independent readers, two SIGKILLed writers, published/old-prefix preservation, legacy/context-usage equality and absent metadata canaries. Its guarantee is process-crash-no-fsync, not power-loss durability; owner/source-link acknowledgements were not exercised. Throwaway tooling is retained as session-local artifacts rather than permanent package scripts; reproduction paths and the still-draft issuer prerequisite are recorded in `docs/session.md`.
 
 ### Changed
 

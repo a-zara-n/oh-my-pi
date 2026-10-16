@@ -549,6 +549,15 @@ export class CodexSessionStore implements ForeignSessionStore {
 			throw new Error(`Unable to read Codex session ${info.id} at ${info.path}`, { cause: error });
 		}
 		if (records.length === 0) throw new Error(`Codex session ${info.id} at ${info.path} is empty or malformed`);
+		if (
+			records.some(
+				record =>
+					record.type === "model_request_metadata" ||
+					(record.type === "session" && Object.hasOwn(record, "modelRequestJournal")),
+			)
+		) {
+			throw new Error("Managed model-request journals cannot be imported as Codex sessions");
+		}
 
 		const metadata = records.find(record => record.type === "session_meta" && isRecord(record.payload));
 		const cwd =

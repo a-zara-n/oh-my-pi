@@ -65,6 +65,13 @@ export interface SessionStorageWriter {
 export interface SessionStorageWriteOptions {
 	/** Current UTF-8 byte length, or `null` when the target must not exist. */
 	expectedSize?: number | null;
+	/**
+	 * Require a single atomic replacement. Reject rather than move the old
+	 * file aside when the platform refuses rename-over-existing (EPERM).
+	 * Managed journal batches require this; ordinary rewrites retain their
+	 * existing best-effort replacement behavior when omitted.
+	 */
+	requireAtomicReplace?: boolean;
 }
 
 /**
@@ -117,6 +124,15 @@ export interface WriteTextAtomicOptions extends SessionStorageWriteOptions {
 }
 
 export interface SessionStorage {
+	/**
+	 * Managed journal durability, independent of ordinary storage support.
+	 * Missing capabilities are unsupported, including third-party backends.
+	 * The supported value requires persistent use, awaited atomic batches with
+	 * `requireAtomicReplace: true`, writer flush, drain, and artifact-copy
+	 * completion before acknowledgement. It promises separate-reader visibility
+	 * and software-process-crash rereads, not fsync or power-loss durability.
+	 */
+	readonly modelRequestJournal?: "process-crash-reader-visible" | "unsupported";
 	/**
 	 * `true` when synchronous writes ({@link writeTextSync} and a writer's
 	 * {@link SessionStorageWriter.appendSync}) have reached the backing store by
@@ -625,6 +641,8 @@ async function writeLinesToFile(target: string, lines: readonly string[]): Promi
 }
 
 export class FileSessionStorage implements SessionStorage {
+	readonly modelRequestJournal = "process-crash-reader-visible";
+
 	#assertExpectedSize(fpath: string, expectedSize: number | null | undefined): void {
 		if (expectedSize === undefined) return;
 		let actualSize: number | null;
@@ -937,7 +955,7 @@ export class FileSessionStorage implements SessionStorage {
 				try {
 					this.renameSync(tempPath, fpath);
 				} catch (err) {
-					if (!hasFsCode(err, "EPERM")) throw toError(err);
+					if (options?.requireAtomicReplace || !hasFsCode(err, "EPERM")) throw toError(err);
 					this.#replaceSessionFileAfterEpermSync(tempPath, fpath, err);
 				}
 			});
@@ -1069,7 +1087,7 @@ export class FileSessionStorage implements SessionStorage {
 					this.renameSync(tempPath, fpath);
 					return;
 				} catch (err) {
-					if (!hasFsCode(err, "EPERM")) throw toError(err);
+					if (options?.requireAtomicReplace || !hasFsCode(err, "EPERM")) throw toError(err);
 					this.#replaceSessionFileAfterEpermSync(tempPath, fpath, err, options?.commitGuard);
 				}
 			});
@@ -1515,6 +1533,8 @@ function memoryFileNotFound(path: string): FsError {
 }
 
 export class MemorySessionStorage implements SessionStorage {
+	readonly modelRequestJournal = "unsupported";
+
 	// Each path keeps appended string chunks plus cumulative UTF-8 byte offsets.
 	// Full reads materialize the chunks into one string chunk, so repeated reads
 	// do not re-join stale history. Later appends still stay O(1) by pushing

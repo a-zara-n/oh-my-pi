@@ -82,7 +82,7 @@ async function collectSubSessionsFromDir(
 				parent: parentKey,
 				header,
 				entries,
-				leafId: entries.length > 0 ? entries[entries.length - 1].id : null,
+				leafId: entries.findLast(entry => entry.type !== "model_request_metadata")?.id ?? null,
 				aborted: fileNames.has(getAgentTombstonePath(name)),
 				malformedRecords,
 			};

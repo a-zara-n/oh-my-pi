@@ -1,4 +1,5 @@
 import { Snowflake } from "@oh-my-pi/pi-utils";
+import { validateModelRequestJournal } from "./model-request-journal";
 import { type CompactionEntry, CURRENT_SESSION_VERSION, type FileEntry, type SessionHeader } from "./session-entries";
 
 /** Generate a unique short ID (8 hex chars, collision-checked) */
@@ -20,6 +21,7 @@ function migrateV1ToV2(entries: FileEntry[]): void {
 			entry.version = 2;
 			continue;
 		}
+		if (entry.type === "model_request_metadata") throw new Error("Cannot migrate managed model request journal");
 
 		entry.id = generateId(ids);
 		entry.parentId = prevId;
@@ -63,6 +65,13 @@ function migrateV2ToV3(entries: FileEntry[]): void {
 export function migrateToCurrentVersion(entries: FileEntry[]): boolean {
 	const header = entries.find(e => e.type === "session") as SessionHeader | undefined;
 	const version = header?.version ?? 1;
+
+	if (header?.modelRequestJournal !== undefined || entries.some(entry => entry.type === "model_request_metadata")) {
+		validateModelRequestJournal(entries);
+		// Managed history must never acquire regenerated source IDs or inferred epochs.
+		if (version < CURRENT_SESSION_VERSION) throw new Error("Cannot migrate managed model request journal");
+		return false;
+	}
 
 	if (version >= CURRENT_SESSION_VERSION) return false;
 

@@ -292,6 +292,7 @@ export function formatCurrentBranchFullHistory(entries: readonly SessionEntry[])
 		"",
 	];
 	for (const entry of entries) {
+		if (entry.type === "model_request_metadata") continue;
 		renderRawEntry(lines, entry);
 		lines.push("");
 	}

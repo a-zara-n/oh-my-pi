@@ -406,6 +406,15 @@ export class ClaudeSessionStore implements ForeignSessionStore {
 		}
 		if (records.length === 0 && stats.size > 0)
 			throw new Error(`Claude session ${info.id} contains no readable records`);
+		if (
+			records.some(
+				({ value }) =>
+					value.type === "model_request_metadata" ||
+					(value.type === "session" && Object.hasOwn(value, "modelRequestJournal")),
+			)
+		) {
+			throw new Error("Managed model-request journals cannot be imported as Claude sessions");
+		}
 
 		const sourceParents = new Map<string, string | null>();
 		let sourceCwd: string | undefined;

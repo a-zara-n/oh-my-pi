@@ -95,6 +95,7 @@ Notes:
 - `parentSession` is an opaque lineage string. Current code writes either a session id or a session path depending on flow (`fork`, `forkFrom`, `createBranchedSession`, or explicit `newSession({ parentSession })`). Treat it as metadata, not a typed foreign key.
 
 - `titleSource` is `auto` or `user`; automatic renames cannot overwrite a user title.
+- `modelRequestJournal`, when present, is a closed descriptor `{ schemaVersion: 1, journalId, sessionId, epochs: [{ journalOwnerId, journalEpoch }] }`. The session id must match the header; journal/owner/epoch ids are core-generated lowercase UUIDs. Ordered epochs retain previous owners rather than rewriting their history.
 
 ### Entry Base (`SessionEntryBase`)
 
@@ -108,6 +109,49 @@ All non-header entries include:
   "timestamp": "2026-02-16T10:20:30.000Z"
 }
 ```
+
+### Model-request journal metadata
+
+`model_request_metadata` is a closed, non-tree entry with `parentId: null`, ordinary `id`/`timestamp`, and `schemaVersion: 1`, `journalId`, `sessionId`, `journalOwnerId`, `journalEpoch`, `seq`, and `record`. Records contain only typed lifecycle/source-link identifiers, enums and integers, never copied prompts, credentials, transport headers or usage amounts. Sequence numbers start at 1 independently in each epoch and apply only to these entries.
+
+Canonical `getEntries()` and RPC `get_entries` retain metadata in append order, including metadata cursor ids. It is never a leaf, tree-selection target, model-context message, transcript message or additional usage charge. The fallback leaf is the last non-metadata entry. Shared HTML, share snapshots and anonymized transcripts omit both these entries and the header descriptor; these noncanonical artifacts are not managed continuation or recovery evidence. Journals without the optional descriptor remain readable without backfilling owner history.
+
+The proposed typed journal append contract requires an opaque runtime-issued owner; existing read-only, extension/hook and RPC readers receive no issuer or append capability. Ordinary manager construction, import and matching serialized ids do not issue an owner. This schema/reader/storage cutover does not itself activate managed execution: trusted owner issuance and append acknowledgements remain unimplemented pending the issuer-composition design amendment, while producer wiring and root-owner registration remain separate integration prerequisites.
+
+The managed acknowledgement contract is limited to persistent File storage after flush, storage drain and required artifact copies. File atomic rewrites use `requireAtomicReplace: true`; ordinary writes retain their existing fallback behavior when that option is omitted. The guarantee is **process-crash-reader-visible**, not power-loss durability: **No fsync** or fdatasync is added, and OS crashes, power failures, controller-cache loss and remote-replica loss are not covered. Memory, nonpersistent, Indexed, SQL, Redis and unadvertised third-party backends retain their ordinary behavior but do not provide this managed acknowledgement. These backend capabilities alone are not evidence that owner issuance or a managed append succeeded.
+
+#### ISS047 implementation and verification record
+
+The parent verification run passed the coding-agent typecheck and all eight focused regression files: 148 tests and 644 assertions. The isolated real-File smoke passed with `status: "fixture-prefix-only"`, `throughSeq: 2`, three independent reader processes and two SIGKILLed writer processes. It verified the published prefix, old-file preservation on a staged-write kill, legacy compatibility, real `AgentSession.getContextUsage()` equality and absence of prompt/key canaries from metadata. This evidence is limited to **process-crash-no-fsync**.
+
+The real context-usage lifecycles use byte-identical temporary copies and complete only while no crash writer holds the shared session-id lease. Normal disposal records `session_exit`, so those writes must not alter canonical reader fixtures. While a writer is live, the separate supervisor uses the canonical loader without constructing a writing session lifecycle. Canonical bytes, entries, branches, context and usage remain subject to exact comparisons.
+
+The throwaway smoke tooling is preserved outside the repository as session-local artifacts: `local://model-request-journal-smoke.ts`, `local://model-request-journal-smoke-probe.ts` and `local://model-request-journal-smoke-diagnostics.ts`. For this checkout, reproduce with:
+
+```sh
+bun /Users/azara/.omp/agent/sessions/-.omp/2026-10-12T15-07-06-406Z_01a130a7-3326-77fa-9bba-93fd49852bd2/local/model-request-journal-smoke.ts
+```
+
+The artifact imports target `/Users/azara/work/omp-fork-sa-iss047-journal` explicitly; moving the checkout requires updating those imports. The launcher isolates HOME/config/state and reports only closed failure diagnostics, not child stderr or free-form exception text. The parent reran the command successfully after relocation (3.58 seconds), preserving the same fixture-prefix-only result and all reported checks. `ownerAck` and `sourceLinkBatchAck` remain `not-exercised`; no owner issuance, source/link append acknowledgement, completed ISS047 acceptance or approved issuer-composition implementation is claimed. The issuer-composition amendment is still a draft prerequisite.
+
+#### Consumer compatibility map
+
+Paths below are relative to `packages/`; consumer regressions are in `coding-agent/test/model-request-metadata-consumers.test.ts` and do not assert source text or wiring.
+
+| Surface | Reader decision | Regression |
+| --- | --- | --- |
+| `coding-agent/src/session/session-context.ts`, `coding-agent/src/session/sub-sessions.ts` | Changed: retain canonical rows, exclude metadata from fallback leaves/context/transcript. | Legacy/context/transcript equality; real nested File reader leaf. |
+| `coding-agent/src/export/html/index.ts`, `coding-agent/src/export/share.ts`, `coding-agent/src/session/session-anonymizer.ts`, `coding-agent/src/cli/anonymize-cli.ts` | HTML/anonymizer projection changed; share and CLI intentionally reuse those projections. Descriptor and metadata are excluded from noncanonical output. | Main/nested export payload, shared snapshot, anonymized JSONL, prompt/key canaries. |
+| `coding-agent/src/internal-urls/history-protocol.ts`, `coding-agent/src/session/session-history-format.ts`, `coding-agent/src/session/session-dump-format.ts` | Full-history generic entry fallback changed to skip metadata; message-only formatters intentionally unchanged. | Raw/full history and dump equality with old history. |
+| `tui/src/overlays/tree-selector.ts`, `tui/src/overlays/agent-transcript-viewer.ts`, `tui/src/chat/chat-transcript-builder.ts` | Selector changed to hide/nonselect even in all/labeled mode; viewer's message/model-change predicates and builder's message roles intentionally unchanged. | Render/selection test; transcript equality. |
+| `coding-agent/src/modes/rpc/{rpc-compat,rpc-mode,rpc-types,rpc-client}.ts`, `coding-agent/src/extensibility/{extensions/types,hooks/types,shared-events}.ts`, `coding-agent/src/internal-urls/{types,context}.ts` | Intentionally unchanged canonical reader types and RPC slicing retain variant/cursor. Branch reads remain non-tree; no issuer is added. | Metadata cursor before/at tail; canonical File manager versus context. |
+| `coding-agent/src/session/{session-index,session-listing,session-stats}.ts`, `stats/src/{parser,types,aggregator}.ts` | Intentionally unchanged message/model-usage predicates; index/listing are projections rather than canonical journal rewrites. | Real stats parser old/metadata totals, manager usage, real AgentSession context usage. |
+| `coding-agent/src/collab/{host,protocol,guest,replication-shrink}.ts`, pi-wire grammar | Metadata excluded by the existing host wire allowlist; no wire variant added. Replication is not a managed canonical copy. | Existing collab protocol/replication tests; canonical-vs-branch regression. |
+| `coding-agent/src/session/{foreign-session-jsonl,foreign-session-import,foreign-session-store,codex-session-store,claude-session-store}.ts` | Raw JSONL and normal foreign conversion remain compatible; Codex/Claude load now reject managed descriptors/metadata before losing their identity. Final `persistCopy` guards belong to SessionManager. | Both stores reject descriptor-only and metadata-only input without rewriting the source; existing foreign-session-store tests retain ordinary import coverage. |
+| `coding-agent/src/autoresearch/state.ts`, `coding-agent/src/session/{checkpoint-entries,context-notes,exit-diagnostics,model-mentions,todo-tracker,session-tools}.ts`, `coding-agent/src/tools/todo.ts`, `coding-agent/src/hindsight/transcript.ts`, `coding-agent/src/extensibility/custom-commands/bundled/annotate/text-source.ts`, `coding-agent/src/extensibility/legacy-pi-coding-agent-shim.ts` | Intentionally unchanged custom/message/role predicates; no metadata-as-state or last-turn conversion. | Positive goal/notebook/model/todo state, pending-tool/exit recovery and hindsight tests; existing annotate/checkpoint/legacy tests exercise their message-only paths. |
+| `coding-agent/src/session/{session-advisors,session-maintenance,turn-recovery}.ts`, `coding-agent/src/modes/controllers/selector-controller.ts` | Intentionally unchanged branch consumers inherit non-tree paths. Canonical rewrite preservation and destructive-operation refusal remain manager responsibilities. | Real branch/tree/leaf regression; existing advisor/context-maintenance/recovery/selector tests. |
+
+
 
 `parentId` can be `null` for a root entry (first append, or after `resetLeaf()`). Generated entry ids are normally eight hexadecimal characters, with a full Snowflake id as the collision-exhaustion fallback; consumers must not assume a fixed width.
 
@@ -485,7 +529,7 @@ The underlying model is append-only tree + mutable leaf pointer:
 - `resetLeaf()` sets `leafId = null`; next append creates a new root entry (`parentId: null`).
 - `branchWithSummary()` sets leaf to branch target and appends a `branch_summary` entry.
 
-`getEntries()` returns all non-header entries in insertion order. There is no separate persisted leaf field: loading rebuilds the leaf from the last physical entry. Pointer-only `branch()`/`resetLeaf()` changes therefore need a subsequent append to survive reload. `discardEntryDurably()` appends a metadata branch marker and rewrites the journal to make a discarded path durable.
+`getEntries()` returns all non-header entries in insertion order, including non-tree model-request metadata. There is no separate persisted leaf field: loading rebuilds the leaf from the last physical non-metadata entry. Pointer-only `branch()`/`resetLeaf()` changes therefore need a subsequent tree append to survive reload. `discardEntryDurably()` appends a metadata branch marker and rewrites the journal to make a discarded path durable; destructive operations on managed journals are rejected.
 
 `createBranchedSession(leafId, { copyArtifacts? })` creates a new identity containing only the selected root-to-leaf path. It drops old label records and recreates the resolved labels for retained entries. Unlike a full fork, it does not inherit the provider prompt-cache key. With `copyArtifacts` (used by `AgentSession.fork(entryId)`), the artifacts directory is copied in the background and the new artifact manager waits for the copy before allocating ids or resolving `artifact://`, as for a move to a sibling file.
 
@@ -497,8 +541,8 @@ Algorithm:
 
 1. Determine leaf:
    - `leafId === null` -> return empty context.
-   - explicit `leafId` -> use that entry if found.
-   - otherwise fallback to last entry.
+   - explicit `leafId` -> use that entry if found and not model-request metadata.
+   - otherwise fallback to the last non-metadata entry.
 2. Walk `parentId` to root, stopping on a repeated id to bound corrupt cycles, then reverse to root->leaf.
 3. Derive runtime state across the path:
    - resolved and configured thinking selectors from latest `thinking_level_change`

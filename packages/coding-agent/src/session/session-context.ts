@@ -258,11 +258,12 @@ export function buildSessionContext(
 		};
 	}
 	if (leafId) {
-		leaf = byId.get(leafId);
+		const candidate = byId.get(leafId);
+		if (candidate?.type !== "model_request_metadata") leaf = candidate;
 	}
 	if (!leaf) {
-		// Fallback to last entry (when leafId is undefined)
-		leaf = entries[entries.length - 1];
+		// Journal metadata is canonical history, not a branch or context leaf.
+		leaf = entries.findLast(entry => entry.type !== "model_request_metadata");
 	}
 
 	if (!leaf) {
@@ -283,7 +284,7 @@ export function buildSessionContext(
 	let current: SessionEntry | undefined = leaf;
 	while (current && !seenPathIds.has(current.id)) {
 		seenPathIds.add(current.id);
-		path.push(current);
+		if (current.type !== "model_request_metadata") path.push(current);
 		current = current.parentId ? byId.get(current.parentId) : undefined;
 	}
 	path.reverse();

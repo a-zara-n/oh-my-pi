@@ -7,6 +7,7 @@ import {
 	isBlobRef,
 	isImageDataUrl,
 } from "./blob-store";
+import { isModelRequestJournalDescriptor, isModelRequestMetadataEntry } from "./model-request-journal";
 import type { FileEntry } from "./session-entries";
 
 const MAX_PERSIST_CHARS = 500_000;
@@ -151,6 +152,7 @@ export function forgetExternalizedImages(blobStore: BlobStore): void {
  */
 function truncateForPersistence(obj: unknown, blobStore: BlobStore, key?: string): unknown {
 	if (obj === null || obj === undefined) return obj;
+	if (key === "modelRequestJournal" && isModelRequestJournalDescriptor(obj)) return obj;
 	if (
 		typeof obj === "object" &&
 		"type" in obj &&
@@ -522,5 +524,13 @@ function stripSpilledMcpStructuredContent(entry: FileEntry): FileEntry {
 
 export function prepareEntryForPersistence(entry: FileEntry, blobStore: BlobStore): FileEntry {
 	const projected = stripSpilledMcpStructuredContent(stripReplayedReasoningSignatures(entry));
+	if (entry.type === "model_request_metadata") {
+		if (!isModelRequestMetadataEntry(entry)) throw new Error("Invalid model request journal metadata");
+		return entry;
+	}
+	if (entry.type === "session" && entry.modelRequestJournal !== undefined &&
+		!isModelRequestJournalDescriptor(entry.modelRequestJournal, entry.id)) {
+		throw new Error("Invalid model request journal descriptor");
+	}
 	return truncateForPersistence(projected, blobStore) as FileEntry;
 }

@@ -18,6 +18,26 @@ async function createSqlite(): Promise<{ client: InstanceType<typeof SQL>; stora
 }
 
 describe("SqlSessionStorage (SQLite backend)", () => {
+	it("keeps managed durability unsupported after a real SQL commit and drain", async () => {
+		const { client, storage } = await createSqlite();
+		try {
+			expect(storage.modelRequestJournal).toBe("unsupported");
+			await storage.writeTextAtomic("/sessions/ordinary.jsonl", "ordinary\n");
+			const writer = storage.openWriter("/sessions/ordinary.jsonl");
+			try {
+				await writer.append("append\n");
+				await writer.flush();
+				await storage.drain();
+				expect(await storage.readText("/sessions/ordinary.jsonl")).toBe("ordinary\nappend\n");
+				expect(storage.modelRequestJournal).toBe("unsupported");
+			} finally {
+				await writer.close();
+			}
+		} finally {
+			await client.end();
+		}
+	});
+
 	it("indexes writeText metadata and reads content asynchronously", async () => {
 		const { client, storage } = await createSqlite();
 		await storage.writeText("/sessions/p/a.jsonl", "line1\nline2\n");

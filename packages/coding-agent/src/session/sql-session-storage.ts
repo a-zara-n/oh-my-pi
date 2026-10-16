@@ -252,6 +252,8 @@ function decodeSqlBytes(value: unknown): string {
  * at construction.
  */
 export class SqlSessionStorage extends IndexedSessionStorage {
+	override readonly modelRequestJournal = "unsupported";
+
 	readonly #adapter: SqlSessionStorageAdapter;
 	readonly #table: string;
 

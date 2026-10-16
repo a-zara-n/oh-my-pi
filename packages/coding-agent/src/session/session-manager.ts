@@ -115,6 +115,7 @@ import {
 	normalizeWorkspaceDirectory,
 } from "./session-workspace";
 import { recordSessionRecap, recordSessionTitle } from "./session-index";
+import { validateModelRequestJournal } from "./model-request-journal";
 
 const JSONL_SUFFIX_LENGTH = ".jsonl".length;
 const DRAFT_ONLY_SESSION_MARKER = ".draft-only-session";
@@ -518,6 +519,8 @@ class SessionEntryIndex {
 		const previousLeaf = this.#leaf;
 		const isNew = !this.#entriesById.has(entry.id);
 		this.#entriesById.set(entry.id, entry);
+		// Journal metadata is addressable canonical history, never a tree node.
+		if (entry.type === "model_request_metadata") return;
 		this.#leaf = entry.id;
 		this.#generation++;
 		const cache = this.#branchCache;
@@ -579,6 +582,9 @@ class SessionEntryIndex {
 	}
 
 	setLeaf(id: string | null): void {
+		if (id !== null && this.#entriesById.get(id)?.type === "model_request_metadata") {
+			throw new Error("Model request journal metadata cannot be a branch leaf.");
+		}
 		if (this.#leaf === id) return;
 		this.#leaf = id;
 		this.#generation++;
@@ -636,7 +642,9 @@ class SessionEntryIndex {
 		const seen = new Set<string>();
 		let cursor = leaf ? this.#entriesById.get(leaf) : undefined;
 
+		if (cursor?.type === "model_request_metadata") return branch;
 		while (cursor && !seen.has(cursor.id)) {
+			if (cursor.type === "model_request_metadata") break;
 			seen.add(cursor.id);
 			branch.push(cursor);
 			cursor = cursor.parentId ? this.#entriesById.get(cursor.parentId) : undefined;
@@ -650,10 +658,12 @@ class SessionEntryIndex {
 		const roots: SessionTreeNode[] = [];
 
 		for (const entry of entries) {
+			if (entry.type === "model_request_metadata") continue;
 			nodes.set(entry.id, { entry, children: [], label: this.#labels.get(entry.id) });
 		}
 
 		for (const entry of entries) {
+			if (entry.type === "model_request_metadata") continue;
 			const node = nodes.get(entry.id)!;
 			const parentId = entry.parentId;
 			if (parentId === null || parentId === entry.id) {
@@ -876,6 +886,15 @@ export class SessionManager {
 	#rewriteRequired = false;
 	/** Malformed records the loader skipped for the current session file; reported by `/dump anon`. */
 	#loadedMalformedRecords = 0;
+	/** Immutable managed-history baseline; ordinary rewrites cannot truncate its prefix. */
+	#modelRequestJournalHistory:
+		| { descriptor: string; metadata: ReadonlyMap<string, string>; sources: ReadonlySet<string> }
+		| undefined;
+	/** Captures are local rollback views, not an import or relocation authority. */
+	readonly #modelRequestJournalCaptures = new WeakMap<
+		SessionManagerStateSnapshot,
+		{ sessionId: string; sessionFile: string | undefined; cwd: string; sessionDir: string }
+	>();
 	/** Byte length this manager last loaded or durably wrote; `null` means the path was absent. */
 	#expectedDiskSize: number | null = null;
 	/**
@@ -1102,6 +1121,7 @@ export class SessionManager {
 			!this.#persist ||
 			this.#released ||
 			this.#sessionFileRelocating ||
+			this.#header.modelRequestJournal ||
 			this.#storage.defersSyncPublish
 		) {
 			return undefined;
@@ -1218,6 +1238,7 @@ export class SessionManager {
 	 * await it. Returns the sibling.
 	 */
 	#moveOffSessionFile(reason: SessionPersistenceNotice["reason"]): string {
+		this.#refuseManagedJournalMutation();
 		const from = this.#sessionFile as string;
 		const previousSessionId = this.#sessionId;
 		const timestamp = nowIso();
@@ -1423,7 +1444,11 @@ export class SessionManager {
 				? this.#moveOffSessionFile("open-elsewhere")
 				: sessionFile;
 		const body = this.#serializeBody();
-		const options = { expectedSize: this.#expectedDiskSize, commitGuard };
+		const options = {
+			expectedSize: this.#expectedDiskSize,
+			commitGuard,
+			requireAtomicReplace: this.#header.modelRequestJournal !== undefined,
+		};
 		try {
 			await (this.#storage.writeLinesAtomic
 				? this.#storage.writeLinesAtomic(target, body.lines, options)
@@ -1469,10 +1494,18 @@ export class SessionManager {
 	}
 	#recordDurableAppend(line: string): void {
 		this.#expectedDiskSize = (this.#expectedDiskSize ?? 0) + Buffer.byteLength(line, "utf8");
+		if (this.#modelRequestJournalHistory && !this.#atomicEntryBatch) {
+			this.#assertModelRequestJournalHistory(this.#header, this.#entries);
+			this.#protectModelRequestJournalHistory();
+		}
 	}
 
 	#recordFullRewrite(bytes: number): void {
 		this.#expectedDiskSize = bytes;
+		if (this.#modelRequestJournalHistory && !this.#atomicEntryBatch) {
+			this.#assertModelRequestJournalHistory(this.#header, this.#entries);
+			this.#protectModelRequestJournalHistory();
+		}
 	}
 
 	/**
@@ -1523,6 +1556,7 @@ export class SessionManager {
 
 	/** Serialize the whole file — title slot, header, entries — as lines, stamped with the state they came from. */
 	#serializeBody(): SessionFileBody {
+		this.#assertModelRequestJournalHistory(this.#header, this.#entries);
 		const titleLine = this.#titleSlotLine();
 		const headerLine = this.#lineFor(this.#header);
 		const entries = this.#entries;
@@ -1590,7 +1624,10 @@ export class SessionManager {
 			this.#closeWriterEventually();
 			for (let recoveries = 0; ; recoveries++) {
 				try {
-					const options = { expectedSize: this.#expectedDiskSize };
+					const options = {
+						expectedSize: this.#expectedDiskSize,
+						requireAtomicReplace: this.#header.modelRequestJournal !== undefined,
+					};
 					if (this.#storage.writeLinesSync) this.#storage.writeLinesSync(targetPath, body.lines, options);
 					else this.#storage.writeTextSync(targetPath, body.lines.join(""), options);
 					break;
@@ -1720,6 +1757,7 @@ export class SessionManager {
 				const body = this.#serializeBody();
 				const options = {
 					expectedSize: this.#expectedDiskSize,
+					requireAtomicReplace: this.#header.modelRequestJournal !== undefined,
 					commitGuard: () => !this.#released && this.#diskEpoch === epoch,
 				};
 				try {
@@ -1937,6 +1975,7 @@ export class SessionManager {
 	}
 
 	#resetToNewSession(options?: NewSessionOptions, forcedSessionFile?: string): string | undefined {
+		this.#modelRequestJournalHistory = undefined;
 		this.#diskTail = Promise.resolve();
 		this.#clearDiskError();
 		this.#expectedDiskSize = null;
@@ -2000,7 +2039,58 @@ export class SessionManager {
 		return this.#sessionFile;
 	}
 
+	#refuseManagedJournalMutation(): void {
+		if (this.#modelRequestJournalHistory || this.#header.modelRequestJournal || this.#entries.some(entry => entry.type === "model_request_metadata")) {
+			throw new Error("Managed model request journal history cannot be copied, moved, or discarded.");
+		}
+	}
+
+	#assertModelRequestJournalHistory(header: SessionHeader, entries: readonly SessionEntry[]): void {
+		const protectedHistory = this.#modelRequestJournalHistory;
+		if (!protectedHistory && !header.modelRequestJournal && !entries.some(entry => entry.type === "model_request_metadata")) {
+			return;
+		}
+		validateModelRequestJournal([header, ...entries]);
+		if (!protectedHistory) return;
+		if (JSON.stringify(header.modelRequestJournal) !== protectedHistory.descriptor) {
+			throw new Error("Managed model request journal descriptor cannot be replaced.");
+		}
+		const byId = new Map(entries.map(entry => [entry.id, entry]));
+		for (const [id, serialized] of protectedHistory.metadata) {
+			if (JSON.stringify(byId.get(id)) !== serialized) {
+				throw new Error("Managed model request journal metadata cannot be removed or changed.");
+			}
+		}
+		for (const id of protectedHistory.sources) {
+			const source = byId.get(id);
+			if (!source || (source.type !== "message" && source.type !== "model_usage")) {
+				throw new Error("Managed model request journal sources cannot be removed or reidentified.");
+			}
+		}
+	}
+
+	#protectModelRequestJournalHistory(): void {
+		if (!this.#header.modelRequestJournal) {
+			this.#modelRequestJournalHistory = undefined;
+			return;
+		}
+		const metadata = new Map<string, string>();
+		const sources = new Set<string>();
+		for (const entry of this.#entries) {
+			if (entry.type === "model_request_metadata") metadata.set(entry.id, JSON.stringify(entry));
+			else if (entry.type === "message" || entry.type === "model_usage") sources.add(entry.id);
+		}
+		this.#modelRequestJournalHistory = {
+			descriptor: JSON.stringify(this.#header.modelRequestJournal),
+			metadata,
+			sources,
+		};
+	}
+
 	#applyEntries(header: SessionHeader, entries: SessionEntry[]): void {
+		if (header.modelRequestJournal || entries.some(entry => entry.type === "model_request_metadata")) {
+			validateModelRequestJournal([header, ...entries]);
+		}
 		this.#header = header;
 		this.#entries = entries;
 		this.#sessionId = header.id;
@@ -2010,6 +2100,7 @@ export class SessionManager {
 		const repairedUsage = normalizeLoadedUsage(entries);
 		if (repairedUsage > 0) logger.warn("Loaded assistant messages with incomplete usage", { count: repairedUsage });
 		this.#index.rebuild(entries);
+		this.#protectModelRequestJournalHistory();
 	}
 
 	#freshEntryFields(): { id: string; parentId: string | null; timestamp: string } {
@@ -2034,6 +2125,9 @@ export class SessionManager {
 			logger.warn("Dropped session entry appended after terminal release", { type: entry.type });
 			return;
 		}
+		if (this.#modelRequestJournalHistory || this.#header.modelRequestJournal) {
+			this.#assertModelRequestJournalHistory(this.#header, this.#entries);
+		}
 		if (entry.type === "message" && entry.message.role === "assistant" && normalizeAssistantUsage(entry.message)) {
 			logger.warn("Assistant message recorded with incomplete usage", { id: entry.id });
 		}
@@ -2041,7 +2135,7 @@ export class SessionManager {
 		this.#index.insert(entry);
 		const batch = this.#atomicEntryBatch;
 		if (batch?.collecting) batch.entryIds.add(entry.id);
-		if (batch && !batch.collecting) {
+		if (batch && !batch.collecting && entry.type !== "model_request_metadata") {
 			batch.externalLeafChanged = true;
 			batch.externalLeafId = entry.id;
 		}
@@ -2060,7 +2154,9 @@ export class SessionManager {
 			return id;
 		};
 		const retained = this.#entries.filter(entry => !batch.entryIds.has(entry.id));
-		for (const entry of retained) entry.parentId = retainedAncestor(entry.parentId);
+		for (const entry of retained) {
+			if (entry.type !== "model_request_metadata") entry.parentId = retainedAncestor(entry.parentId);
+		}
 		const restoredLeaf = retainedAncestor(batch.externalLeafChanged ? batch.externalLeafId : batch.preBatchLeafId);
 		this.#entries = retained;
 		this.#index.rebuild(retained);
@@ -2147,7 +2243,7 @@ export class SessionManager {
 	}
 
 	captureState(): SessionManagerStateSnapshot {
-		return {
+		const snapshot: SessionManagerStateSnapshot = {
 			cwd: this.#cwd,
 			sessionDir: this.#sessionDir,
 			sessionId: this.#sessionId,
@@ -2168,6 +2264,15 @@ export class SessionManager {
 			header: structuredClone(this.#header),
 			entries: [...this.#entries],
 		};
+		if (this.#modelRequestJournalHistory) {
+			this.#modelRequestJournalCaptures.set(snapshot, {
+				sessionId: this.#sessionId,
+				sessionFile: this.#sessionFile,
+				cwd: this.#cwd,
+				sessionDir: this.#sessionDir,
+			});
+		}
+		return snapshot;
 	}
 
 	/**
@@ -2177,6 +2282,7 @@ export class SessionManager {
 	 * Set `persist` false when the original session is intentionally being dropped.
 	 */
 	cloneCurrentSession(options?: { persist?: boolean }): SessionManager {
+		this.#refuseManagedJournalMutation();
 		const persist = options?.persist ?? this.#persist;
 		const clone = new SessionManager(this.#cwd, this.#sessionDir, persist, this.#storage);
 		clone.#suppressBreadcrumb = true;
@@ -2192,6 +2298,18 @@ export class SessionManager {
 	}
 
 	restoreState(snapshot: SessionManagerStateSnapshot): void {
+		if (snapshot.header.modelRequestJournal || snapshot.entries.some(entry => entry.type === "model_request_metadata")) {
+			const captured = this.#modelRequestJournalCaptures.get(snapshot);
+			if (!captured || captured.sessionId !== snapshot.sessionId || captured.sessionFile !== snapshot.sessionFile ||
+				captured.cwd !== snapshot.cwd || captured.sessionDir !== snapshot.sessionDir) {
+				throw new Error("Managed model request journal snapshots cannot be imported, copied, or relocated.");
+			}
+		}
+		if (snapshot.sessionId === this.#sessionId) {
+			this.#assertModelRequestJournalHistory(snapshot.header, snapshot.entries);
+		} else if (snapshot.header.modelRequestJournal || snapshot.entries.some(entry => entry.type === "model_request_metadata")) {
+			validateModelRequestJournal([snapshot.header, ...snapshot.entries]);
+		}
 		this.#closeWriterEventually();
 		this.#diskTail = Promise.resolve();
 		this.#clearDiskError();
@@ -2276,6 +2394,13 @@ export class SessionManager {
 
 		const resolvedSessionFile = path.resolve(sessionFile);
 		const loaded = loadedSession ?? (await loadSessionFile(resolvedSessionFile, this.#storage));
+		if (loaded.entries.some(entry => entry.type === "model_request_metadata" ||
+			(entry.type === "session" && entry.modelRequestJournal))) {
+			validateModelRequestJournal(loaded.entries, {
+				malformedRecords: loaded.malformedRecords,
+				invalidHeader: loaded.invalidHeader,
+			});
+		}
 		const sourceSize =
 			loaded.sourceSize !== undefined
 				? loaded.sourceSize
@@ -2366,6 +2491,13 @@ export class SessionManager {
 
 	/** Delete a session file and its artifact directory. ENOENT is treated as success. */
 	async dropSession(sessionPath: string): Promise<void> {
+		if (this.#sessionFile && path.resolve(sessionPath) === path.resolve(this.#sessionFile)) {
+			this.#refuseManagedJournalMutation();
+		}
+		const onDisk = await loadSessionFile(sessionPath, this.#storage);
+		if (onDisk.entries.some(entry => entry.type === "model_request_metadata" || (entry.type === "session" && entry.modelRequestJournal))) {
+			throw new Error("Managed model request journal history cannot be deleted.");
+		}
 		await this.#drainAndCloseWriter();
 		try {
 			await this.#storage.deleteSessionWithArtifacts(sessionPath);
@@ -2379,6 +2511,7 @@ export class SessionManager {
 	 * @returns the old and new session file paths, or undefined when not persisting.
 	 */
 	async fork(): Promise<{ oldSessionFile: string; newSessionFile: string } | undefined> {
+		this.#refuseManagedJournalMutation();
 		if (!this.#persist || !this.#sessionFile) return undefined;
 
 		const oldSessionFile = this.#sessionFile;
@@ -2421,6 +2554,7 @@ export class SessionManager {
 
 	/** Move the session to a new working directory. */
 	async moveTo(newCwd: string, targetSessionDir?: string): Promise<void> {
+		this.#refuseManagedJournalMutation();
 		const resolvedCwd = path.resolve(newCwd);
 		const resolvedTargetDir = targetSessionDir ? path.resolve(targetSessionDir) : undefined;
 		const managedRoot = resolveManagedSessionRoot(this.#sessionDir, this.#cwd);
@@ -2644,6 +2778,7 @@ export class SessionManager {
 		options?: { sessionDir?: string; suppressBreadcrumb?: boolean },
 		storage: SessionStorage = new FileSessionStorage(),
 	): Promise<SessionManager> {
+		this.#refuseManagedJournalMutation();
 		const sessionDir = options?.sessionDir ?? SessionManager.getDefaultSessionDir(this.#cwd, undefined, storage);
 		const manager = new SessionManager(this.#cwd, sessionDir, true, storage);
 		manager.#suppressBreadcrumb = options?.suppressBreadcrumb === true;
@@ -2709,6 +2844,7 @@ export class SessionManager {
 				throw new Error("Atomic session batch was superseded before commit.");
 			}
 			this.#atomicEntryBatch = undefined;
+			if (this.#header.modelRequestJournal) this.#protectModelRequestJournalHistory();
 			this.#notifyDurableEntries(batch.deferredNotifications);
 			return result;
 		} catch (error) {
@@ -3321,17 +3457,25 @@ export class SessionManager {
 	 * `id`/`parentId`. Used by collab guests to mirror the host session.
 	 */
 	ingestReplicatedEntry(entry: SessionEntry): void {
+		if (entry.type === "model_request_metadata") {
+			throw new Error("Model request journal metadata cannot be ingested from a replica.");
+		}
 		this.#recordEntry(entry);
 	}
 
 	/**
-	 * The live header and entries, for collab replication. Nothing is copied:
-	 * the host mutates entries in place on rewrite paths, so callers must not
-	 * mutate what this returns and must serialize it synchronously, before any
-	 * such rewrite can run.
+	 * Entries remain a live view for collab replication; the managed descriptor
+	 * is never replicated into a noncanonical guest. Callers must not mutate the
+	 * returned view and must serialize it synchronously before a rewrite runs.
 	 */
 	snapshotForReplication(): { header: SessionHeader; entries: readonly SessionEntry[] } {
-		return { header: this.#header, entries: this.#entries };
+		if (!this.#header.modelRequestJournal) return { header: this.#header, entries: this.#entries };
+		const header = { ...this.#header };
+		delete header.modelRequestJournal;
+		return {
+			header,
+			entries: this.#entries.filter(entry => entry.type !== "model_request_metadata"),
+		};
 	}
 
 	/**
@@ -3665,6 +3809,9 @@ export class SessionManager {
 	 */
 	appendLabelChange(targetId: string, label: string | undefined): string {
 		if (!this.#index.has(targetId)) throw new Error(`Entry ${targetId} not found`);
+		if (this.#index.get(targetId)?.type === "model_request_metadata") {
+			throw new Error("Model request journal metadata cannot be labeled as a tree node.");
+		}
 
 		const entry: LabelEntry = { type: "label", ...this.#freshEntryFields(), targetId, label };
 		this.#recordEntry(entry);
@@ -3757,6 +3904,7 @@ export class SessionManager {
 	 * rewrite the journal, making the selected path durable.
 	 */
 	async discardEntryDurably(entryId: string): Promise<void> {
+		this.#refuseManagedJournalMutation();
 		const entry = this.#index.get(entryId);
 		if (!entry) return;
 		const children = this.#index.childrenOf(entryId);
@@ -3804,6 +3952,7 @@ export class SessionManager {
 	 * Returns the new file path, or undefined when not persisting.
 	 */
 	createBranchedSession(leafId: string, options?: { copyArtifacts?: boolean }): string | undefined {
+		this.#refuseManagedJournalMutation();
 		const sourceSessionFile = this.#sessionFile;
 		const branchPath = this.getBranch(leafId);
 		if (branchPath.length === 0) throw new Error(`Entry ${leafId} not found`);
@@ -3961,6 +4110,9 @@ export class SessionManager {
 		await resolveBlobRefsInEntries(sourceEntries, manager.#blobs);
 
 		const sourceHeader = sourceEntries.find(entry => entry.type === "session") as SessionHeader | undefined;
+		if (sourceHeader?.modelRequestJournal || sourceEntries.some(entry => entry.type === "model_request_metadata")) {
+			throw new Error("Managed model request journals cannot be forked or imported.");
+		}
 		const history = sourceEntries.filter(entry => entry.type !== "session") as SessionEntry[];
 		normalizeLoadedUsage(history);
 		if (options?.resetInheritedCost) SessionManager.#resetInheritedUsageCost(history);

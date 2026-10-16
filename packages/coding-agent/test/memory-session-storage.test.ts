@@ -3,6 +3,23 @@ import { MemorySessionStorage } from "@oh-my-pi/pi-coding-agent/session/session-
 import { serializeTitleSlot } from "@oh-my-pi/pi-coding-agent/session/session-title-slot";
 
 describe("MemorySessionStorage indexed mirror", () => {
+	test("explicitly rejects managed durability while preserving ordinary storage", async () => {
+		const storage = new MemorySessionStorage();
+		const path = "/virtual/session.jsonl";
+		expect(storage.modelRequestJournal).toBe("unsupported");
+		await storage.writeTextAtomic(path, "ordinary\n");
+		const writer = storage.openWriter(path);
+		try {
+			await writer.append("append\n");
+			await writer.flush();
+			await storage.drain();
+			expect(await storage.readText(path)).toBe("ordinary\nappend\n");
+			expect(storage.modelRequestJournal).toBe("unsupported");
+		} finally {
+			await writer.close();
+		}
+	});
+
 	test("append builds the same content as a single writeTextSync of the join", async () => {
 		const storage = new MemorySessionStorage();
 		const path = "/virtual/session.jsonl";

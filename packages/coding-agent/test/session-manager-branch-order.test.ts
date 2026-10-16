@@ -61,7 +61,10 @@ describe("SessionManager branch ordering", () => {
 		manager.appendModelChange("m/c", "smol");
 		// Corrupt the leaf into a self-cycle through the shared entry ref.
 		const branch = manager.getBranch();
-		const leafEntry = branch.find(entry => entry.id === leaf)!;
+		const leafEntry = branch.find(entry => entry.id === leaf);
+		if (!leafEntry || leafEntry.type !== "model_change") {
+			throw new Error("Expected a model-change leaf entry");
+		}
 		const savedParent = leafEntry.parentId;
 		leafEntry.parentId = leafEntry.id;
 		try {
