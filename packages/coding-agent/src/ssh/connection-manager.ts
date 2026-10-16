@@ -195,8 +195,8 @@ function buildCommonArgs(host: SSHConnectionTarget, owner: ControlPathOwner, opt
 
 	if (supportsSshControlMaster(options?.platform)) {
 		args.push("-o", "ControlMaster=auto");
-		if (owner === "omp") args.push("-o", `ControlPath=${CONTROL_PATH}`);
-		args.push("-o", "ControlPersist=3600");
+		// A config-owned socket keeps the user's ControlPath and ControlPersist.
+		if (owner === "omp") args.push("-o", `ControlPath=${CONTROL_PATH}`, "-o", "ControlPersist=3600");
 	}
 
 	args.push("-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new");
@@ -722,6 +722,9 @@ const CONNECTION_VERIFY_TTL_MS = 30_000;
 /** Per host: when the connection was last verified, and the target it was verified for. */
 const verifiedConnections = new Map<string, { at: number; fingerprint: string }>();
 
+/** Host names whose master omp itself started on a config-owned ControlPath; only these are exited on close. */
+const startedConfigMasters = new Set<string>();
+
 export async function ensureConnection(host: SSHConnectionTarget): Promise<void> {
 	const key = host.name;
 	const fingerprint = `${host.username ?? ""}@${host.host}:${host.port ?? ""}\0${host.keyPath ?? ""}`;
@@ -765,7 +768,8 @@ export async function ensureConnection(host: SSHConnectionTarget): Promise<void>
 			return;
 		}
 
-		const commonArgs = buildCommonArgs(host, await resolveControlPathOwner(host));
+		const owner = await resolveControlPathOwner(host);
+		const commonArgs = buildCommonArgs(host, owner);
 		const check = await runSshSync(["-O", "check", ...commonArgs, target]);
 		if (check.exitCode === 0) {
 			activeHosts.set(key, host);
@@ -781,6 +785,7 @@ export async function ensureConnection(host: SSHConnectionTarget): Promise<void>
 			throw new Error(`Failed to start SSH master for ${target}${detail}`);
 		}
 
+		if (owner === "config") startedConfigMasters.add(key);
 		activeHosts.set(key, host);
 		if (!hostInfoCache.has(key) && !(await loadHostInfoFromDisk(host))) {
 			await probeHostInfo(host);
@@ -818,9 +823,9 @@ async function closeConnectionInternal(host: SSHConnectionTarget): Promise<void>
 	if (!supportsSshControlMaster()) return;
 	const target = buildSshTarget(host.username, host.host);
 	const owner = await resolveControlPathOwner(host);
-	// A master on the user's configured socket is shared with their own ssh
-	// sessions; leave its lifetime to ssh_config/ControlPersist.
-	if (owner === "config") return;
+	// A master on the user's configured socket that omp did not start is shared
+	// with their own ssh sessions; leave its lifetime to ssh_config.
+	if (owner === "config" && !startedConfigMasters.delete(host.name)) return;
 	await runSshSync(["-O", "exit", ...buildCommonArgs(host, owner), target]);
 }
 

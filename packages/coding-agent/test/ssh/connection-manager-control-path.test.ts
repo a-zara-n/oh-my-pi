@@ -20,29 +20,38 @@ let binDir: string;
 let fakeSsh: string;
 let logPath: string;
 
-// Fake `ssh`: `-G` reports a configured ControlPath only for `cfg-host`; the
-// "live master" answers `-O check` only when omp left ControlPath to the
-// config; starting a new master fails like a keyboard-interactive-only host;
-// remote commands run locally so the host probe succeeds.
+// Fake `ssh`: `-G` reports a configured ControlPath for `cfg-host` and
+// `idle-host`. `cfg-host` has a live master that answers `-O check` only when
+// omp left ControlPath to the config, and refuses new masters like a
+// keyboard-interactive-only host. `idle-host` has no master yet and accepts
+// `-M`. Remote commands run locally so the host probe succeeds.
 const FAKE_SSH = `#!/usr/bin/env bash
 echo "$*" >> "__LOG__"
 case " $* " in
 	*" -G "*)
 		case "\${!#}" in
 			cfg-host) echo "controlpath /tmp/user-master.sock" ;;
+			idle-host) echo "controlpath /tmp/idle-master.sock" ;;
 			none-host) echo "controlpath none" ;;
 		esac
 		echo "batchmode no"
 		exit 0 ;;
 	*" -O check "*)
-		case " $* " in *ControlPath=*) exit 255 ;; esac
+		case " $* " in *ControlPath=*|*" idle-host "*) exit 255 ;; esac
 		echo "Master running" >&2
 		exit 0 ;;
 	*" -O exit "*) exit 0 ;;
-	*" -M "*) echo "Permission denied (keyboard-interactive)." >&2; exit 255 ;;
+	*" -M "*)
+		case " $* " in *" idle-host "*) exit 0 ;; esac
+		echo "Permission denied (keyboard-interactive)." >&2; exit 255 ;;
 esac
 exec bash -c "\${!#}"
 `;
+
+async function callsFor(destination: string): Promise<string[]> {
+	const log = await Bun.file(logPath).text();
+	return log.split("\n").filter(call => ` ${call} `.includes(` ${destination} `));
+}
 
 beforeAll(async () => {
 	binDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-ssh-control-path-"));
@@ -74,18 +83,33 @@ describe.skipIf(process.platform === "win32")("ssh_config ControlPath (#15974)",
 		const args = await buildRemoteCommand(host, "true");
 		await closeConnection(host.name);
 
-		const calls = (await Bun.file(logPath).text()).trim().split("\n");
+		const calls = await callsFor("cfg-host");
 		expect(calls.some(call => call.includes("-O check") && !call.includes("ControlPath="))).toBe(true);
 		expect(calls.some(call => call.startsWith("-M "))).toBe(false);
 		expect(calls.some(call => call.includes("-O exit"))).toBe(false);
 		expect(args.some(arg => arg.startsWith("ControlPath="))).toBe(false);
+		expect(args.some(arg => arg.startsWith("ControlPersist="))).toBe(false);
 		expect(args).toContain("BatchMode=yes");
+	});
+
+	it("starts a master on the configured socket under the user's ControlPersist and exits it on close", async () => {
+		const host = { name: "omp-test-15974-idle-host", host: "idle-host" };
+		await ensureConnection(host);
+		await closeConnection(host.name);
+
+		const calls = await callsFor("idle-host");
+		const start = calls.find(call => call.startsWith("-M "));
+		expect(start).toBeDefined();
+		expect(start).not.toContain("ControlPath=");
+		expect(start).not.toContain("ControlPersist=");
+		expect(calls.some(call => call.includes("-O exit"))).toBe(true);
 	});
 
 	it("keeps omp's socket when ssh_config sets no ControlPath or `none`", async () => {
 		for (const name of ["plain-host", "none-host"]) {
 			const args = await buildRemoteCommand({ name, host: name }, "true", { platform: "linux" });
 			expect(args).toContain(`ControlPath=${getControlPathTemplate()}`);
+			expect(args).toContain("ControlPersist=3600");
 		}
 	});
 });
