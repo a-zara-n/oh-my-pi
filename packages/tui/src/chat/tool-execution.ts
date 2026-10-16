@@ -19,6 +19,7 @@ import {
 	type ToolRenderer,
 	toolRenderers,
 } from "../tools/index";
+import { readSourceFsPath } from "../tools/read";
 import { describeDefaultToolExecution, formatDefaultToolExecution } from "../tools/default-renderer";
 import { INTENT_FIELD, type TspCardStatus, type TspPreview, type TspText, type TspTone } from "@oh-my-pi/pi-wire";
 import { card, col, EMPTY_NODE, node, span, text, withHidden } from "../native/describe";
@@ -420,6 +421,8 @@ export class ToolExecutionComponent extends Container {
 		isError?: boolean;
 		details?: unknown;
 	};
+	// Unmodified filesystem target for read hyperlinks; #result.details stays display-safe.
+	#readLinkPath?: string;
 	// Edit preview state
 	#editMode?: EditMode;
 	#editDiffPreview?: PerFileDiffPreview[];
@@ -632,6 +635,15 @@ export class ToolExecutionComponent extends Container {
 		const partialResultPainted = this.#partialResultShapePainted;
 		this.#firstResultViewportRepaintShapePainted = false;
 		this.#partialResultShapePainted = false;
+		const rawDetails = result.details;
+		if (this.#toolName === "read" && isRecord(rawDetails)) {
+			this.#readLinkPath =
+				typeof rawDetails.resolvedPath === "string"
+					? rawDetails.resolvedPath
+					: typeof rawDetails.displayTarget === "string"
+						? rawDetails.displayTarget
+						: readSourceFsPath(rawDetails);
+		}
 		// `details` reaches renderers verbatim (live and on transcript replay) and
 		// carries raw file/command text (grep/read `displayContent`, diffs, paths);
 		// strip control sequences once here so no renderer can emit them.
@@ -1806,6 +1818,7 @@ export class ToolExecutionComponent extends Container {
 			return Math.max(1, Math.min(maxSeconds, value));
 		};
 
+		if (this.#toolName === "read" && this.#readLinkPath) context.readLinkPath = this.#readLinkPath;
 		if (this.#toolName === "bash") {
 			// Bash needs render context even before a result exists. The renderer uses the pending-call args
 			// plus this context to keep the inline command preview visible while tool-call JSON is still streaming.

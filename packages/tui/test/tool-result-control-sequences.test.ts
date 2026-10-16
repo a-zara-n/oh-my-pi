@@ -1,10 +1,11 @@
-import { beforeAll, describe, expect, it, vi } from "bun:test";
+import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import { ReadToolGroupComponent } from "@oh-my-pi/pi-tui/chat/read-tool-group";
 import { ToolExecutionComponent } from "@oh-my-pi/pi-tui/chat/tool-execution";
+import { applyHyperlinkSetting } from "@oh-my-pi/pi-tui/render/hyperlink";
 import type { ReadToolDetails } from "@oh-my-pi/pi-tui/tools/read";
 import { initTheme } from "@oh-my-pi/pi-tui/theme";
 
@@ -23,6 +24,10 @@ const LINE = `needle ${FILE_ESCAPES}`;
 function privateModeSequences(text: string): string[] {
 	return text.match(/\x1b\[\?[\d;]*[hl]/g) ?? [];
 }
+
+afterEach(() => {
+	applyHyperlinkSetting("auto");
+});
 
 describe("tool result details with raw control sequences", () => {
 	beforeAll(async () => {
@@ -109,6 +114,42 @@ describe("tool result details with raw control sequences", () => {
 				if (!href) throw new Error("Missing file link");
 				expect(await Bun.file(new URL(href)).text()).toBe("needle");
 			}
+		} finally {
+			await fs.rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("standalone read cards keep the original file hyperlink target", async () => {
+		applyHyperlinkSetting("always");
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-read-single-link-"));
+		const filename = path.join(dir, `fixture${FILE_ESCAPES}.txt`);
+		try {
+			await Bun.write(filename, "needle");
+			const component = new ToolExecutionComponent(
+				"read",
+				{ path: filename },
+				{ useBuiltInRenderer: true },
+				undefined,
+				{ requestRender: vi.fn(), requestComponentRender: vi.fn(), resetDisplay: vi.fn() },
+				dir,
+			);
+			component.updateResult({
+				content: [{ type: "text", text: "needle" }],
+				details: { resolvedPath: filename, displayContent: { text: LINE, startLine: 1 } },
+			});
+			const view = component.describe({
+				cols: 120,
+				reduceMotion: false,
+				dark: true,
+				supports: kind => kind === "tool",
+				feature: () => true,
+			});
+			if (view.k !== "tool") throw new Error("Expected read tool node");
+			expect(view.p?.href).toBe(pathToFileURL(filename).href);
+			expect(view.p?.target).not.toContain("\x1b");
+			const rendered = component.render(120).join("\n");
+			expect(rendered).toContain(pathToFileURL(filename).href);
+			expect(rendered).not.toContain(FILE_ESCAPES);
 		} finally {
 			await fs.rm(dir, { recursive: true, force: true });
 		}
