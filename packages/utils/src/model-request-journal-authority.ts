@@ -260,7 +260,8 @@ function verify(state: BindingState): AuthorityRecord {
 		const verdict = inspectModelRequestWriterCredential(state.requester, controlSnapshot(db, state.resources.storeId, credential.credential.writerId, record));
 		const allowed = state.mode === "bootstrap-new" ? BOOTSTRAP_ROLES : RESUME_ROLES;
 		if (!verdict.ok || !verdict.active || !validRole(verdict.row.role) || !allowed.includes(verdict.row.role) || verdict.row.sessionId !== null && verdict.row.sessionId !== state.rootSessionId) throw new Error("Journal requester rejected");
-		const moved = new Int32Array(1);
+		// Bun's fileControl buffer must hold at least eight bytes; HAS_MOVED writes the first int.
+		const moved = new Int32Array(2);
 		if (db.fileControl(20, moved) !== 0 || moved[0] !== 0) throw new Error("Journal database identity unavailable");
 		// Bun exposes an opaque handle index, not the actual SQLite file descriptor.
 		// HAS_MOVED does not establish fstat identity against this nofollow fd under swap-back.

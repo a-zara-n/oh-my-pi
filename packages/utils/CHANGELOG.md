@@ -22,6 +22,8 @@
   Native lookup validates bounded caller-owned storage, UID/effective UID and the returned
   home-pointer range; errors fail closed without an environment fallback. The parent owns
   post-change verification of the retained real subprocess HOME/lease regressions.
+- Sized the fixed verifier's `fileControl` buffer to Bun's eight-byte minimum. This only
+  reaches the explicit unsupported actual-fd boundary; `HAS_MOVED` is not identity proof.
 
 ### Changed
 
