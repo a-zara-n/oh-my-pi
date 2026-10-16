@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { readFile } from "node:fs/promises";
 import * as path from "node:path";
 import { BlobStore } from "@oh-my-pi/pi-coding-agent/session/blob-store";
 import {
@@ -121,11 +122,16 @@ describe("managed model request journal persisted reader boundary", () => {
 		["unknown-key", { ...metadata, body: "PROMPT_KEY_CANARY_BODY" }],
 		["unknown-variant", { ...metadata, record: { ...decision, event: "future" } }],
 		["uppercase-id", { ...metadata, journalId: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA" }],
+		["record-body", { ...metadata, record: { ...decision, body: "REJECTED_RECORD_CANARY" } }],
+		["record-headers", { ...metadata, record: { ...decision, headers: { authorization: "REJECTED_RECORD_CANARY" } } }],
+		["model-url", { ...metadata, record: { ...decision, modelRef: { ...decision.modelRef, baseUrl: "https://REJECTED_RECORD_CANARY" } } }],
 	])("rejects persisted %s without accepting a prefix", async (_name, bad) => {
 		using dir = TempDir.createSync("@model-request-reject-");
 		const file = path.join(dir.path(), "session.jsonl");
 		await persist(file, [header, bad]);
+		const bytes = await readFile(file, "utf8");
 		await expect(loadModelRequestJournalFromFile(file)).rejects.toThrow();
+		expect(await readFile(file, "utf8")).toBe(bytes);
 	});
 
 	it("validates every epoch, preserves empty epochs, and rejects epoch rollback and duplicate seq", () => {
@@ -155,6 +161,29 @@ describe("managed model request journal persisted reader boundary", () => {
 		const usage = { type: "model_usage", id: "usage1", parentId: null, timestamp: ISO, purpose: "judge", api: "openai-responses", provider: "openai", model: "gpt-5", usage: assistant.message.role === "assistant" ? assistant.message.usage : undefined, stopReason: "stop" };
 		await persist(file, [header, usage, { ...metadata, record: { ...link, sourceKind: "model_usage", sourceEntryId: usage.id } }]);
 		expect((await loadModelRequestJournalFromFile(file)).metadataEntries.length).toBe(1);
+	});
+
+	it("rejects canary-bearing fixture source links instead of returning a valid metadata prefix", async () => {
+		using dir = TempDir.createSync("@model-request-link-canary-");
+		const file = path.join(dir.path(), "session.jsonl");
+		const link = {
+			schemaVersion: 1, sourceKind: "assistant", sourceSessionId: "s1", sourceEntryId: assistant.id,
+			resultId: null, provenance: { kind: "non-wire", reason: "cache" },
+		};
+		const canary = "REJECTED_SOURCE_LINK_CANARY";
+		for (const record of [
+			{ ...link, body: canary },
+			{ ...link, provenance: { ...link.provenance, headers: { authorization: canary } } },
+			{ ...link, provenance: { kind: "unresolved", error: canary } },
+		]) {
+			// Explicitly persisted corrupt reader fixtures are not issued-owner writes.
+			await persist(file, [header, metadata, assistant, { ...linked, record }]);
+			const bytes = await readFile(file, "utf8");
+			await expect(loadModelRequestJournalFromFile(file)).rejects.toThrow();
+			const streaming = await loadEntriesFromFileStream(file);
+			expect(() => validateModelRequestJournal(streaming.entries, streaming)).toThrow();
+			expect(await readFile(file, "utf8")).toBe(bytes);
+		}
 	});
 
 	it("never migrates managed history by regenerating IDs or fabricating epochs", () => {

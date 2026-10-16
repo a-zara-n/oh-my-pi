@@ -5,14 +5,16 @@ import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import type {
 	ModelRequestJournalDescriptor,
+	ModelRequestLifecycleRecord,
 	ModelRequestMetadataEntry,
 	ModelUsageEntry,
+	ModelRequestSourceLinkInput,
 	SessionEntry,
 	SessionHeader,
 	SessionMessageEntry,
 } from "../../src/session/session-entries";
 import { loadModelRequestJournalFromFile } from "../../src/session/session-loader";
-import { SessionManager } from "../../src/session/session-manager";
+import { type ModelRequestSourceInput, SessionManager } from "../../src/session/session-manager";
 import { FileSessionStorage } from "../../src/session/session-storage";
 
 const timestamp = "2026-10-16T00:00:00.000Z";
@@ -23,6 +25,7 @@ const nextOwnerId = "44444444-4444-4444-8444-444444444444";
 const nextEpoch = "55555555-5555-4555-8555-555555555555";
 const promptCanary = "PROMPT_CANARY_JOURNAL_MANAGER";
 const keyCanary = "KEY_CANARY_JOURNAL_MANAGER";
+const rejectedCanary = "REJECTED_TYPED_APPEND_CANARY";
 
 function assistantMessage(): AssistantMessage {
 	return {
@@ -92,6 +95,173 @@ function jsonl(records: readonly unknown[]): string {
 async function open(file: string, storage = new FileSessionStorage()): Promise<SessionManager> {
 	return SessionManager.open(file, path.dirname(file), storage, { suppressBreadcrumb: true, throwIfMissing: true });
 }
+
+function journalInputs(manager: SessionManager) {
+	const record: ModelRequestLifecycleRecord = {
+		schemaVersion: 1, event: "decision", requestId: "66666666-6666-4666-8666-666666666666",
+		coreAttemptId: "77777777-7777-4777-8777-777777777777", coreRetryOf: null,
+		rootSessionId: manager.getSessionId(), sessionId: manager.getSessionId(), purpose: "main",
+		modelRef: { provider: "openai", id: "gpt-4o-mini", api: "openai-completions" }, atMs: 0, decision: "pass",
+	};
+	const message = assistantMessage();
+	message.content = [{ type: "text", text: rejectedCanary }];
+	const assistant: ModelRequestSourceInput = { kind: "assistant", args: [message] };
+	const usage: ModelRequestSourceInput = {
+		kind: "model_usage",
+		args: [{ purpose: "title", api: message.api, provider: message.provider, model: message.model,
+			usage: message.usage, stopReason: message.stopReason },
+			{ sessionId: manager.getSessionId(), parentId: manager.getLeafId() }],
+	};
+	const assistantLink: ModelRequestSourceLinkInput = {
+		schemaVersion: 1, sourceKind: "assistant", resultId: null, provenance: { kind: "non-wire", reason: "cache" },
+	};
+	const usageLink: ModelRequestSourceLinkInput = {
+		schemaVersion: 1, sourceKind: "model_usage", resultId: null, provenance: { kind: "non-wire", reason: "local" },
+	};
+	return { record, assistant, usage, assistantLink, usageLink };
+}
+
+async function expectRejectedWithoutMutation(manager: SessionManager, operation: () => unknown): Promise<void> {
+	const entries = JSON.stringify(manager.getEntries());
+	const header = JSON.stringify(manager.getHeader());
+	const leaf = manager.getLeafId();
+	const file = manager.getSessionFile();
+	const bytes = file ? await readFile(file, "utf8") : undefined;
+	await expect(Promise.resolve().then(operation)).rejects.toThrow();
+	expect(JSON.stringify(manager.getEntries())).toBe(entries);
+	expect(JSON.stringify(manager.getHeader())).toBe(header);
+	expect(manager.getLeafId()).toBe(leaf);
+	await manager.flush();
+	expect(JSON.stringify(manager.getEntries())).not.toContain(rejectedCanary);
+	if (file) {
+		expect(await readFile(file, "utf8")).toBe(bytes);
+		expect(await readFile(file, "utf8")).not.toContain(rejectedCanary);
+	}
+}
+
+type JournalBackend = "File" | "inMemory";
+
+async function withJournalBackend(
+	backend: JournalBackend,
+	run: (manager: SessionManager, data: JournalFixture) => Promise<void>,
+): Promise<void> {
+	await using dir = await TempDir.create("@journal-typed-reject-");
+	const data = fixture(dir.path());
+	const file = path.join(dir.path(), "managed.jsonl");
+	if (backend === "File") await writeFile(file, jsonl([data.header, ...data.entries]));
+	const manager = backend === "File" ? await open(file) : SessionManager.inMemory(dir.path());
+	if (backend === "inMemory") manager.appendMessage({ role: "user", content: "existing branch", timestamp: 1 });
+	try {
+		await run(manager, data);
+		if (backend === "File") {
+			// A separate File reader, not a cloned manager, observes the durable prefix.
+			const reader = await open(file);
+			try {
+				expect(reader.getHeader()?.modelRequestJournal).toEqual(data.descriptor);
+				expect(reader.getEntries()).toEqual(data.entries);
+				expect(reader.getLeafId()).toBe(data.assistant.id);
+				expect((await loadModelRequestJournalFromFile(file)).metadataEntries).toEqual(data.metadata);
+			} finally { await reader.close(); }
+		}
+	} finally { await manager.close(); }
+}
+
+describe("model-request typed append rejects unissued capabilities", () => {
+	for (const backend of ["File", "inMemory"] as const) {
+		it(`rejects forged and copied owner DTOs without metadata, source or leaf mutation in ${backend}`, async () => {
+			await withJournalBackend(backend, async (manager, data) => {
+				const input = journalInputs(manager);
+				// Every candidate is unissued. Copying persisted identifiers never creates an owner.
+				const owners: readonly unknown[] = [
+					undefined, null, {}, data.descriptor, structuredClone(data.descriptor),
+					data.descriptor.epochs[0], { ...data.descriptor.epochs[0] },
+					Object.freeze({ schemaVersion: 1, journalId, sessionId: manager.getSessionId(),
+						journalOwnerId, journalEpoch }),
+				];
+				for (const owner of owners) {
+					await expectRejectedWithoutMutation(manager,
+						() => Reflect.apply(manager.appendModelRequestMetadata, manager, [owner, input.record]));
+					await expectRejectedWithoutMutation(manager,
+						() => Reflect.apply(manager.appendModelRequestSource, manager, [owner, input.assistant, input.assistantLink]));
+					await expectRejectedWithoutMutation(manager,
+						() => Reflect.apply(manager.appendModelRequestSource, manager, [owner, input.usage, input.usageLink]));
+				}
+			});
+		});
+
+		it(`does not persist malformed or canary payloads supplied without an issued owner in ${backend}`, async () => {
+			await withJournalBackend(backend, async (manager, data) => {
+				const input = journalInputs(manager);
+				const unissuedOwner = { journalId, sessionId: manager.getSessionId(), journalOwnerId, journalEpoch };
+				const records: readonly unknown[] = [
+					null, {}, data.assistantLink,
+					{ ...input.record, body: rejectedCanary },
+					{ ...input.record, headers: { authorization: rejectedCanary } },
+					{ ...input.record, modelRef: { ...input.record.modelRef, baseUrl: rejectedCanary } },
+					{ ...input.record, atMs: -1 },
+					{ ...input.record, sessionId: "foreign-session" },
+				];
+				for (const record of records) {
+					await expectRejectedWithoutMutation(manager,
+						() => Reflect.apply(manager.appendModelRequestMetadata, manager, [unissuedOwner, record]));
+				}
+				const links: readonly unknown[] = [
+					null, {}, data.assistantLink.record,
+					{ ...input.assistantLink, body: rejectedCanary },
+					{ ...input.assistantLink, provenance: { kind: "unresolved", error: rejectedCanary } },
+					{ ...input.assistantLink, provenance: { kind: "non-wire", reason: "unknown" } },
+					{ ...input.assistantLink, sourceKind: "model_usage" },
+				];
+				for (const link of links) {
+					await expectRejectedWithoutMutation(manager,
+						() => Reflect.apply(manager.appendModelRequestSource, manager, [unissuedOwner, input.assistant, link]));
+				}
+				const sources: readonly unknown[] = [
+					null, {}, { kind: "assistant", args: [] },
+					{ kind: "assistant", args: [{ role: "user", content: rejectedCanary, timestamp: 2 }] },
+					{ kind: "model_usage", args: input.usage.args },
+					{ kind: "unknown", args: [rejectedCanary] },
+				];
+				for (const source of sources) {
+					await expectRejectedWithoutMutation(manager,
+						() => Reflect.apply(manager.appendModelRequestSource, manager, [unissuedOwner, source, input.assistantLink]));
+				}
+			});
+		});
+	}
+
+	it("does not turn a reopened readonly descriptor or epoch into a write capability", async () => {
+		await using dir = await TempDir.create("@journal-reopened-owner-");
+		const data = fixture(dir.path());
+		const file = path.join(dir.path(), "managed.jsonl");
+		const body = jsonl([data.header, ...data.entries]);
+		await writeFile(file, body);
+		const original = await open(file);
+		const originalDescriptor = original.getHeader()?.modelRequestJournal;
+		await original.close();
+		const manager = await open(file);
+		try {
+			const loaded = await loadModelRequestJournalFromFile(file);
+			const descriptor = manager.getHeader()?.modelRequestJournal;
+			if (!descriptor) throw new Error("Missing persisted fixture descriptor");
+			const input = journalInputs(manager);
+			const owners: readonly unknown[] = [
+				originalDescriptor, descriptor, descriptor.epochs.at(-1),
+				loaded.descriptor, loaded.descriptor.epochs.at(-1), structuredClone(loaded.descriptor),
+			];
+			for (const owner of owners) {
+				await expectRejectedWithoutMutation(manager,
+					() => Reflect.apply(manager.appendModelRequestMetadata, manager, [owner, input.record]));
+				await expectRejectedWithoutMutation(manager,
+					() => Reflect.apply(manager.appendModelRequestSource, manager, [owner, input.assistant, input.assistantLink]));
+				await expectRejectedWithoutMutation(manager,
+					() => Reflect.apply(manager.appendModelRequestSource, manager, [owner, input.usage, input.usageLink]));
+			}
+			expect(await readFile(file, "utf8")).toBe(body);
+			expect((await loadModelRequestJournalFromFile(file)).metadataEntries).toEqual(data.metadata);
+		} finally { await manager.close(); }
+	});
+});
 
 // These are persisted reader fixtures, not issued owners or evidence of append acknowledgements.
 describe("model-request journal real File manager", () => {

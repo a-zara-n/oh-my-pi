@@ -1,5 +1,11 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { resolveModelRequestScope, type ModelRequestExecution } from "@oh-my-pi/pi-ai";
+import {
+	type ModelRequestJournalLeaseBinding,
+	type ModelRequestJournalRootLeaseScope,
+	withVerifiedModelRequestJournalLeases,
+} from "@oh-my-pi/pi-utils/model-request-journal-authority";
 import type {
 	AssistantMessage,
 	ImageContent,
@@ -56,6 +62,10 @@ import {
 	type ModeChangeEntry,
 	type ModelChangeEntry,
 	type ModelUsageEntry,
+	type ModelRequestJournalAck,
+	type ModelRequestLifecycleRecord,
+	type ModelRequestMetadataEntry,
+	type ModelRequestSourceLinkInput,
 	type NewSessionOptions,
 	type ResetBoundaryEntry,
 	type ServiceTierChangeEntry,
@@ -115,7 +125,12 @@ import {
 	normalizeWorkspaceDirectory,
 } from "./session-workspace";
 import { recordSessionRecap, recordSessionTitle } from "./session-index";
-import { validateModelRequestJournal } from "./model-request-journal";
+import {
+	assertModelRequestLifecycleRecord,
+	assertModelRequestSourceLinkInput,
+	validateModelRequestJournal,
+	type ModelRequestJournalValidation,
+} from "./model-request-journal";
 
 const JSONL_SUFFIX_LENGTH = ".jsonl".length;
 const DRAFT_ONLY_SESSION_MARKER = ".draft-only-session";
@@ -833,6 +848,151 @@ export class ForkSourceNotFoundError extends Error {
 	}
 }
 
+declare const MODEL_REQUEST_JOURNAL_OWNER: unique symbol;
+
+/** An issued object identity, never an ID DTO or a deserialized capability. */
+export interface ModelRequestJournalOwner {
+	readonly [MODEL_REQUEST_JOURNAL_OWNER]: true;
+}
+
+class IssuedModelRequestJournalOwner implements ModelRequestJournalOwner {
+	declare readonly [MODEL_REQUEST_JOURNAL_OWNER]: true;
+}
+
+export type ModelRequestSourceInput =
+	| { kind: "assistant"; args: Parameters<SessionManager["appendMessage"]> }
+	| { kind: "model_usage"; args: Parameters<SessionManager["appendModelUsage"]> };
+
+/** Session-bound operations; neither the owner nor a rebinding operation escapes. */
+export interface ModelRequestJournal {
+	appendMetadata(record: ModelRequestLifecycleRecord): Promise<ModelRequestJournalAck>;
+	appendSource(source: ModelRequestSourceInput, link: ModelRequestSourceLinkInput): Promise<ModelRequestJournalAck>;
+}
+
+export type ModelRequestJournalCompositionHandoff = Readonly<{
+	execution: ModelRequestExecution;
+	rootManager: SessionManager;
+	leases: ModelRequestJournalLeaseBinding;
+	acceptJournal: (journal: ModelRequestJournal) => void;
+}>;
+
+// Only the real registry writer may populate this map after its strict reader ack.
+// ISS-049 owns that producer. A descriptor or a caller-provided DTO is not a receipt.
+type RegisteredJournalReceipt = Readonly<{
+	registryId: string;
+	registryEpoch: string;
+	registrationThroughSeq: number;
+	rootSessionId: string;
+	sessionId: string;
+	journalId: string;
+	journalOwnerId: string;
+	journalEpoch: string;
+	firstSeq: 1;
+}>;
+
+interface RegisteredJournalReceiptState {
+	readonly receipt: RegisteredJournalReceipt;
+	readonly rootManager: SessionManager;
+	readonly memberManager: SessionManager;
+	readonly rootGeneration: number;
+	readonly memberGeneration: number;
+	readonly persistenceOwner: SessionStorage;
+	readonly leases: ModelRequestJournalLeaseBinding;
+	readonly scope: ModelRequestJournalRootLeaseScope;
+}
+
+interface ModelRequestJournalOwnerState {
+	readonly manager: SessionManager;
+	readonly rootManager: SessionManager;
+	readonly rootGeneration: number;
+	readonly receipt: RegisteredJournalReceipt;
+	readonly leases: ModelRequestJournalLeaseBinding;
+	readonly generation: number;
+	readonly sessionFile: string;
+	readonly persistenceOwner: SessionStorage;
+	throughSeq: number;
+	closed: boolean;
+	journal?: ModelRequestJournal;
+	execution?: ModelRequestExecution;
+}
+
+interface ModelRequestJournalManagerAccess {
+	generation(): number;
+	assertWritable(): void;
+	issue(receipt: RegisteredJournalReceiptState): Promise<ModelRequestJournalOwner>;
+	invalidate(): void;
+}
+
+const modelRequestJournalManagers = new WeakMap<SessionManager, ModelRequestJournalManagerAccess>();
+const registeredJournalReceipts = new WeakMap<SessionManager, RegisteredJournalReceiptState>();
+const issuedModelRequestJournalOwners = new WeakMap<ModelRequestJournalOwner, ModelRequestJournalOwnerState>();
+
+function journalUnavailable(): never {
+	throw new Error("Model request journal capability is unavailable.");
+}
+
+/** The only owner minting function; deliberately not exported to SDK/readers. */
+async function issueModelRequestJournalOwner(manager: SessionManager): Promise<ModelRequestJournalOwner> {
+	const access = modelRequestJournalManagers.get(manager);
+	const registration = registeredJournalReceipts.get(manager);
+	if (!access || !registration) journalUnavailable();
+	return access.issue(registration);
+}
+
+/**
+ * Internal composition boundary. Until the real registry writer has registered
+ * this manager, this rejects rather than treating a File header as registration.
+ */
+export async function bindModelRequestJournalComposition(
+	manager: SessionManager,
+	handoff: ModelRequestJournalCompositionHandoff,
+): Promise<void> {
+	const access = modelRequestJournalManagers.get(manager);
+	const rootAccess = modelRequestJournalManagers.get(handoff.rootManager);
+	if (!access || !rootAccess) journalUnavailable();
+	access.assertWritable();
+	rootAccess.assertWritable();
+	const executionScope = resolveModelRequestScope(handoff.execution);
+	if (executionScope.sessionId !== manager.getSessionId() ||
+		executionScope.rootSessionId !== handoff.rootManager.getSessionId() ||
+		handoff.leases.rootSessionId !== executionScope.rootSessionId) journalUnavailable();
+	const registration = registeredJournalReceipts.get(manager);
+	if (!registration || registration.rootManager !== handoff.rootManager ||
+		registration.leases !== handoff.leases) journalUnavailable();
+	try {
+		await withVerifiedModelRequestJournalLeases(handoff.leases, registration.receipt.registryId, async scope => {
+			// ISS-049's real bootstrap/register producer runs in this exact scope;
+			// a receipt retained from a previous root critical section is invalid.
+			if (registeredJournalReceipts.get(manager)?.scope !== scope) journalUnavailable();
+			const owner = await issueModelRequestJournalOwner(manager);
+			const state = issuedModelRequestJournalOwners.get(owner);
+			if (!state || state.closed || (state.execution && state.execution !== handoff.execution)) journalUnavailable();
+			const journal = state.journal ?? Object.freeze({
+				appendMetadata: (record: ModelRequestLifecycleRecord) => manager.appendModelRequestMetadata(owner, record),
+				appendSource: (source: ModelRequestSourceInput, link: ModelRequestSourceLinkInput) =>
+					manager.appendModelRequestSource(owner, source, link),
+			});
+			state.journal = journal;
+			state.execution = handoff.execution;
+			handoff.acceptJournal(journal);
+			scope.assertActive();
+			access.assertWritable();
+			rootAccess.assertWritable();
+			const currentScope = resolveModelRequestScope(handoff.execution);
+			if (state.closed || state.generation !== access.generation() ||
+				registration.rootGeneration !== rootAccess.generation() ||
+				currentScope.sessionId !== state.receipt.sessionId ||
+				currentScope.rootSessionId !== state.receipt.rootSessionId ||
+				manager.getSessionId() !== state.receipt.sessionId ||
+				handoff.rootManager.getSessionId() !== state.receipt.rootSessionId) journalUnavailable();
+		});
+	} catch (error) {
+		// Also covers the fixed verifier's recheck after the consumer returns.
+		access.invalidate();
+		throw error;
+	}
+}
+
 /**
  * Stores and navigates an append-only conversation journal.
  *
@@ -895,6 +1055,10 @@ export class SessionManager {
 		SessionManagerStateSnapshot,
 		{ sessionId: string; sessionFile: string | undefined; cwd: string; sessionDir: string }
 	>();
+	#modelRequestJournalGeneration = 0;
+	#modelRequestJournalOwner: ModelRequestJournalOwner | undefined;
+	/** Only newly created, still source-free sessions may receive their first descriptor. */
+	#modelRequestJournalFreshSession = false;
 	/** Byte length this manager last loaded or durably wrote; `null` means the path was absent. */
 	#expectedDiskSize: number | null = null;
 	/**
@@ -1001,6 +1165,13 @@ export class SessionManager {
 		this.#blobs = new BlobStore(getBlobsDir());
 
 		if (persist && sessionDir) this.#storage.ensureDirSync(sessionDir);
+		// Construction registers private access only, never an owner or a receipt.
+		modelRequestJournalManagers.set(this, {
+			generation: () => this.#modelRequestJournalGeneration,
+			assertWritable: () => this.#assertModelRequestJournalWritable(),
+			issue: registration => this.#issueRegisteredModelRequestJournalOwner(registration),
+			invalidate: () => this.#invalidateModelRequestJournalOwner(),
+		});
 	}
 
 	#rememberBreadcrumb(cwd: string, sessionFile: string, fresh = false): void {
@@ -1045,6 +1216,7 @@ export class SessionManager {
 
 	#noteDiskFailure(errorLike: unknown): Error {
 		const error = toError(errorLike);
+		this.#invalidateModelRequestJournalOwner();
 		if (!this.#diskFailure) this.#diskFailure = error;
 		// A line that failed to land leaves its blob refs unreferenced on disk,
 		// so the next persist must re-check those blobs instead of trusting the memo.
@@ -1323,6 +1495,7 @@ export class SessionManager {
 
 	#latchIndeterminate(operationError: Error, recoveryErrors: readonly Error[]): SessionPersistenceIndeterminateError {
 		const error = new SessionPersistenceIndeterminateError(operationError, recoveryErrors);
+		this.#invalidateModelRequestJournalOwner();
 		this.#diskFailure = error;
 		forgetExternalizedImages(this.#blobs);
 		if (!this.#diskFailureLogged) {
@@ -1975,6 +2148,8 @@ export class SessionManager {
 	}
 
 	#resetToNewSession(options?: NewSessionOptions, forcedSessionFile?: string): string | undefined {
+		this.#invalidateModelRequestJournalOwner();
+		this.#modelRequestJournalFreshSession = true;
 		this.#modelRequestJournalHistory = undefined;
 		this.#diskTail = Promise.resolve();
 		this.#clearDiskError();
@@ -2039,6 +2214,253 @@ export class SessionManager {
 		return this.#sessionFile;
 	}
 
+	#invalidateModelRequestJournalOwner(): void {
+		this.#modelRequestJournalGeneration++;
+		const state = this.#modelRequestJournalOwner && issuedModelRequestJournalOwners.get(this.#modelRequestJournalOwner);
+		if (state) state.closed = true;
+	}
+
+	#assertModelRequestJournalWritable(): void {
+		if (!this.#persist || !this.#sessionFile || this.#released || this.#entriesReleased ||
+			this.#diskFailure || this.#loadedMalformedRecords !== 0 ||
+			!(this.#storage instanceof FileSessionStorage) ||
+			this.#storage.modelRequestJournal !== "process-crash-reader-visible" || this.#storage.defersSyncPublish) {
+			journalUnavailable();
+		}
+	}
+
+	#assertRegisteredModelRequestJournal(registration: RegisteredJournalReceiptState): void {
+		this.#assertModelRequestJournalWritable();
+		const rootAccess = modelRequestJournalManagers.get(registration.rootManager);
+		const receipt = registration.receipt;
+		registration.scope.assertActive();
+		rootAccess?.assertWritable();
+		if (registeredJournalReceipts.get(this) !== registration || registration.memberManager !== this ||
+			registration.memberGeneration !== this.#modelRequestJournalGeneration ||
+			registration.persistenceOwner !== this.#storage || !rootAccess ||
+			registration.rootGeneration !== rootAccess.generation() ||
+			registration.rootManager.getSessionId() !== receipt.rootSessionId ||
+			this.#sessionId !== receipt.sessionId || registration.leases.rootSessionId !== receipt.rootSessionId ||
+			registration.scope.rootSessionId !== receipt.rootSessionId ||
+			registration.scope.registryId !== receipt.registryId ||
+			!Number.isSafeInteger(receipt.registrationThroughSeq) || receipt.registrationThroughSeq < 1 ||
+			receipt.firstSeq !== 1) journalUnavailable();
+	}
+
+	/** Publish the source descriptor only after an authentic registration ack. */
+	async #issueRegisteredModelRequestJournalOwner(
+		registration: RegisteredJournalReceiptState,
+	): Promise<ModelRequestJournalOwner> {
+		this.#assertRegisteredModelRequestJournal(registration);
+		const existing = this.#modelRequestJournalOwner;
+		const state = existing && issuedModelRequestJournalOwners.get(existing);
+		if (existing && state && !state.closed) {
+			if (state.generation !== this.#modelRequestJournalGeneration ||
+				state.leases !== registration.leases || state.receipt !== registration.receipt) journalUnavailable();
+			return existing;
+		}
+		const receipt = registration.receipt;
+		try {
+			await this.#withAtomicPersistenceLock(async () => {
+				this.#assertRegisteredModelRequestJournal(registration);
+				const descriptor = this.#header.modelRequestJournal;
+				if (!descriptor && (!this.#modelRequestJournalFreshSession || this.#entries.some(entry =>
+					entry.type === "model_usage" || (entry.type === "message" && entry.message.role === "assistant")))) {
+					// Never backfill an epoch onto unknown legacy or copied source history.
+					journalUnavailable();
+				}
+				if (descriptor && descriptor.journalId !== receipt.journalId) journalUnavailable();
+				if (descriptor?.epochs.some(epoch =>
+					epoch.journalOwnerId === receipt.journalOwnerId || epoch.journalEpoch === receipt.journalEpoch)) {
+					// A reopened descriptor does not revive a previous owner.
+					journalUnavailable();
+				}
+				this.#assertModelRequestJournalHistory(this.#header, this.#entries);
+				this.#header.modelRequestJournal = {
+					schemaVersion: 1,
+					journalId: receipt.journalId,
+					sessionId: this.#sessionId,
+					epochs: [...(descriptor?.epochs ?? []), {
+						journalOwnerId: receipt.journalOwnerId,
+						journalEpoch: receipt.journalEpoch,
+					}],
+				};
+				// Only this receipt-checked path extends the protected descriptor.
+				this.#protectModelRequestJournalHistory();
+				this.#forceFileCreation = true;
+				await this.#rewriteAtomically();
+				await this.flush();
+				this.#assertRegisteredModelRequestJournal(registration);
+				const visible = await this.#readModelRequestJournal();
+				if (JSON.stringify(visible.descriptor) !== JSON.stringify(this.#header.modelRequestJournal) ||
+					visible.throughSeqByEpoch.get(receipt.journalEpoch) !== 0) journalUnavailable();
+			});
+			this.#assertRegisteredModelRequestJournal(registration);
+			const owner: ModelRequestJournalOwner = Object.freeze(new IssuedModelRequestJournalOwner());
+			const sessionFile = this.#sessionFile;
+			if (!sessionFile) journalUnavailable();
+			issuedModelRequestJournalOwners.set(owner, {
+				manager: this,
+				rootManager: registration.rootManager,
+				rootGeneration: registration.rootGeneration,
+				receipt,
+				leases: registration.leases,
+				generation: this.#modelRequestJournalGeneration,
+				sessionFile,
+				persistenceOwner: this.#storage,
+				throughSeq: 0,
+				closed: false,
+			});
+			this.#modelRequestJournalOwner = owner;
+			return owner;
+		} catch (error) {
+			this.#invalidateModelRequestJournalOwner();
+			throw error;
+		}
+	}
+
+	async #readModelRequestJournal(): Promise<ModelRequestJournalValidation> {
+		const sessionFile = this.#sessionFile;
+		if (!sessionFile) journalUnavailable();
+		const loaded = parseSessionContent(await this.#storage.readText(sessionFile));
+		return validateModelRequestJournal(loaded.entries, loaded);
+	}
+
+	#requireModelRequestJournalOwner(owner: ModelRequestJournalOwner): ModelRequestJournalOwnerState {
+		const state = issuedModelRequestJournalOwners.get(owner);
+		this.#assertModelRequestJournalWritable();
+		const descriptor = this.#header.modelRequestJournal;
+		const epoch = descriptor?.epochs.at(-1);
+		if (!state || state.closed || state.manager !== this || owner !== this.#modelRequestJournalOwner ||
+			state.generation !== this.#modelRequestJournalGeneration || state.persistenceOwner !== this.#storage ||
+			state.sessionFile !== this.#sessionFile || state.receipt.sessionId !== this.#sessionId ||
+			descriptor?.journalId !== state.receipt.journalId ||
+			epoch?.journalOwnerId !== state.receipt.journalOwnerId || epoch.journalEpoch !== state.receipt.journalEpoch) {
+			journalUnavailable();
+		}
+		const rootAccess = modelRequestJournalManagers.get(state.rootManager);
+		if (!rootAccess || rootAccess.generation() !== state.rootGeneration ||
+			state.rootManager.getSessionId() !== state.receipt.rootSessionId || !state.execution) journalUnavailable();
+		rootAccess.assertWritable();
+		const scope = resolveModelRequestScope(state.execution);
+		if (scope.sessionId !== state.receipt.sessionId || scope.rootSessionId !== state.receipt.rootSessionId) {
+			state.closed = true;
+			journalUnavailable();
+		}
+		return state;
+	}
+
+	/** Owner-fixed non-leaf lifecycle append with a separately re-read ack. */
+	async appendModelRequestMetadata(
+		owner: ModelRequestJournalOwner,
+		record: ModelRequestLifecycleRecord,
+	): Promise<ModelRequestJournalAck> {
+		const state = this.#requireModelRequestJournalOwner(owner);
+		const snapshot: unknown = structuredClone(record);
+		assertModelRequestLifecycleRecord(snapshot, state.receipt.sessionId, state.receipt.journalOwnerId);
+		if (snapshot.event !== "logical-result" && snapshot.rootSessionId !== state.receipt.rootSessionId) {
+			journalUnavailable();
+		}
+		return this.#appendModelRequestJournal(owner, () => ({ record: snapshot, sourceEntryId: null }));
+	}
+
+	/** Generate the real source ID and its link inside the very same batch. */
+	async appendModelRequestSource(
+		owner: ModelRequestJournalOwner,
+		source: ModelRequestSourceInput,
+		link: ModelRequestSourceLinkInput,
+	): Promise<ModelRequestJournalAck> {
+		this.#requireModelRequestJournalOwner(owner);
+		const snapshot: unknown = structuredClone(link);
+		assertModelRequestSourceLinkInput(snapshot);
+		const sourceSnapshot = structuredClone(source);
+		if (!sourceSnapshot || snapshot.sourceKind !== sourceSnapshot.kind ||
+			(sourceSnapshot.kind !== "assistant" && sourceSnapshot.kind !== "model_usage") ||
+			!Array.isArray(sourceSnapshot.args) ||
+			(sourceSnapshot.kind === "assistant" ?
+				sourceSnapshot.args.length !== 1 || sourceSnapshot.args[0]?.role !== "assistant" :
+				sourceSnapshot.args.length !== 2)) journalUnavailable();
+		return this.#appendModelRequestJournal(owner, () => {
+			const sourceEntryId = sourceSnapshot.kind === "assistant" ?
+				this.appendMessage(...sourceSnapshot.args) : this.appendModelUsage(...sourceSnapshot.args);
+			if (!sourceEntryId || !this.#index.has(sourceEntryId)) journalUnavailable();
+			return {
+				record: {
+					...snapshot,
+					sourceSessionId: this.#sessionId,
+					sourceEntryId,
+				},
+				sourceEntryId,
+			};
+		});
+	}
+
+	async #appendModelRequestJournal(
+		owner: ModelRequestJournalOwner,
+		append: () => {
+			record: ModelRequestMetadataEntry["record"];
+			sourceEntryId: string | null;
+		},
+	): Promise<ModelRequestJournalAck> {
+		const state = this.#requireModelRequestJournalOwner(owner);
+		try {
+			return await withVerifiedModelRequestJournalLeases(state.leases, state.receipt.registryId, async scope =>
+				this.#withAtomicPersistenceLock(async () => {
+					this.#requireModelRequestJournalOwner(owner);
+					scope.assertActive();
+					if (state.throughSeq >= Number.MAX_SAFE_INTEGER) journalUnavailable();
+					const throughSeq = state.throughSeq + 1;
+					let batchEpoch = this.#diskEpoch;
+					const published = await this.#appendEntriesAtomicallyLocked(() => {
+						this.#requireModelRequestJournalOwner(owner);
+						scope.assertActive();
+						batchEpoch = this.#diskEpoch;
+						const source = append();
+						const metadata: ModelRequestMetadataEntry = {
+							type: "model_request_metadata",
+							id: generateId(this.#index),
+							parentId: null,
+							timestamp: nowIso(),
+							schemaVersion: 1,
+							journalId: state.receipt.journalId,
+							sessionId: state.receipt.sessionId,
+							journalOwnerId: state.receipt.journalOwnerId,
+							journalEpoch: state.receipt.journalEpoch,
+							seq: throughSeq,
+							record: source.record,
+						};
+						this.#recordEntry(metadata);
+						return { metadata, sourceEntryId: source.sourceEntryId };
+					});
+					await this.flush();
+					this.#requireModelRequestJournalOwner(owner);
+					scope.assertActive();
+					if (this.#diskEpoch !== batchEpoch) journalUnavailable();
+					const visible = await this.#readModelRequestJournal();
+					this.#requireModelRequestJournalOwner(owner);
+					scope.assertActive();
+					if (this.#diskEpoch !== batchEpoch ||
+						visible.throughSeqByEpoch.get(state.receipt.journalEpoch) !== throughSeq ||
+						!visible.metadataEntries.some(entry => entry.id === published.metadata.id &&
+							JSON.stringify(entry) === JSON.stringify(published.metadata))) journalUnavailable();
+					state.throughSeq = throughSeq;
+					return Object.freeze({
+						schemaVersion: 1,
+						journalId: state.receipt.journalId,
+						sessionId: state.receipt.sessionId,
+						journalOwnerId: state.receipt.journalOwnerId,
+						journalEpoch: state.receipt.journalEpoch,
+						throughSeq,
+						metadataEntryId: published.metadata.id,
+						sourceEntryId: published.sourceEntryId,
+					});
+				}));
+		} catch (error) {
+			this.#invalidateModelRequestJournalOwner();
+			throw error;
+		}
+	}
+
 	#refuseManagedJournalMutation(): void {
 		if (this.#modelRequestJournalHistory || this.#header.modelRequestJournal || this.#entries.some(entry => entry.type === "model_request_metadata")) {
 			throw new Error("Managed model request journal history cannot be copied, moved, or discarded.");
@@ -2088,6 +2510,7 @@ export class SessionManager {
 	}
 
 	#applyEntries(header: SessionHeader, entries: SessionEntry[]): void {
+		this.#modelRequestJournalFreshSession = false;
 		if (header.modelRequestJournal || entries.some(entry => entry.type === "model_request_metadata")) {
 			validateModelRequestJournal([header, ...entries]);
 		}
@@ -2298,6 +2721,9 @@ export class SessionManager {
 	}
 
 	restoreState(snapshot: SessionManagerStateSnapshot): void {
+		if (snapshot.sessionId !== this.#sessionId || snapshot.sessionFile !== this.#sessionFile) {
+			this.#invalidateModelRequestJournalOwner();
+		}
 		if (snapshot.header.modelRequestJournal || snapshot.entries.some(entry => entry.type === "model_request_metadata")) {
 			const captured = this.#modelRequestJournalCaptures.get(snapshot);
 			if (!captured || captured.sessionId !== snapshot.sessionId || captured.sessionFile !== snapshot.sessionFile ||
@@ -2384,6 +2810,7 @@ export class SessionManager {
 		loadedSession?: SessionLoadResult,
 		options?: { throwIfMissing?: boolean; newSession?: NewSessionOptions },
 	): Promise<void> {
+		this.#invalidateModelRequestJournalOwner();
 		await this.#drainAndCloseWriter();
 		this.#clearDiskError();
 		this.#draftOnlySessionCleanupArmed = false;
@@ -2971,6 +3398,7 @@ export class SessionManager {
 
 	/** Flush, then close the append writer. */
 	async close(): Promise<void> {
+		this.#invalidateModelRequestJournalOwner();
 		if (!this.#persist) return;
 		// Closing gives up this process's ownership claim; a later write reclaims it.
 		const claim = this.#sessionClaim;
@@ -3040,6 +3468,7 @@ export class SessionManager {
 	 */
 	seal(): void {
 		if (this.#released) return;
+		this.#invalidateModelRequestJournalOwner();
 		this.#released = true;
 		this.#diskEpoch++;
 	}
