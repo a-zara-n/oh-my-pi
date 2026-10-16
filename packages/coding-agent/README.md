@@ -34,6 +34,12 @@ only transports the sink; it is never trusted as runtime readiness. Managed runt
 therefore remains closed, even if a caller supplies a resolved promise or a gate would pass.
 This is an unresolved design/integration boundary, not a completed managed sending path.
 
+The prior WIP runtime-only refusal did not cover the wire: three no-gate shortcuts in pi-ai
+could bypass authorization. Their fast paths now apply only to executions without a managed
+binding (`gatedSend`, `authorizeUninstrumentedAttempt`, and the uninstrumented stream wrapper).
+Permanent regressions and a before/after loopback smoke are prepared, not run by this worker;
+actual wire measurements remain pending parent verification.
+
 Normal SDK use without a binding, including sinkless custom providers, is unchanged.
 
 ## Memory backends

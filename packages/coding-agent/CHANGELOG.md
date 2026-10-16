@@ -6,6 +6,7 @@
 
 - Added the core execution context for model requests: sessions, agent runs, extension handlers/tools/commands, child sessions, advisors and background jobs now carry a session, root and purpose, and child sessions receive their spawner's root explicitly (`modelRequestRoot`).
 - Work in progress: added the internal `modelRequestJournalLeaseBinding` SDK handoff and private sink-slot transport. Child creation and live/persisted revival retain the same opaque object; SDK composition rejects a foreign runtime, conflicting root binding, or unavailable exact root manager before publishing the execution. Callback delivery or a caller-resolved promise is not runtime readiness. Managed sending remains closed pending the real registry receipt producer and authenticated receipt-to-execution connection design.
+- The prior WIP runtime-only refusal was insufficient for no-gate wire traffic. The three pi-ai fetch/uninstrumented transport fast paths now reach the managed-connection precondition when a binding is present; ordinary sinkless paths retain existing behavior. Consumer regressions and a throwaway before/after loopback smoke are prepared, with wire measurements pending parent verification.
 - Session-less CLI commands are marked as such at process entry so their model requests are classified as standalone.
 
 - Retries, credential rotations, model fallbacks, judge candidates, turn recovery, cache-warm replays and compaction walks now tell a registered model request gate which kind of re-attempt each wire attempt is.

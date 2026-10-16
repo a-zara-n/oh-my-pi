@@ -274,7 +274,7 @@ export class ModelRequestRuntime {
 		void this.verifyContext();
 	}
 
-	/** Whether a gate is registered. Request paths check this first so an ungated process does no extra work. */
+	/** Whether a gate is registered. Only sinkless executions may bypass authorization when this is false. */
 	hasGate(): boolean {
 		return this.#registration !== undefined;
 	}

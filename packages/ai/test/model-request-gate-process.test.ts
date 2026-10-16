@@ -33,6 +33,20 @@ describe("process-wide gate behavior", () => {
 		expect(result).toEqual({ wire: 1, stopReason: "stop", registered: false });
 	});
 
+	for (const mode of ["none", "pass", "deny"]) {
+		test(`managed execution without authenticated composition cannot reach real transports with gate mode ${mode}`, async () => {
+			const result = observed(await runScenario(`managed-${mode}`));
+			expect(result).toEqual({
+				sinklessWire: 1,
+				managedWire: 0,
+				customStarts: 0,
+				gateCalls: 0,
+				denied: Array.from({ length: 10 }, () => true),
+				registered: mode !== "none",
+			});
+		});
+	}
+
 	test("a second copy of the runtime module cannot register a different gate, so a duplicate pi-ai cannot unguard the host", async () => {
 		const result = observed(await runScenario("shared-latch"));
 

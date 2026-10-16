@@ -943,14 +943,16 @@ const UNINSTRUMENTED_APIS: ReadonlySet<Api> = new Set<Api>([
 /**
  * A model request gate must be able to account for a request it permits. Where the transport is not a core-controlled
  * `fetch`, the gate is asked once with no readable wire and the request is sent only if it answers `pass`; a gate
- * that allows is refused (see {@link authorizeUninstrumentedAttempt}). With no gate registered this is `create()`.
+ * that allows is refused (see {@link authorizeUninstrumentedAttempt}). Only an ordinary sinkless execution with no
+ * gate may call `create()` without authorization; a managed execution must meet its connection precondition first.
  */
 function gateUninstrumentedTransport(
 	model: Model<Api>,
 	signal: AbortSignal | undefined,
 	create: () => AssistantMessageEventStream,
 ): AssistantMessageEventStream {
-	if (!getModelRequestRuntime().hasGate()) return create();
+	const runtime = getModelRequestRuntime();
+	if (!runtime.hasGate() && runtime.currentExecution()?.modelRequestJournalLeaseBinding === undefined) return create();
 	const outer = new AssistantMessageEventStream();
 	void (async () => {
 		try {

@@ -15,6 +15,12 @@ This is an incomplete integration boundary, not a completed managed-runtime impl
 Ordinary contexts without a binding retain their existing sinkless behavior; this mechanism
 does not install journal lifecycle producers.
 
+The earlier WIP runtime-only rejection was insufficient at the wire boundary: three no-gate
+fast paths could skip authorization. `gatedSend`, `authorizeUninstrumentedAttempt`, and the
+stream's uninstrumented-transport wrapper now retain that fast path only when the active
+execution has no managed binding. The isolated transport regressions and before/after loopback
+smoke are prepared but unexecuted by this worker; actual wire measurements await parent verification.
+
 ## Table of Contents
 
 - [Supported Providers](#supported-providers)

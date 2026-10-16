@@ -5,9 +5,15 @@
  * Scenarios (argv[2]):
  *  - unregistered: a request through the real `completeSimple` entry with no gate registered reaches the transport.
  *  - shared-latch: a second copy of the runtime module cannot hold a different gate than the first.
+ *  - managed-none/pass/deny: unconnected managed contexts must stop at real fetch and custom stream controls.
  */
 import { completeSimple, registerCustomApi } from "@oh-my-pi/pi-ai";
-import { authorizeModelRequest } from "@oh-my-pi/pi-ai/model-request-execution";
+import {
+	createModelRequestSessionExecution,
+	deriveModelRequestExecution,
+	runWithModelRequestExecution,
+} from "@oh-my-pi/pi-ai/model-request-execution";
+import { isModelRequestDenied } from "@oh-my-pi/pi-ai/error";
 import {
 	getModelRequestGateInfo,
 	type ModelRequestDecision,
@@ -16,6 +22,9 @@ import {
 } from "@oh-my-pi/pi-ai/model-request-gate";
 import type { Api, AssistantMessage, Context, Model } from "@oh-my-pi/pi-ai/types";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
+import { stream } from "@oh-my-pi/pi-ai/stream";
+import { authorizeUninstrumentedAttempt, gatedSend, gateFetch } from "@oh-my-pi/pi-ai/utils/model-request-fetch";
+import type { ModelRequestJournalLeaseBinding } from "@oh-my-pi/pi-utils/model-request-journal-authority";
 
 const API = "model-request-gate-process-fixture" as Api;
 
@@ -50,27 +59,15 @@ const fixtureModel = {
 
 const context: Context = { systemPrompt: [], messages: [{ role: "user", content: "hi", timestamp: 1 }] };
 
-/** A fake transport: what a per-attempt hook does before it lets bytes leave. */
+/** A custom provider's transport callback: no manual authorization may mask an entry-point fast-path gap. */
 function registerFakeTransport(counter: { wire: number }): void {
-	registerCustomApi(API, (model, _context, options) => {
-		const stream = new AssistantMessageEventStream();
-		void authorizeModelRequest({
-			requestId: "fixture-request",
-			reason: "first",
-			kind: "chat",
-			model: { provider: model.provider, id: model.id, api: model.api },
-			wire: undefined,
-			signal: options?.signal,
-		}).then(
-			() => {
-				counter.wire += 1;
-				const message = assistant("ok");
-				stream.push({ type: "start", partial: message });
-				stream.push({ type: "done", reason: "stop", message });
-			},
-			error => stream.fail(error),
-		);
-		return stream;
+	registerCustomApi(API, () => {
+		counter.wire += 1;
+		const events = new AssistantMessageEventStream();
+		const message = assistant("ok");
+		events.push({ type: "start", partial: message });
+		events.push({ type: "done", reason: "stop", message });
+		return events;
 	});
 }
 
@@ -134,7 +131,100 @@ async function sharedLatch(): Promise<object> {
 	};
 }
 
+async function managedTransportBoundary(mode: "none" | "pass" | "deny"): Promise<object> {
+	let sinklessWire = 0;
+	let managedWire = 0;
+	let gateCalls = 0;
+	const server = Bun.serve({
+		hostname: "127.0.0.1",
+		port: 0,
+		fetch(request) {
+			if (new URL(request.url).pathname === "/sinkless") sinklessWire += 1;
+			else managedWire += 1;
+			return new Response("ok");
+		},
+	});
+	try {
+		const modelRef = { provider: "fixture", id: "fixture-1", api: API };
+		const fetch = gateFetch(modelRef, "chat", (input, init) => globalThis.fetch(input, init));
+		await (await fetch(`${server.url}sinkless`)).text();
+		if (mode !== "none") {
+			registerModelRequestGate("managed-process-fixture", {
+				async authorize() {
+					gateCalls += 1;
+					return mode === "pass" ? { type: "pass" } : { type: "deny", code: "fixture-deny", message: "denied" };
+				},
+			});
+		}
+		// Invalid input only, not a test issuer. A resolved extra field is never proof of a journal receipt.
+		const invalidBinding = {} as ModelRequestJournalLeaseBinding;
+		const init = {
+			sessionId: () => "managed-session",
+			root: { kind: "self" as const, modelRequestJournalLeaseBinding: invalidBinding },
+			agent: { kind: "main" as const, id: "Main", name: "main", depth: 0 },
+			purpose: "main" as const,
+			journalConnection: Promise.resolve(),
+		};
+		const base = createModelRequestSessionExecution(init);
+		const executions = [base, deriveModelRequestExecution(base, { purpose: "advisor" })];
+		const custom = { wire: 0 };
+		registerFakeTransport(custom);
+		const denied: boolean[] = [];
+		for (const execution of executions) {
+			const requests: readonly (() => Promise<unknown>)[] = [
+				() => fetch(`${server.url}managed-fetch`),
+				() =>
+					gatedSend({
+						model: modelRef,
+						kind: "chat",
+						input: `${server.url}managed-send`,
+						init: undefined,
+						send: () => globalThis.fetch(`${server.url}managed-send`),
+					}),
+				() => authorizeUninstrumentedAttempt(modelRef, "chat", undefined),
+				() => completeSimple(fixtureModel, context, { apiKey: "unused" }),
+				() => stream(fixtureModel, context, { apiKey: "unused" }).result(),
+			];
+			for (const request of requests) {
+				try {
+					const result: unknown = await runWithModelRequestExecution(execution, request);
+					denied.push(isModelRequestDenied(result));
+				} catch (error) {
+					denied.push(isModelRequestDenied(error));
+				}
+			}
+		}
+		return {
+			sinklessWire,
+			managedWire,
+			customStarts: custom.wire,
+			gateCalls,
+			denied,
+			registered: getModelRequestGateInfo().registered,
+		};
+	} finally {
+		await server.stop(true);
+	}
+}
+
 const scenario = process.argv[2];
-const result = scenario === "unregistered" ? await unregistered() : scenario === "shared-latch" ? await sharedLatch() : undefined;
+let result: object | undefined;
+switch (scenario) {
+	case "unregistered":
+		result = await unregistered();
+		break;
+	case "shared-latch":
+		result = await sharedLatch();
+		break;
+	case "managed-none":
+		result = await managedTransportBoundary("none");
+		break;
+	case "managed-pass":
+		result = await managedTransportBoundary("pass");
+		break;
+	case "managed-deny":
+		result = await managedTransportBoundary("deny");
+		break;
+}
 if (result === undefined) throw new Error(`unknown scenario: ${String(scenario)}`);
 console.log(JSON.stringify(result));

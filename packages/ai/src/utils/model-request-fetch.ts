@@ -1,10 +1,10 @@
 /**
  * The per-attempt hook for fetch-based model requests.
  *
- * Every call of a gated `fetch` is one wire attempt. With a gate registered it is authorized before any I/O, told to
- * start sending immediately before the first byte, shown the response as it streams past (unaltered), and settled
- * exactly once however it ends. With no gate registered the gated fetch is the underlying fetch: nothing is built,
- * read or wrapped.
+ * Every call of a gated `fetch` is one wire attempt. It is authorized before I/O when a gate is registered or the
+ * active execution requires a managed journal connection. A lease starts immediately before the first byte, sees
+ * the response unaltered and is settled once. Ordinary sinkless calls with no gate use the underlying fetch:
+ * nothing is built, read or wrapped.
  *
  * What the gate is given of the request is the core's own credential-free view ({@link ModelRequestWire}); the body
  * is only ever held in memory and only when the gate asks for it.
@@ -265,7 +265,7 @@ export interface GatedSendArgs {
  */
 export async function gatedSend(args: GatedSendArgs): Promise<Response> {
 	const runtime = getModelRequestRuntime();
-	if (!runtime.hasGate()) return args.send();
+	if (!runtime.hasGate() && runtime.currentExecution()?.modelRequestJournalLeaseBinding === undefined) return args.send();
 	const { input, init } = args;
 	const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
 	const link = nextModelRequestAttemptLink();
@@ -311,7 +311,7 @@ export async function gatedSend(args: GatedSendArgs): Promise<Response> {
 
 /**
  * `base` with every call authorized as one wire attempt of `kind`. Returns `base` itself when it already authorizes its
- * calls. With no gate registered, a call goes straight to `base`.
+ * calls. With no gate registered, an ordinary sinkless call goes straight to `base`.
  */
 export function gateFetch(model: ModelRequestModelRef, kind: ModelRequestKind, base: FetchImpl): FetchImpl {
 	if (ungatedTwins.has(base)) return base;
@@ -353,7 +353,7 @@ export async function authorizeUninstrumentedAttempt(
 	signal: AbortSignal | undefined,
 ): Promise<void> {
 	const runtime = getModelRequestRuntime();
-	if (!runtime.hasGate()) return;
+	if (!runtime.hasGate() && runtime.currentExecution()?.modelRequestJournalLeaseBinding === undefined) return;
 	const link = nextModelRequestAttemptLink();
 	const permit = await runtime.authorize({
 		requestId: link.requestId,
