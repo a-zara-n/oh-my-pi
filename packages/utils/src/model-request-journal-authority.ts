@@ -66,38 +66,61 @@ const retired = new WeakSet<object>();
 // Kept for this module execution's entire lifetime: retirement must never permit alias resurrection.
 const credentialOwners = new Map<string, object>();
 const ROLES: Readonly<Record<string, true>> = Object.freeze({"model-agent": true, "harness-core": true, "harness-runner": true, "operator-command": true, "cli-tool": true});
+const tokenByteLength = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Uint8Array.prototype), "byteLength")?.get;
+const copyTokenBytes = Uint8Array.prototype.set;
+const zeroTokenBytes = Uint8Array.prototype.fill;
 function closed(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value) && Reflect.ownKeys(value).every(key => typeof key === "string" && keys.includes(key));
 }
 function text(value: unknown): value is string { return typeof value === "string" && value.length > 0 && value.length <= 1024; }
 function integer(value: unknown): value is number { return typeof value === "number" && Number.isSafeInteger(value) && value >= 0; }
 function validRole(value: unknown): value is ModelRequestWriterRole { return typeof value === "string" && Object.hasOwn(ROLES, value); }
-function credentialValid(value: unknown): value is ModelRequestWriterCredential {
-	if (!closed(value, ["writerId", "token", "role", "capabilities", "identity", "parentWriterId"]) || !text(value.writerId) || !(value.token instanceof Uint8Array) || value.token.length !== 32 || !validRole(value.role) || !Array.isArray(value.capabilities) || value.capabilities.some(item => item !== "review") || value.capabilities.length > 1 || value.parentWriterId !== undefined && !text(value.parentWriterId)) return false;
-	const identity = value.identity;
-	return identity === undefined || closed(identity, ["sessionId", "id", "kind", "depth", "parentId"]) && text(identity.sessionId) && text(identity.id) && (identity.kind === "main" || identity.kind === "sub") && integer(identity.depth) && (identity.parentId === undefined || text(identity.parentId));
-}
 /** Raw secret retention is not authority: only a later self-opened database match can issue a binding. */
 export function retainModelRequestWriterCredential(handle: object, credential: ModelRequestWriterCredential): void {
-	if (handle === null || typeof handle !== "object" || retired.has(handle) || credentials.has(handle) || !credentialValid(credential)) throw new Error("Writer credential rejected");
-	const tokenHash = createHash("sha256").update(credential.token).digest("hex");
-	const key = `${credential.writerId}:${tokenHash}`;
-	if (credentialOwners.has(key)) throw new Error("Writer credential alias rejected");
-	const copy: ModelRequestWriterCredential = Object.freeze({
-		writerId: credential.writerId, role: credential.role, token: Uint8Array.from(credential.token),
-		capabilities: Object.freeze([...credential.capabilities]),
-		...(credential.identity === undefined ? {} : {identity: Object.freeze({...credential.identity})}),
-		...(credential.parentWriterId === undefined ? {} : {parentWriterId: credential.parentWriterId}),
-	});
-	credentials.set(handle, { credential: copy, originalToken: credential.token, tokenHash, generation: Object.freeze({}) });
-	credentialOwners.set(key, handle);
+	if (handle === null || typeof handle !== "object" || !closed(credential, ["writerId", "token", "role", "capabilities", "identity", "parentWriterId"])) throw new Error("Writer credential rejected");
+	// Read caller-controlled fields exactly once. Complete normalization before any
+	// uniqueness checks: getters may reenter this kernel or change later reads.
+	const {writerId, token: originalToken, role, capabilities: suppliedCapabilities, identity: suppliedIdentity, parentWriterId} = credential;
+	if (!text(writerId) || !validRole(role) || !(originalToken instanceof Uint8Array) || !Array.isArray(suppliedCapabilities) || parentWriterId !== undefined && !text(parentWriterId)) throw new Error("Writer credential rejected");
+	const capabilityCount: unknown = suppliedCapabilities.length;
+	if (capabilityCount !== 0 && capabilityCount !== 1 || Reflect.ownKeys(suppliedCapabilities).some(key => key !== "length" && key !== "0")) throw new Error("Writer credential rejected");
+	const capabilities: string[] = [];
+	if (capabilityCount === 1) {
+		const capability: unknown = suppliedCapabilities[0];
+		if (capability !== "review") throw new Error("Writer credential rejected");
+		capabilities.push(capability);
+	}
+	let identity: ModelRequestWriterCredential["identity"];
+	if (suppliedIdentity !== undefined) {
+		if (!closed(suppliedIdentity, ["sessionId", "id", "kind", "depth", "parentId"])) throw new Error("Writer credential rejected");
+		const {sessionId, id, kind, depth, parentId} = suppliedIdentity;
+		if (!text(sessionId) || !text(id) || kind !== "main" && kind !== "sub" || !integer(depth) || parentId !== undefined && !text(parentId)) throw new Error("Writer credential rejected");
+		identity = Object.freeze({sessionId, id, kind, depth, ...(parentId === undefined ? {} : {parentId})});
+	}
+	// Use typed-array intrinsics, not caller length/iterator/species/set overrides.
+	if (tokenByteLength === undefined || tokenByteLength.call(originalToken) !== 32) throw new Error("Writer credential rejected");
+	const token = new Uint8Array(32);
+	copyTokenBytes.call(token, originalToken);
+	const copy: ModelRequestWriterCredential = Object.freeze({writerId, role, token, capabilities: Object.freeze(capabilities), ...(identity === undefined ? {} : {identity}), ...(parentWriterId === undefined ? {} : {parentWriterId})});
+	let retained = false;
+	try {
+		const tokenHash = createHash("sha256").update(token).digest("hex");
+		const key = `${writerId}:${tokenHash}`;
+		if (retired.has(handle) || credentials.has(handle)) throw new Error("Writer credential rejected");
+		if (credentialOwners.has(key)) throw new Error("Writer credential alias rejected");
+		credentials.set(handle, {credential: copy, originalToken, tokenHash, generation: Object.freeze({})});
+		credentialOwners.set(key, handle);
+		retained = true;
+	} finally {
+		if (!retained) zeroTokenBytes.call(token, 0);
+	}
 }
 export function retireModelRequestWriterCredential(handle: object): void {
 	retired.add(handle);
 	const stored = credentials.get(handle);
 	credentials.delete(handle);
 	if (stored === undefined) return;
-	try { stored.credential.token.fill(0); } finally { stored.originalToken.fill(0); }
+	try { zeroTokenBytes.call(stored.credential.token, 0); } finally { zeroTokenBytes.call(stored.originalToken, 0); }
 }
 /** Ordinary authentication result. Caller-provided snapshots never affect verified state. */
 export function inspectModelRequestWriterCredential(handle: object, snapshot: ModelRequestWriterAuthenticationSnapshot): ModelRequestWriterAuthenticationVerdict {

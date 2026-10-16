@@ -5,9 +5,18 @@
 ### Added
 
 - Added fixed macOS model-request journal raw leases and shared credential retain/retire/inspect
-  operations, with alias retirement tombstones and real SQLite/OS rejection regressions.
+  operations, with alias retirement tombstones, single-read credential normalization, intrinsic
+  token copy/zeroing, and real SQLite/OS rejection regressions.
   Verified binding issuance remains blocked on a supported actual-SQLite-fd identity API;
   this does not enable managed sending.
+
+### Fixed
+
+- Fixed a credential accessor counterexample where alias checking hashed a decoy token but
+  retained a retired writer's secret from a later getter read. Retention now validates a
+  single-read normalized snapshot and hashes the same intrinsic-copied token it stores.
+  The integrating parent reproduced the pre-fix authentication bypass; post-fix verification
+  is pending with that parent, including changing-getter and reentrant-retirement regressions.
 
 ### Changed
 

@@ -42,6 +42,17 @@ Inspection accepts an ordinary authentication snapshot and never creates a bindi
 zeros both retained token buffers and leaves `(writerId, tokenHash)` alias tombstones for the
 module lifetime. There is no secret getter, public verified setter, issuer, or reset.
 
+Retention first normalizes every caller-controlled field exactly once, then copies token bytes
+with typed-array intrinsics. Alias keys and the retained secret use that same private copy;
+uniqueness/retirement checks run only after caller getters have finished. This prevents a
+changing token getter from checking a decoy hash while storing a previously retired writer's
+secret. Copying and retirement do not invoke caller iterator, species, length or `fill` overrides.
+
+Security regression evidence: the integrating parent reproduced the pre-fix accessor attack
+(`getterReads: 5`, alias retained and authenticated). The single-snapshot fix and permanent
+changing-getter, reentrant-retirement and overridden-token regressions await the parent's
+post-fix verification; the implementation worker has not run checks.
+
 **Implementation boundary:** verified issuance is currently stopped because Bun's public SQLite
 API does not expose the actual connection's file descriptor for the required `fstat` identity
 check. A separately opened descriptor or `SQLITE_FCNTL_HAS_MOVED` is not accepted as equivalent.

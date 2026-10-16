@@ -54,6 +54,59 @@ describe("model request credential kernel", () => {
 		expect(() => retainModelRequestWriterCredential(handle, alias)).toThrow("credential rejected");
 	});
 
+	test("a changing token getter cannot authenticate a retired writer through a different hash tombstone", () => {
+		const original = fixture();
+		const savedToken = Uint8Array.from(original.credential.token);
+		retainModelRequestWriterCredential(original.handle, original.credential);
+		retireModelRequestWriterCredential(original.handle);
+		const differentToken = randomBytes(32);
+		let tokenReads = 0;
+		const alias = {
+			...original.credential,
+			get token(): Uint8Array {
+				tokenReads++;
+				return tokenReads === 4 ? savedToken : differentToken;
+			},
+		};
+		const aliasHandle = {};
+		try {
+			retainModelRequestWriterCredential(aliasHandle, alias);
+			expect(tokenReads).toBe(1);
+			expect(inspectModelRequestWriterCredential(aliasHandle, {writer: original.row, inactive: false}).ok).toBe(false);
+			expect(() => retainModelRequestWriterCredential({}, {...original.credential, token: savedToken})).toThrow("alias rejected");
+		} finally { retireModelRequestWriterCredential(aliasHandle); }
+	});
+
+	test("caller getters can retire a handle during normalization but cannot revive it", () => {
+		const {credential, row} = fixture();
+		const handle = {};
+		let roleReads = 0;
+		const reentrant = {
+			...credential,
+			get role(): ModelRequestWriterCredential["role"] {
+				roleReads++;
+				retireModelRequestWriterCredential(handle);
+				return "operator-command";
+			},
+		};
+		expect(() => retainModelRequestWriterCredential(handle, reentrant)).toThrow("credential rejected");
+		expect(roleReads).toBe(1);
+		expect(credential.token.some(value => value !== 0)).toBe(true);
+		expect(inspectModelRequestWriterCredential(handle, {writer: row, inactive: false})).toEqual({ok: false, reason: "retired"});
+	});
+
+	test("token copy and retirement use typed-array intrinsics rather than caller overrides", () => {
+		const {handle, credential, row} = fixture();
+		for (const property of ["length", "slice", "fill", Symbol.iterator, "constructor"]) {
+			Object.defineProperty(credential.token, property, {get() { throw new Error("Caller token override invoked"); }});
+		}
+		retainModelRequestWriterCredential(handle, credential);
+		try {
+			expect(inspectModelRequestWriterCredential(handle, {writer: row, inactive: false}).ok).toBe(true);
+		} finally { retireModelRequestWriterCredential(handle); }
+		expect(Uint8Array.prototype.every.call(credential.token, (value: number) => value === 0)).toBe(true);
+	});
+
 	test("tombstones bind writer and hash together, not unrelated stores' token values", () => {
 		const first = fixture();
 		const second = fixture();

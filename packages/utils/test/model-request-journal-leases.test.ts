@@ -23,9 +23,15 @@ mac("fixed model request journal OS leases", () => {
 				writeFileSync(`${raw.recordPath}.new`, "{}", {mode: 0o600});
 				renameSync(`${raw.recordPath}.new`, raw.recordPath);
 				expect(lstatSync(control).ino).toBe(before.ino);
-				const holder = Bun.spawn([process.execPath, join(import.meta.dir, "fixtures/model-request-journal-lease-holder.ts"), storeId], {env: {...process.env, HOME: "/not-the-account-home"}, stdout: "pipe", stderr: "ignore"});
+				const holder = Bun.spawn([process.execPath, join(import.meta.dir, "fixtures/model-request-journal-lease-holder.ts"), storeId], {env: {...process.env, HOME: "/not-the-account-home"}, stdout: "pipe", stderr: "pipe"});
 				expect(await holder.exited).not.toBe(0);
 			});
+			const available = Bun.spawn([process.execPath, join(import.meta.dir, "fixtures/model-request-journal-lease-holder.ts"), storeId], {stdin: "ignore", env: {...process.env, HOME: "/not-the-account-home"}, stdout: "pipe", stderr: "pipe"});
+			const output = await new Response(available.stdout).text();
+			const diagnostics = await new Response(available.stderr).text();
+			const exitCode = await available.exited;
+			if (exitCode !== 0) throw new Error(`Lease fixture exited ${exitCode}: ${diagnostics}`);
+			expect(output).toBe("held\n");
 			expect(() => escaped?.assertHeld()).toThrow("ended");
 		} finally { if (namespace !== undefined) rmSync(namespace, {recursive: true, force: true}); }
 	});
@@ -35,11 +41,20 @@ mac("fixed model request journal OS leases", () => {
 			const storeId = `test-${randomUUID()}`;
 			let namespace: string | undefined;
 			await withRawModelRequestJournalLeases({storeId, control: "shared", maintenance: "shared"}, async raw => { namespace = raw.namespacePath; });
-			const holder = Bun.spawn([process.execPath, join(import.meta.dir, "fixtures/model-request-journal-lease-holder.ts"), storeId, ...(registryId === undefined ? [] : [registryId])], {stdin: "pipe", stdout: "pipe", stderr: "ignore", env: {...process.env, HOME: "/different-home"}});
+			const holder = Bun.spawn([process.execPath, join(import.meta.dir, "fixtures/model-request-journal-lease-holder.ts"), storeId, ...(registryId === undefined ? [] : [registryId])], {stdin: "pipe", stdout: "pipe", stderr: "pipe", env: {...process.env, HOME: "/different-home"}});
 			try {
 				const reader = holder.stdout.getReader();
-				const ready = await reader.read();
-				expect(new TextDecoder().decode(ready.value)).toBe("held\n");
+				let output = "";
+				for (;;) {
+					const ready = await reader.read();
+					if (ready.done) {
+						const diagnostics = await new Response(holder.stderr).text();
+						throw new Error(`Lease fixture exited ${await holder.exited} before readiness: ${diagnostics}`);
+					}
+					output += new TextDecoder().decode(ready.value);
+					if (output.includes("\n")) break;
+				}
+				expect(output).toBe("held\n");
 				reader.releaseLock();
 				const request = {storeId, control: "shared" as const, maintenance: "shared" as const, ...(registryId === undefined ? {} : {registryId})};
 				await expect(withRawModelRequestJournalLeases(request, async () => {})).rejects.toThrow("unavailable");
