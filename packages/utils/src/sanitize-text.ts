@@ -46,38 +46,65 @@ function sanitizeWellFormedText(text: string): string {
  *
  * Returns the input reference when nothing changed, so reference-keyed caches
  * stay warm; changed containers are copied and the input is never mutated.
- * Display layers use it on structured payloads (tool-result `details`) whose
- * strings carry untrusted file or command text.
+ * The iterative walk also handles arbitrarily deep tool-result `details`
+ * without exhausting the TUI's call stack.
  */
 export function sanitizeTextDeep(value: unknown): unknown {
-	return sanitizeValue(value, new Set());
+	if (typeof value === "string") return sanitizeText(value);
+	const root = sanitizerFrame(value);
+	if (!root) return value;
+	const stack: SanitizerFrame[] = [root];
+	const ancestors = new Set<object>([root.value]);
+	while (true) {
+		const frame = stack[stack.length - 1]!;
+		const length = frame.kind === "array" ? frame.value.length : frame.keys.length;
+		if (frame.index === length) {
+			const clean = frame.copy ?? frame.value;
+			ancestors.delete(frame.value);
+			stack.pop();
+			if (stack.length === 0) return clean;
+			acceptSanitizedValue(stack[stack.length - 1]!, clean);
+			continue;
+		}
+		const child = frame.kind === "array" ? frame.value[frame.index++] : frame.value[frame.keys[frame.index++]!];
+		if (typeof child === "string") {
+			acceptSanitizedValue(frame, sanitizeText(child));
+			continue;
+		}
+		if (child === null || typeof child !== "object" || ancestors.has(child)) continue;
+		const next = sanitizerFrame(child);
+		if (!next) continue;
+		ancestors.add(child);
+		stack.push(next);
+	}
 }
 
-function sanitizeValue(value: unknown, ancestors: Set<object>): unknown {
-	if (typeof value === "string") return sanitizeText(value);
-	if (typeof value !== "object" || value === null || ancestors.has(value)) return value;
-	if (Array.isArray(value)) {
-		ancestors.add(value);
-		let copy: unknown[] | undefined;
-		for (let index = 0; index < value.length; index++) {
-			const item: unknown = value[index];
-			const clean = sanitizeValue(item, ancestors);
-			if (clean !== item) (copy ??= value.slice())[index] = clean;
-		}
-		ancestors.delete(value);
-		return copy ?? value;
-	}
+type SanitizerFrame =
+	| { kind: "array"; value: unknown[]; index: number; copy?: unknown[] }
+	| { kind: "record"; value: Record<string, unknown>; keys: string[]; index: number; copy?: Record<string, unknown> };
+
+function sanitizerFrame(value: unknown): SanitizerFrame | undefined {
+	if (Array.isArray(value)) return { kind: "array", value, index: 0 };
+	if (!isRecord(value)) return undefined;
 	const proto: unknown = Object.getPrototypeOf(value);
-	if (!isRecord(value) || (proto !== Object.prototype && proto !== null)) return value;
-	ancestors.add(value);
-	let copy: Record<string, unknown> | undefined;
-	for (const key in value) {
-		const item = value[key];
-		const clean = sanitizeValue(item, ancestors);
-		if (clean !== item) (copy ??= { ...value })[key] = clean;
+	if (proto !== Object.prototype && proto !== null) return undefined;
+	return { kind: "record", value, keys: Object.keys(value), index: 0 };
+}
+
+function acceptSanitizedValue(frame: SanitizerFrame, clean: unknown): void {
+	if (frame.kind === "array") {
+		const index = frame.index - 1;
+		if (clean !== frame.value[index]) (frame.copy ??= frame.value.slice())[index] = clean;
+		return;
 	}
-	ancestors.delete(value);
-	return copy ?? value;
+	const key = frame.keys[frame.index - 1]!;
+	if (clean === frame.value[key]) return;
+	const copy = (frame.copy ??= { ...frame.value });
+	if (key === "__proto__") {
+		Object.defineProperty(copy, key, { value: clean, writable: true, enumerable: true, configurable: true });
+	} else {
+		copy[key] = clean;
+	}
 }
 
 /**

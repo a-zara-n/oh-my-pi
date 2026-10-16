@@ -76,4 +76,41 @@ describe("sanitizeTextDeep", () => {
 		expect(isRecord(output) && output.text).toBe("ab");
 		expect(isRecord(output) && output.self).toBe(input);
 	});
+
+	it("handles deeply nested clean and unsafe details without overflowing", () => {
+		const depth = 50_000;
+		let clean: unknown = "safe";
+		let unsafe: unknown = "needle \x1b[?1049h";
+		for (let index = 0; index < depth; index++) {
+			clean = [clean];
+			unsafe = [unsafe];
+		}
+		expect(sanitizeTextDeep(clean)).toBe(clean);
+		let result = sanitizeTextDeep(unsafe);
+		for (let index = 0; index < depth; index++) {
+			if (!Array.isArray(result)) throw new Error("Nested array lost");
+			result = result[0];
+		}
+		expect(result).toBe("needle ");
+	});
+
+	it("sanitizes the leaf of a deeply nested object without mutating the source", () => {
+		const depth = 50_000;
+		let input: unknown = { text: "needle \x1b]52;c;cHduZWQ=\x07" };
+		for (let index = 0; index < depth; index++) input = { child: input };
+		let result = sanitizeTextDeep(input);
+		expect(result).not.toBe(input);
+		for (let index = 0; index < depth; index++) {
+			if (!isRecord(result)) throw new Error("Nested record lost");
+			result = result.child;
+		}
+		expect(isRecord(result) && result.text).toBe("needle ");
+	});
+
+	it("keeps an own __proto__ field when its value is sanitized", () => {
+		const input: unknown = JSON.parse('{"__proto__":"needle \\u001b[?1049h"}');
+		const output = sanitizeTextDeep(input);
+		expect(isRecord(output) && Object.hasOwn(output, "__proto__")).toBe(true);
+		expect(isRecord(output) && output.__proto__).toBe("needle ");
+	});
 });
