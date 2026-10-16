@@ -147,4 +147,17 @@ describe("AgentSession todo-error reminder", () => {
 		expect(reminders[0]).not.toContain("Missing phase name for append operation");
 		expect(reminders[0]).not.toContain("Remaining items");
 	});
+
+	it("drops reminders when retries correct other invalid arguments", async () => {
+		const reminders = await runTwoPrompts([
+			todoCall("todo-missing-items", { op: "append", phase: "Build" }),
+			todoCall("todo-placeholder", { op: "done", task: "task-1" }),
+			todoCall("todo-items-retry", { op: "append", phase: "Build", items: ["Add tests"] }),
+			todoCall("todo-task-retry", { op: "done", task: "Release" }),
+			{ content: ["Corrected both"] },
+		]);
+
+		expect(session?.getTodoPhases()[1]?.tasks[0]?.status).toBe("completed");
+		expect(reminders).toEqual([]);
+	});
 });
