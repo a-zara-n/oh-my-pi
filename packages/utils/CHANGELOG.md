@@ -20,10 +20,15 @@
 - Replaced `os.userInfo().homedir` with direct public-ABI libc `getpwuid_r` account lookup.
   Parent regressions on Bun 1.4.2 showed the compatibility API honored fake HOME values.
   Native lookup validates bounded caller-owned storage, UID/effective UID and the returned
-  home-pointer range; errors fail closed without an environment fallback. The parent owns
-  post-change verification of the retained real subprocess HOME/lease regressions.
+  home-pointer range; errors fail closed without an environment fallback. Verification on
+  Bun 1.4.2 passed all 16 utility regressions, including HOME-independent subprocess locking
+  and process-death release. A direct child with `HOME=/different-home` acquired its lease.
 - Sized the fixed verifier's `fileControl` buffer to Bun's eight-byte minimum. This only
   reaches the explicit unsupported actual-fd boundary; `HAS_MOVED` is not identity proof.
+- Integrated verification passed 116 tests across eight utils/ai/coding-agent files.
+  Real loopback smoke observed zero unconnected managed requests and one ordinary request.
+  This is partial WIP evidence: actual SQLite descriptor verification and authenticated
+  registry-receipt-to-execution readiness remain unimplemented and are not acceptance passes.
 
 ### Changed
 
