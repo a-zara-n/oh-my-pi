@@ -33,8 +33,14 @@ const CHOICE_CONFIRMATION_RE = /^(?:go|proceed|continue|stick)\s+with\b/i;
 const QUESTION_PROMPT_RE =
 	/^(?:what|which|when|where|why|how|who|whom|whose|do|does|did|can|could|would|will|should|is|are|am|may|shall)\b/i;
 const USER_DIRECTED_PROMPT_RE = /\b(?:you|your|we|our)\b/i;
+const ADDRESSEE_RE = /\b(?:you|your)\b/i;
+// Imperatives ("tell me", "message me") and conditional permission ("If you confirm, I'll…").
 const USER_RESPONSE_CUE_RE =
-	/^(?:please\s+)?(?:confirm|reply|choose|pick|decide|advise)\b|^(?:please\s+)?answer\b|^(?:please\s+)?(?:let\s+me\s+know|tell\s+me)\b/i;
+	/^(?:please\s+)?(?:confirm|reply|choose|pick|decide|advise|answer|approve)\b|^(?:please\s+)?(?:let\s+me\s+know|(?:tell|message|ping)\s+me)\b|^(?:if|once|when)\s+you\s+(?:confirm|approve|agree|allow|okay|ok|give)\b/i;
+// Connectives that open a cue sentence without changing it: "Separately, tell me…", "Then message me…".
+const LEADING_CONNECTIVE_RE = /^(?:and|or|so|then|also|otherwise|alternatively|separately|finally)\b,?\s*/i;
+// Western terminators need trailing whitespace (so `foo?: string` stays whole); CJK ones do not.
+const SENTENCE_BREAK_RE = /(?<=[.!?…])\s+|(?<=[。！？])/;
 /**
  * A trailing question mark is the universal signal that a line is a question, but
  * the English word/pronoun gates above exist to filter incidental "?" out of prose
@@ -412,16 +418,70 @@ function isQuestionPromptLine(line: string): boolean {
 function isResponseCueLine(line: string): boolean {
 	const candidate = promptLine(line)
 		.text.replace(/[.!?。！？]+$/, "")
+		.replace(LEADING_CONNECTIVE_RE, "")
 		.trim();
 	return USER_RESPONSE_CUE_RE.test(candidate);
+}
+
+/**
+ * How a closing span hands control back: `request` asks the user outright (cue,
+ * labelled or user-addressed question, non-English question); `question` is only
+ * question-shaped ("What's next?") and may be a heading the agent answers itself.
+ */
+type ClosingAsk = "none" | "question" | "request";
+
+function askOf(span: string): ClosingAsk {
+	if (isResponseCueLine(span)) return "request";
+	if (!isQuestionPromptLine(span)) return "none";
+	const candidate = promptLine(span);
+	return candidate.hadPromptLabel || ADDRESSEE_RE.test(candidate.text) || NON_ASCII_TEXT_RE.test(candidate.text)
+		? "request"
+		: "question";
+}
+
+/** The last two sentences of the prose lines closing `paragraph`; a list item ends the walk. */
+function closingSentences(paragraph: string): string[] {
+	const sentences: string[] = [];
+	const lines = paragraph.split(/\r?\n/);
+	for (let index = lines.length - 1; index >= 0 && sentences.length < 2; index--) {
+		const line = lines[index].trim();
+		if (OPTION_LINE_RE.test(line)) break;
+		const lineSentences = line.split(SENTENCE_BREAK_RE).filter(Boolean);
+		sentences.unshift(...lineSentences.slice(sentences.length - 2));
+	}
+	return sentences;
+}
+
+function closingAsk(paragraph: string): ClosingAsk {
+	const lastLine = paragraph.slice(paragraph.lastIndexOf("\n") + 1).trim();
+	const sentences = closingSentences(paragraph);
+	const asks = [askOf(lastLine), ...sentences.slice(-1).map(askOf)];
+	// No lexicon recognizes a non-English follow-up ("…? Отдельно скажите, …"), and none
+	// recognizes a non-English self-answer either; an open request is the costlier miss.
+	const foreignQuestion =
+		sentences.length === 2 && NON_ASCII_TEXT_RE.test(sentences[0]) && isQuestionPromptLine(sentences[0]);
+	if (foreignQuestion || asks.includes("request")) return "request";
+	return asks.includes("question") ? "question" : "none";
 }
 
 function isAwaitingUserAnswer(message: AssistantMessage): boolean {
 	const text = assistantText(message);
 	if (!text) return false;
+	const paragraphs = text.split(/\r?\n\s*\r?\n/);
+	const lastParagraph = paragraphs.at(-1)?.trim() ?? "";
+	if (closingAsk(lastParagraph) !== "none") return true;
+	// A one-line closing note ("Repository unchanged, no commits.") does not answer an
+	// outright request in the paragraph before it.
+	const previousParagraph = paragraphs.at(-2)?.trim();
+	if (
+		previousParagraph &&
+		!lastParagraph.includes("\n") &&
+		!OPTION_LINE_RE.test(lastParagraph) &&
+		closingAsk(previousParagraph) === "request"
+	) {
+		return true;
+	}
 	const lines = text.split(/\r?\n/);
-	const lastLine = lines.at(-1)?.trim();
-	if (lastLine !== undefined && (isQuestionPromptLine(lastLine) || isResponseCueLine(lastLine))) return true;
 
 	// Options and a recommendation do not answer the question on the user's behalf.
 	// Stop at other prose so self-answered questions still allow unfinished work to resume.
