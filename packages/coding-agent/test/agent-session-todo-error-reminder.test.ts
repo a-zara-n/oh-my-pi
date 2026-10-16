@@ -1,14 +1,12 @@
 /**
- * Regression coverage for issue #16001: a failed `todo` call queues a hidden
- * `todo-error-reminder` for the next turn. The reminder exists to force a
- * corrected retry, so once a later `todo` mutation succeeds it is stale — its
- * embedded failure-time list snapshot would resurface finished work as open.
+ * A todo failure remains actionable until its own retry succeeds. Later,
+ * unrelated mutations must not discard it or replay its old list snapshot.
  */
 
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
 import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
-import type { ToolCall } from "@oh-my-pi/pi-ai";
+import type { TextContent, ToolCall } from "@oh-my-pi/pi-ai";
 import { createMockModel, type MockResponse } from "@oh-my-pi/pi-ai/providers/mock";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
@@ -52,8 +50,8 @@ describe("AgentSession todo-error reminder", () => {
 		}
 	});
 
-	/** Runs one scripted prompt plus a follow-up prompt; returns the serialized follow-up model context. */
-	async function runTwoPrompts(firstRun: MockResponse[]): Promise<string> {
+	/** Runs one scripted prompt plus a follow-up prompt; returns reminders delivered to the model. */
+	async function runTwoPrompts(firstRun: MockResponse[]): Promise<string[]> {
 		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
 		if (!model) throw new Error("Expected bundled test model to exist");
 		const mock = createMockModel({ responses: [...firstRun, { content: ["Next answer"] }] });
@@ -92,27 +90,61 @@ describe("AgentSession todo-error reminder", () => {
 
 		const lastCall = mock.calls.at(-1);
 		if (!lastCall) throw new Error("Expected the mock model to be called");
-		return JSON.stringify(lastCall.context.messages);
+		return lastCall.context.messages.flatMap(message => {
+			if (message.role !== "developer") return [];
+			const content = message.content;
+			if (typeof content === "string") return content.includes(REMINDER_MARKER) ? [content] : [];
+			return content
+				.filter((part): part is TextContent => part.type === "text" && part.text.includes(REMINDER_MARKER))
+				.map(part => part.text);
+		});
 	}
 
-	it("drops the queued reminder once a later todo mutation succeeds", async () => {
-		const context = await runTwoPrompts([
+	it("drops the reminder only after its append retry succeeds", async () => {
+		const reminders = await runTwoPrompts([
 			todoCall("todo-fail", { op: "append", items: ["Add tests"] }),
 			todoCall("todo-retry", { op: "append", phase: "Build", items: ["Add tests"] }),
 			{ content: ["Appended"] },
 		]);
 
 		expect(session?.getTodoPhases()[0]?.tasks.map(task => task.content)).toEqual(["Write code", "Add tests"]);
-		expect(context).not.toContain(REMINDER_MARKER);
+		expect(reminders).toEqual([]);
 	});
 
-	it("still delivers the reminder when the failure was never corrected", async () => {
-		const context = await runTwoPrompts([
+	it("preserves an uncorrected failure across a view", async () => {
+		const reminders = await runTwoPrompts([
 			todoCall("todo-fail", { op: "append", items: ["Add tests"] }),
 			todoCall("todo-view", { op: "view" }),
 			{ content: ["Gave up"] },
 		]);
 
-		expect(context).toContain(REMINDER_MARKER);
+		expect(reminders).toHaveLength(1);
+	});
+
+	it("preserves an uncorrected failure after an unrelated mutation without a stale list", async () => {
+		const reminders = await runTwoPrompts([
+			todoCall("todo-fail", { op: "append", items: ["Add tests"] }),
+			todoCall("todo-unrelated", { op: "done", task: "Release" }),
+			{ content: ["Completed release"] },
+		]);
+
+		expect(session?.getTodoPhases()[1]?.tasks[0]?.status).toBe("completed");
+		expect(reminders).toHaveLength(1);
+		expect(reminders[0]).toContain("Missing phase name for append operation");
+		expect(reminders[0]).not.toContain("Remaining items");
+	});
+
+	it("keeps only the failed operation that has not been retried", async () => {
+		const reminders = await runTwoPrompts([
+			todoCall("todo-missing-phase", { op: "append", items: ["Add tests"] }),
+			todoCall("todo-duplicate", { op: "append", phase: "Ship", items: ["Write code"] }),
+			todoCall("todo-retry", { op: "append", phase: "Build", items: ["Add tests"] }),
+			{ content: ["Appended"] },
+		]);
+
+		expect(reminders).toHaveLength(1);
+		expect(reminders[0]).toContain('Task "Write code" already exists');
+		expect(reminders[0]).not.toContain("Missing phase name for append operation");
+		expect(reminders[0]).not.toContain("Remaining items");
 	});
 });
