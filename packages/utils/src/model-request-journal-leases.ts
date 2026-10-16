@@ -1,6 +1,5 @@
-import { dlopen, FFIType } from "bun:ffi";
+import { dlopen, FFIType, ptr } from "bun:ffi";
 import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, type Stats } from "node:fs";
-import { userInfo } from "node:os";
 import { isAbsolute, join, parse, resolve } from "node:path";
 
 export type RawModelRequestJournalLeaseMode = "shared" | "exclusive";
@@ -31,16 +30,46 @@ function runtime(): NativeLeaseRuntime {
 	if (nativeRuntime !== undefined) return nativeRuntime;
 	const library = dlopen("/usr/lib/libSystem.B.dylib", {
 		flock: { args: [FFIType.i32, FFIType.i32], returns: FFIType.i32 },
+		getpwuid_r: { args: [FFIType.u32, FFIType.ptr, FFIType.ptr, FFIType.u64, FFIType.ptr], returns: FFIType.i32 },
+		sysconf: { args: [FFIType.i32], returns: FFIType.i64 },
 	});
+	// Public Darwin LP64 ABI, SDK usr/include/pwd.h:84-95,102:
+	// pointers/time_t are 8 bytes, uid_t/gid_t are 4; passwd is 72 bytes,
+	// pw_uid is at 16 and pw_dir is at 48 (arm64 and x86_64).
+	const account = new Uint8Array(72);
+	const result = new Uint8Array(8);
+	const accountView = new DataView(account.buffer);
+	const resultView = new DataView(result.buffer);
+	const accountPointer = ptr(account);
+	const resultPointer = ptr(result);
+	// unistd.h:299 and getpwent(3) specify this maximum caller-owned buffer.
+	const bufferSize = Number(library.symbols.sysconf(71));
+	if (!Number.isSafeInteger(bufferSize) || bufferSize < 1 || bufferSize > 1024 * 1024) throw new Error("Journal account buffer unavailable");
+	const buffer = new Uint8Array(bufferSize);
+	const bufferPointer = ptr(buffer);
+	const decodeHome = new TextDecoder("utf-8", {fatal: true});
 	nativeRuntime = {
 		flock: (fd, operation) => library.symbols.flock(fd, operation),
 		home(uid) {
-			// OS account data (getpwuid), unlike homedir(), never a HOME override.
-			const account = userInfo();
-			if (account.uid !== uid) throw new Error("Journal account unavailable");
-			const home = account.homedir;
-			if (!isAbsolute(home) || resolve(home) !== home) throw new Error("Journal account unavailable");
-			return home;
+			try {
+				const status = library.symbols.getpwuid_r(uid, accountPointer, bufferPointer, buffer.length, resultPointer);
+				if (status !== 0 || resultView.getBigUint64(0, true) !== BigInt(accountPointer) || accountView.getUint32(16, true) !== uid) throw new Error("Journal account unavailable");
+				// getpwuid_r promises strings in our supplied buffer. Validate the
+				// returned pw_dir range before reading, rather than dereferencing it.
+				const directoryPointer = accountView.getBigUint64(48, true);
+				const offset = directoryPointer - BigInt(bufferPointer);
+				if (offset < 0n || offset >= BigInt(buffer.length)) throw new Error("Journal account home unavailable");
+				const start = Number(offset);
+				const end = buffer.indexOf(0, start);
+				if (end < 0) throw new Error("Journal account home unavailable");
+				const home = decodeHome.decode(buffer.subarray(start, end));
+				if (!isAbsolute(home) || resolve(home) !== home) throw new Error("Journal account unavailable");
+				return home;
+			} finally {
+				account.fill(0);
+				result.fill(0);
+				buffer.fill(0);
+			}
 		},
 	};
 	return nativeRuntime;
@@ -50,7 +79,7 @@ function validMode(mode: unknown): mode is RawModelRequestJournalLeaseMode {
 }
 function uid(): number {
 	const value = process.getuid?.();
-	if (value === undefined) throw new Error("Journal account unavailable");
+	if (value === undefined || !Number.isSafeInteger(value) || value < 0 || value > 0xffffffff || process.geteuid?.() !== value) throw new Error("Journal account unavailable");
 	return value;
 }
 function sameFile(left: Stats, right: Stats): boolean {

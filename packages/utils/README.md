@@ -29,13 +29,29 @@ Import `model-request-journal-leases` and `model-request-journal-authority` thro
 `@oh-my-pi/pi-utils/<module>` subpaths. Do not bundle a second copy: verified handles are tied to
 the authority module's runtime identity and private object registry.
 
-Raw leases use the OS account home (`os.userInfo()`, not `HOME`) under
+Raw leases use the real UID's OS account home (direct libc `getpwuid_r`, not `HOME`) under
 `Library/Application Support/omp-security-audit/budget-authority/<storeId>`.
 They acquire fixed, never-unlinked control, maintenance, writer-owner and registry accounting
 flock files in that order. Acquisition is nonblocking and macOS-only. Dedicated directories
 must be owner-only `0700`; files must be owner-only `0600`, without symlinks. The low-level fd
 lease helper never removes files; existing area consumers retain their own unlink-before-release
 cleanup behavior. Raw scopes do not constitute verified journal authority.
+
+Account lookup stays inside the existing lazy `bun:ffi` libc boundary. Its public Darwin LP64
+layout is derived from macOS SDK 26.2 `usr/include/pwd.h:84–95,102`, `sys/_types.h:72,87`,
+`arm/_types.h:119` and `i386/_types.h:143`: `struct passwd` is 72 bytes, with the 32-bit
+`pw_uid` at byte 16 and the `pw_dir` pointer at byte 48. This is a public account ABI, not a
+private SQLite file layout. `getpwent(3):178–197` specifies caller-owned struct/string storage
+and the returned result pointer; `unistd.h:299` supplies `_SC_GETPW_R_SIZE_MAX=71`.
+The lookup uses that bounded buffer (at most 1 MiB), validates result/UID/home-pointer range
+and UTF-8 before copying the home string, then clears caller-owned native buffers. Unknown
+buffer size, `ERANGE`/other lookup errors, missing users and differing real/effective UIDs
+reject acquisition; no environment or saved-HOME fallback is used.
+
+The integrating parent's Bun 1.4.2 regressions demonstrated that `os.userInfo().homedir`
+returned the supplied fake `HOME`, contrary to the Node compatibility documentation.
+Consequently it is not accepted as the account-home source here. The existing subprocess
+tests retain distinct fake HOME values and real fixed-namespace contention/kill assertions.
 
 Credential retain/retire/inspect operations centralize secret matching, not role issuance.
 Inspection accepts an ordinary authentication snapshot and never creates a binding. Retirement
@@ -49,9 +65,9 @@ changing token getter from checking a decoy hash while storing a previously reti
 secret. Copying and retirement do not invoke caller iterator, species, length or `fill` overrides.
 
 Security regression evidence: the integrating parent reproduced the pre-fix accessor attack
-(`getterReads: 5`, alias retained and authenticated). The single-snapshot fix and permanent
-changing-getter, reentrant-retirement and overridden-token regressions await the parent's
-post-fix verification; the implementation worker has not run checks.
+(`getterReads: 5`, alias retained and authenticated), then observed the fixed counterexample
+read the token once and leave the alias unauthenticated. The worker did not execute checks.
+Post-fix verification of direct libc account lookup remains with the parent.
 
 **Implementation boundary:** verified issuance is currently stopped because Bun's public SQLite
 API does not expose the actual connection's file descriptor for the required `fstat` identity

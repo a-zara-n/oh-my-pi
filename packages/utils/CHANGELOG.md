@@ -15,8 +15,13 @@
 - Fixed a credential accessor counterexample where alias checking hashed a decoy token but
   retained a retired writer's secret from a later getter read. Retention now validates a
   single-read normalized snapshot and hashes the same intrinsic-copied token it stores.
-  The integrating parent reproduced the pre-fix authentication bypass; post-fix verification
-  is pending with that parent, including changing-getter and reentrant-retirement regressions.
+  The integrating parent reproduced the pre-fix authentication bypass and observed the fixed
+  counterexample leave the alias unauthenticated after one token read.
+- Replaced `os.userInfo().homedir` with direct public-ABI libc `getpwuid_r` account lookup.
+  Parent regressions on Bun 1.4.2 showed the compatibility API honored fake HOME values.
+  Native lookup validates bounded caller-owned storage, UID/effective UID and the returned
+  home-pointer range; errors fail closed without an environment fallback. The parent owns
+  post-change verification of the retained real subprocess HOME/lease regressions.
 
 ### Changed
 
