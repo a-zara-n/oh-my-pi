@@ -18,6 +18,10 @@ import {
 	runWithModelRequestExecution,
 } from "@oh-my-pi/pi-ai/model-request-execution";
 import type { ModelRequestAgent, ModelRequestPurpose } from "@oh-my-pi/pi-ai/model-request-gate";
+import type { ModelRequestJournalLeaseBinding } from "@oh-my-pi/pi-utils/model-request-journal-authority";
+import type { ModelRequestJournal } from "./session-manager";
+
+const executionJournals = new WeakMap<ModelRequestExecution, { journal: ModelRequestJournal | undefined }>();
 
 /**
  * Hand-over of the root session id from a spawning session to a child session, passed as
@@ -30,6 +34,7 @@ import type { ModelRequestAgent, ModelRequestPurpose } from "@oh-my-pi/pi-ai/mod
 export interface ModelRequestRootAssignment {
 	readonly kind: "child";
 	readonly rootSessionId: string | undefined;
+	readonly modelRequestJournalLeaseBinding?: ModelRequestJournalLeaseBinding;
 }
 
 /**
@@ -40,10 +45,32 @@ export interface ModelRequestRootAssignment {
  *   root over: the child has no root (`rootSessionId: undefined`), never its own.
  * - No assignment and no active context means the user started it: it is its own root.
  */
-export function resolveModelRequestRootSource(assignment: ModelRequestRootAssignment | undefined): ModelRequestRootSource {
-	if (assignment !== undefined) return { kind: "inherited", rootSessionId: assignment.rootSessionId };
-	if (getModelRequestExecution() !== undefined) return { kind: "inherited", rootSessionId: undefined };
-	return { kind: "self" };
+export function resolveModelRequestRootSource(
+	assignment: ModelRequestRootAssignment | undefined,
+	binding?: ModelRequestJournalLeaseBinding,
+): ModelRequestRootSource {
+	if (
+		binding !== undefined &&
+		assignment?.modelRequestJournalLeaseBinding !== undefined &&
+		binding !== assignment.modelRequestJournalLeaseBinding
+	) {
+		throw new Error("model request journal binding differs from the inherited root binding");
+	}
+	const modelRequestJournalLeaseBinding = binding ?? assignment?.modelRequestJournalLeaseBinding;
+	const activeExecution = getModelRequestExecution();
+	if (
+		activeExecution?.modelRequestJournalLeaseBinding !== undefined &&
+		modelRequestJournalLeaseBinding !== activeExecution.modelRequestJournalLeaseBinding
+	) {
+		throw new Error("a managed child must explicitly retain its parent's model request journal binding");
+	}
+	if (assignment !== undefined) {
+		return { kind: "inherited", rootSessionId: assignment.rootSessionId, modelRequestJournalLeaseBinding };
+	}
+	if (activeExecution !== undefined) {
+		return { kind: "inherited", rootSessionId: undefined, modelRequestJournalLeaseBinding };
+	}
+	return { kind: "self", modelRequestJournalLeaseBinding };
 }
 
 export interface SessionModelRequestExecutionInit {
@@ -56,21 +83,41 @@ export interface SessionModelRequestExecutionInit {
 	 * drift between where it is made and where it is used.
 	 */
 	readonly root: ModelRequestRootSource;
+	/** Only transports the SDK's private sink slot; never passed to ai as trusted readiness. */
+	readonly journalConnection?: Promise<ModelRequestJournal>;
 }
 
 /** Mint the context of a session being created. */
 export function createSessionModelRequestExecution(init: SessionModelRequestExecutionInit): ModelRequestExecution {
-	return createModelRequestSessionExecution({
+	const journalSlot: { journal: ModelRequestJournal | undefined } | undefined =
+		init.journalConnection === undefined ? undefined : { journal: undefined };
+	const journalConnection = init.journalConnection?.then(journal => {
+		if (journalSlot === undefined) throw new Error("model request execution journal slot is unavailable");
+		journalSlot.journal = journal;
+	});
+	// A failed composition is also awaited by the SDK; do not leave an unobserved rejection on the execution.
+	void journalConnection?.catch(() => {});
+	const execution = createModelRequestSessionExecution({
 		sessionId: init.getSessionId,
 		root: init.root,
 		agent: init.agent,
 		purpose: init.agent.kind === "main" ? "main" : "subagent",
 	});
+	if (journalSlot !== undefined) executionJournals.set(execution, journalSlot);
+	return execution;
 }
 
 /** The root assignment a session gives to a child it spawns, resolved as of now. */
 export function childModelRequestRootOf(execution: ModelRequestExecution): ModelRequestRootAssignment {
-	return { kind: "child", rootSessionId: resolveModelRequestScope(execution).rootSessionId };
+	const journalSlot = executionJournals.get(execution);
+	if (journalSlot !== undefined && journalSlot.journal === undefined) {
+		throw new Error("model request execution journal is not connected");
+	}
+	return {
+		kind: "child",
+		rootSessionId: resolveModelRequestScope(execution).rootSessionId,
+		modelRequestJournalLeaseBinding: execution.modelRequestJournalLeaseBinding,
+	};
 }
 
 /**
@@ -83,5 +130,7 @@ export function withModelRequestExecution(
 	purpose?: ModelRequestPurpose,
 ): StreamFn {
 	const scoped = purpose === undefined ? execution : deriveModelRequestExecution(execution, { purpose });
+	const journalSlot = executionJournals.get(execution);
+	if (journalSlot !== undefined && scoped !== execution) executionJournals.set(scoped, journalSlot);
 	return (model, context, options) => runWithModelRequestExecution(scoped, () => streamFn(model, context, options));
 }

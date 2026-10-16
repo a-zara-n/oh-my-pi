@@ -12,6 +12,7 @@
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 import { EventEmitter } from "node:events";
+import type { ModelRequestJournalLeaseBinding } from "@oh-my-pi/pi-utils/model-request-journal-authority";
 import { AbortError } from "./error/abort";
 import { ModelRequestDeniedError } from "./error/model-request-denied";
 import type {
@@ -36,14 +37,19 @@ declare const EXECUTION_BRAND: unique symbol;
 /** Opaque handle to a core-minted execution context. Cannot be constructed outside the runtime. */
 export interface ModelRequestExecution {
 	readonly [EXECUTION_BRAND]: true;
+	readonly modelRequestJournalLeaseBinding?: ModelRequestJournalLeaseBinding;
 }
 
 /** Where an execution's root session id comes from. */
 export type ModelRequestRootSource =
 	/** A session the user started or resumed: its root is its own current session id. */
-	| { readonly kind: "self" }
+	| { readonly kind: "self"; readonly modelRequestJournalLeaseBinding?: ModelRequestJournalLeaseBinding }
 	/** A child session: the parent handed the root over explicitly. `undefined` records a missing hand-over. */
-	| { readonly kind: "inherited"; readonly rootSessionId: string | undefined };
+	| {
+			readonly kind: "inherited";
+			readonly rootSessionId: string | undefined;
+			readonly modelRequestJournalLeaseBinding?: ModelRequestJournalLeaseBinding;
+	  };
 
 export interface ModelRequestExecutionInit {
 	/** Evaluated on every request, so `/new` and session switches are never billed to a stale id. */
@@ -113,6 +119,10 @@ class ExecutionImpl implements ModelRequestExecution {
 
 	constructor(init: ModelRequestExecutionInit) {
 		this.#init = init;
+	}
+
+	get modelRequestJournalLeaseBinding(): ModelRequestJournalLeaseBinding | undefined {
+		return this.#init.root.modelRequestJournalLeaseBinding;
 	}
 
 	derive(patch: ModelRequestExecutionPatch): ExecutionImpl {
@@ -375,11 +385,20 @@ export class ModelRequestRuntime {
 	// ---- per-attempt authorization ----
 
 	/**
-	 * Ask the registered gate whether one wire attempt may be sent. With no gate registered this resolves to a
-	 * permit without a lease and does nothing else. Otherwise it throws {@link ModelRequestDeniedError} on
-	 * `deny` and on every gate failure (`gate-error`), and the caller MUST NOT start any I/O.
+	 * Ask the registered gate whether one wire attempt may be sent. An ordinary sinkless execution with no gate
+	 * resolves to a permit without a lease. Managed executions require an authenticated journal connection;
+	 * `deny` and every gate failure throw, and the caller MUST NOT start any I/O.
 	 */
 	async authorize(input: ModelRequestAuthorizationInput): Promise<ModelRequestPermit> {
+		const execution = this.currentExecution();
+		if (execution?.modelRequestJournalLeaseBinding !== undefined) {
+			// WIP boundary: r8 has not yet supplied an authenticated bridge from the manager's actual
+			// registry/header/owner receipt to this exact execution. An init promise is not that proof.
+			throw new ModelRequestDeniedError(
+				"gate-error",
+				"authenticated model request journal execution connection is unavailable",
+			);
+		}
 		const registration = this.#registration;
 		const attemptId = this.#deps.newAttemptId();
 		if (registration === undefined) return { attemptId, lease: undefined };

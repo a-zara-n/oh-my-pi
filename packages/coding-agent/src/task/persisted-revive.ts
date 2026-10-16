@@ -180,6 +180,7 @@ export function createPersistedSubagentReviverFactory(
 			const mcpProxyTools = mcpManager ? createMCPProxyTools(mcpManager) : [];
 			let session: AgentSession;
 			try {
+				const modelRequestRoot = ctx.session.childModelRequestRoot();
 				({ session } = await createAgentSession({
 					cwd: ctx.session.sessionManager.getCwd(),
 					authStorage: ctx.authStorage,
@@ -188,7 +189,8 @@ export function createPersistedSubagentReviverFactory(
 					subagentEventBus: ctx.subagentEventBus,
 					// A cold revive runs from IRC/hub handlers with no ambient context: the live
 					// top-level session hands its current root over, never the revived agent's own id.
-					modelRequestRoot: ctx.session.childModelRequestRoot(),
+					modelRequestRoot,
+					modelRequestJournalLeaseBinding: modelRequestRoot.modelRequestJournalLeaseBinding,
 					modelRegistry: ctx.modelRegistry,
 					...(persistedModelPattern ? { modelPattern: persistedModelPattern } : {}),
 					modelPatternAuthFallback: init.resolvedModel,

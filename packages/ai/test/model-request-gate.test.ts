@@ -15,6 +15,7 @@ import {
 	type ModelRequestExecutionInit,
 	ModelRequestRuntime,
 } from "@oh-my-pi/pi-ai/model-request-runtime";
+import type { ModelRequestJournalLeaseBinding } from "@oh-my-pi/pi-utils/model-request-journal-authority";
 
 afterEach(() => {
 	vi.useRealTimers();
@@ -270,6 +271,53 @@ describe("lease protocol is enforced by the core, not left to each call site", (
 
 		expect(calls).toEqual(["beginSend", "observeResponse", "settle"]);
 		expect(settled).toEqual([{ type: "response-ended", status: 200 }]);
+	});
+});
+
+describe("managed execution authenticated connection boundary", () => {
+	// Deliberately invalid boundary input: these tests only exercise refusal, never issue authority.
+	const invalidBinding = {} as ModelRequestJournalLeaseBinding;
+
+	test("a binding cannot authorize before an authenticated journal execution connection exists, even ungated", async () => {
+		const runtime = newRuntime();
+		const execution = runtime.createSessionExecution(
+			sessionInit({ root: { kind: "self", modelRequestJournalLeaseBinding: invalidBinding } }),
+		);
+		await expect(runtime.runWith(execution, () => runtime.authorize(INPUT))).rejects.toThrow(
+			/authenticated model request journal execution connection is unavailable/,
+		);
+	});
+
+	test("a caller-resolved init promise cannot make a managed execution or its derivation ready", async () => {
+		const runtime = newRuntime();
+		// A structural caller may still provide extra fields: a legacy ready promise must not be trusted.
+		const selfAssertedInit = {
+			...sessionInit({ root: { kind: "self", modelRequestJournalLeaseBinding: invalidBinding } }),
+			journalConnection: Promise.resolve(),
+		};
+		const execution = runtime.createSessionExecution(selfAssertedInit);
+		const derived = runtime.deriveExecution(execution, { purpose: "advisor" });
+		expect(derived.modelRequestJournalLeaseBinding).toBe(invalidBinding);
+		const sent: string[] = [];
+		for (const candidate of [execution, derived]) {
+			await expect(runtime.runWith(candidate, () => sendThroughFakeTransport(runtime, sent))).rejects.toThrow(
+				/authenticated model request journal execution connection is unavailable/,
+			);
+		}
+		expect(sent).toEqual([]);
+	});
+
+	test("a gate pass cannot stand in for the missing authenticated execution connection", async () => {
+		const runtime = newRuntime();
+		const { gate, attempts } = recordingGate(PASS);
+		runtime.registerGate("owner", gate, undefined);
+		const execution = runtime.createSessionExecution(
+			sessionInit({ root: { kind: "self", modelRequestJournalLeaseBinding: invalidBinding } }),
+		);
+		await expect(runtime.runWith(execution, () => runtime.authorize(INPUT))).rejects.toThrow(
+			/authenticated model request journal execution connection is unavailable/,
+		);
+		expect(attempts).toEqual([]);
 	});
 });
 

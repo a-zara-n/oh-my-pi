@@ -4314,6 +4314,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 					authStorage,
 					modelRegistry,
 					modelRequestRoot: options.modelRequestRoot,
+					modelRequestJournalLeaseBinding: options.modelRequestRoot?.modelRequestJournalLeaseBinding,
 					getApiKey: options.getApiKey,
 					credentialSourceSessionId: options.credentialSourceSessionId,
 					oauthAccountPools: options.oauthAccountPools,

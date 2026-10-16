@@ -5,6 +5,7 @@
 ### Added
 
 - Added a generic `ModelRequestGate` API (`registerModelRequestGate`, `getModelRequestGateInfo`, `ModelRequestDeniedError`) that lets one registered owner decide whether an outbound model request may be sent, with a core-owned execution context that identifies the requesting session, root and purpose; behavior is unchanged when no gate is registered.
+- Work in progress: execution contexts retain the exact opaque journal authority binding across derivation. Managed authorization remains closed until the manager's actual registry/header/owner receipt can be authenticated against the exact execution; caller-supplied promises cannot assert readiness. This does not complete managed sending. Ordinary sinkless contexts are unchanged.
 
 - With a gate registered, every wire attempt of a fetch-based model request (a provider's own retry, a credential rotation, a thinking-loop re-sample, a oneshot retry, a judge attempt) is authorized separately before any I/O, is told to start sending immediately before the first byte, sees the response pass through unaltered, and is settled exactly once; the gate is shown a credential-free view of the request and each attempt names the kind of re-attempt it is.
 - A transport the core cannot account for (a WebSocket, an SDK's own client, an extension-registered provider) is asked once with no readable request, and is sent only if the gate passes it.

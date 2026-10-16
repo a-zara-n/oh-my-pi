@@ -13,6 +13,29 @@ Package-specific references:
 - [MCP server/tool authoring](../../docs/mcp-server-tool-authoring.md)
 - [DEVELOPMENT](./DEVELOPMENT.md)
 
+## Internal managed journal handoff
+
+`createAgentSession` accepts the optional internal `modelRequestJournalLeaseBinding` only as an
+opaque handle from `@oh-my-pi/pi-utils/model-request-journal-authority`. A raw OS lease, copied
+object, session ID, manager, or alternate runtime instance is not authority. The SDK carries the
+same object through root assignment, child sessions, and revival; it does not serialize the handle.
+Conflicting explicit and inherited bindings are rejected.
+
+Before publishing a managed execution, the SDK awaits
+`bindModelRequestJournalComposition(manager, { execution, rootManager, leases, acceptJournal })`.
+The root manager is the actual matching live manager, not one reopened from a caller-provided
+path. The manager owns the fixed authority verification and must obtain the real registry receipt,
+source header acknowledgement, and owner before returning success. Receiving a sink callback
+alone does not release the SDK's private sink-slot barrier.
+
+**Work in progress:** the actual registry receipt producer and an authenticated bridge from that
+receipt to the exact ai runtime execution are not yet available. The context's private promise
+only transports the sink; it is never trusted as runtime readiness. Managed runtime authorization
+therefore remains closed, even if a caller supplies a resolved promise or a gate would pass.
+This is an unresolved design/integration boundary, not a completed managed sending path.
+
+Normal SDK use without a binding, including sinkless custom providers, is unchanged.
+
 ## Memory backends
 
 The agent supports three mutually-exclusive memory backends, selected via the `memory.backend` setting (Settings → Memory tab, or `~/.omp/config.yml`):

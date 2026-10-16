@@ -23,6 +23,32 @@ Shared utilities for [omp](https://github.com/can1357/oh-my-pi) packages. Zero c
 
 Import from the root barrel or per-module subpaths (`@oh-my-pi/pi-utils/<module>`).
 
+### Model-request journal authority
+
+Import `model-request-journal-leases` and `model-request-journal-authority` through their canonical
+`@oh-my-pi/pi-utils/<module>` subpaths. Do not bundle a second copy: verified handles are tied to
+the authority module's runtime identity and private object registry.
+
+Raw leases use the OS account home (`os.userInfo()`, not `HOME`) under
+`Library/Application Support/omp-security-audit/budget-authority/<storeId>`.
+They acquire fixed, never-unlinked control, maintenance, writer-owner and registry accounting
+flock files in that order. Acquisition is nonblocking and macOS-only. Dedicated directories
+must be owner-only `0700`; files must be owner-only `0600`, without symlinks. The low-level fd
+lease helper never removes files; existing area consumers retain their own unlink-before-release
+cleanup behavior. Raw scopes do not constitute verified journal authority.
+
+Credential retain/retire/inspect operations centralize secret matching, not role issuance.
+Inspection accepts an ordinary authentication snapshot and never creates a binding. Retirement
+zeros both retained token buffers and leaves `(writerId, tokenHash)` alias tombstones for the
+module lifetime. There is no secret getter, public verified setter, issuer, or reset.
+
+**Implementation boundary:** verified issuance is currently stopped because Bun's public SQLite
+API does not expose the actual connection's file descriptor for the required `fstat` identity
+check. A separately opened descriptor or `SQLITE_FCNTL_HAS_MOVED` is not accepted as equivalent.
+The fixed self-opened read-only codec and negative checks are present, but this is not a completed
+managed-binding implementation and does not enable managed sending. No native ABI offsets or
+fallback identity proofs are used.
+
 ## Install
 
 ```sh

@@ -5,6 +5,7 @@
 ### Added
 
 - Added the core execution context for model requests: sessions, agent runs, extension handlers/tools/commands, child sessions, advisors and background jobs now carry a session, root and purpose, and child sessions receive their spawner's root explicitly (`modelRequestRoot`).
+- Work in progress: added the internal `modelRequestJournalLeaseBinding` SDK handoff and private sink-slot transport. Child creation and live/persisted revival retain the same opaque object; SDK composition rejects a foreign runtime, conflicting root binding, or unavailable exact root manager before publishing the execution. Callback delivery or a caller-resolved promise is not runtime readiness. Managed sending remains closed pending the real registry receipt producer and authenticated receipt-to-execution connection design.
 - Session-less CLI commands are marked as such at process entry so their model requests are classified as standalone.
 
 - Retries, credential rotations, model fallbacks, judge candidates, turn recovery, cache-warm replays and compaction walks now tell a registered model request gate which kind of re-attempt each wire attempt is.

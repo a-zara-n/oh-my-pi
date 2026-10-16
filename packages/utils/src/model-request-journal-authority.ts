@@ -1,0 +1,285 @@
+import { Database } from "bun:sqlite";
+import { createHash, timingSafeEqual } from "node:crypto";
+import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync } from "node:fs";
+import { isAbsolute } from "node:path";
+import { withRawModelRequestJournalLeases, type RawModelRequestJournalLeaseScope } from "./model-request-journal-leases";
+
+export type ModelRequestWriterRole = "model-agent" | "harness-core" | "harness-runner" | "operator-command" | "cli-tool";
+export interface ModelRequestWriterCredential {
+	readonly writerId: string;
+	readonly token: Uint8Array;
+	readonly role: ModelRequestWriterRole;
+	readonly capabilities: readonly string[];
+	readonly identity?: Readonly<{sessionId: string; id: string; kind: "main" | "sub"; depth: number; parentId?: string}>;
+	readonly parentWriterId?: string;
+}
+export interface ModelRequestWriterAuthenticationRow {
+	readonly id: string;
+	readonly role: string;
+	readonly capabilitiesJson: string;
+	readonly tokenHash: string;
+	readonly sessionId: string | null;
+	readonly agentId: string | null;
+	readonly kind: string | null;
+	readonly depth: number | null;
+	readonly parentWriterId: string | null;
+}
+export interface ModelRequestWriterAuthenticationSnapshot {
+	readonly writer: ModelRequestWriterAuthenticationRow | undefined;
+	readonly inactive: boolean;
+}
+export type ModelRequestWriterAuthenticationVerdict = Readonly<{ok: true; row: ModelRequestWriterAuthenticationRow; active: boolean}> | Readonly<{ok: false; reason: "unrecognized" | "retired" | "mismatch"}>;
+export interface ModelRequestJournalAuthorityResources {
+	readonly storeId: string;
+	readonly databasePath: string;
+}
+const runtimeBrand: unique symbol = Symbol("model-request-journal-authority-runtime");
+export const modelRequestJournalAuthorityRuntimeIdentity = Object.freeze({ [runtimeBrand]: true });
+declare const bindingBrand: unique symbol;
+export interface ModelRequestJournalLeaseBinding {
+	readonly [bindingBrand]: true;
+	readonly runtimeIdentity: typeof modelRequestJournalAuthorityRuntimeIdentity;
+	readonly rootSessionId: string;
+}
+export interface ModelRequestJournalRootLeaseScope {
+	readonly binding: ModelRequestJournalLeaseBinding;
+	readonly runtimeIdentity: typeof modelRequestJournalAuthorityRuntimeIdentity;
+	readonly registryId: string;
+	readonly rootSessionId: string;
+	readonly storeId: string;
+	readonly authorityEpoch: number;
+	readonly physicalBindingId: string;
+	assertActive(): void;
+}
+const BOOTSTRAP_ROLES: readonly ModelRequestWriterRole[] = Object.freeze(["operator-command"]);
+const RESUME_ROLES: readonly ModelRequestWriterRole[] = Object.freeze(["operator-command", "harness-core"]);
+/** Descriptive values only. The verifier uses the private fixed role definitions. */
+export const modelRequestJournalBindingRoles = Object.freeze({ "bootstrap-new": Object.freeze([...BOOTSTRAP_ROLES]), resume: Object.freeze([...RESUME_ROLES]) });
+interface StoredCredential {
+	readonly credential: ModelRequestWriterCredential;
+	readonly originalToken: Uint8Array;
+	readonly tokenHash: string;
+	readonly generation: object;
+}
+const credentials = new WeakMap<object, StoredCredential>();
+const retired = new WeakSet<object>();
+// Kept for this module execution's entire lifetime: retirement must never permit alias resurrection.
+const credentialOwners = new Map<string, object>();
+const ROLES: Readonly<Record<string, true>> = Object.freeze({"model-agent": true, "harness-core": true, "harness-runner": true, "operator-command": true, "cli-tool": true});
+function closed(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
+	return value !== null && typeof value === "object" && !Array.isArray(value) && Reflect.ownKeys(value).every(key => typeof key === "string" && keys.includes(key));
+}
+function text(value: unknown): value is string { return typeof value === "string" && value.length > 0 && value.length <= 1024; }
+function integer(value: unknown): value is number { return typeof value === "number" && Number.isSafeInteger(value) && value >= 0; }
+function validRole(value: unknown): value is ModelRequestWriterRole { return typeof value === "string" && Object.hasOwn(ROLES, value); }
+function credentialValid(value: unknown): value is ModelRequestWriterCredential {
+	if (!closed(value, ["writerId", "token", "role", "capabilities", "identity", "parentWriterId"]) || !text(value.writerId) || !(value.token instanceof Uint8Array) || value.token.length !== 32 || !validRole(value.role) || !Array.isArray(value.capabilities) || value.capabilities.some(item => item !== "review") || value.capabilities.length > 1 || value.parentWriterId !== undefined && !text(value.parentWriterId)) return false;
+	const identity = value.identity;
+	return identity === undefined || closed(identity, ["sessionId", "id", "kind", "depth", "parentId"]) && text(identity.sessionId) && text(identity.id) && (identity.kind === "main" || identity.kind === "sub") && integer(identity.depth) && (identity.parentId === undefined || text(identity.parentId));
+}
+/** Raw secret retention is not authority: only a later self-opened database match can issue a binding. */
+export function retainModelRequestWriterCredential(handle: object, credential: ModelRequestWriterCredential): void {
+	if (handle === null || typeof handle !== "object" || retired.has(handle) || credentials.has(handle) || !credentialValid(credential)) throw new Error("Writer credential rejected");
+	const tokenHash = createHash("sha256").update(credential.token).digest("hex");
+	const key = `${credential.writerId}:${tokenHash}`;
+	if (credentialOwners.has(key)) throw new Error("Writer credential alias rejected");
+	const copy: ModelRequestWriterCredential = Object.freeze({
+		writerId: credential.writerId, role: credential.role, token: Uint8Array.from(credential.token),
+		capabilities: Object.freeze([...credential.capabilities]),
+		...(credential.identity === undefined ? {} : {identity: Object.freeze({...credential.identity})}),
+		...(credential.parentWriterId === undefined ? {} : {parentWriterId: credential.parentWriterId}),
+	});
+	credentials.set(handle, { credential: copy, originalToken: credential.token, tokenHash, generation: Object.freeze({}) });
+	credentialOwners.set(key, handle);
+}
+export function retireModelRequestWriterCredential(handle: object): void {
+	retired.add(handle);
+	const stored = credentials.get(handle);
+	credentials.delete(handle);
+	if (stored === undefined) return;
+	try { stored.credential.token.fill(0); } finally { stored.originalToken.fill(0); }
+}
+/** Ordinary authentication result. Caller-provided snapshots never affect verified state. */
+export function inspectModelRequestWriterCredential(handle: object, snapshot: ModelRequestWriterAuthenticationSnapshot): ModelRequestWriterAuthenticationVerdict {
+	if (retired.has(handle)) return Object.freeze({ok: false, reason: "retired"});
+	const stored = credentials.get(handle);
+	if (stored === undefined) return Object.freeze({ok: false, reason: "unrecognized"});
+	if (!closed(snapshot, ["writer", "inactive"]) || typeof snapshot.inactive !== "boolean") return Object.freeze({ok: false, reason: "mismatch"});
+	const row = snapshot.writer;
+	const credential = stored.credential;
+	const identity = credential.identity;
+	if (!closed(row, ["id", "role", "capabilitiesJson", "tokenHash", "sessionId", "agentId", "kind", "depth", "parentWriterId"]) || row.id !== credential.writerId || row.role !== credential.role || row.capabilitiesJson !== JSON.stringify(credential.capabilities) || typeof row.tokenHash !== "string" || !/^[0-9a-f]{64}$/.test(row.tokenHash) || !timingSafeEqual(Buffer.from(row.tokenHash, "hex"), Buffer.from(createHash("sha256").update(credential.token).digest("hex"), "hex")) || row.sessionId !== (identity?.sessionId ?? null) || row.agentId !== (identity?.id ?? null) || row.kind !== (identity?.kind ?? null) || row.depth !== (identity?.depth ?? null) || row.parentWriterId !== (credential.parentWriterId ?? null)) return Object.freeze({ok: false, reason: "mismatch"});
+	return Object.freeze({ok: true, row: Object.freeze({...row}), active: !snapshot.inactive});
+}
+interface AuthorityRecord {
+	readonly schemaVersion: 1;
+	readonly storeId: string;
+	readonly authorityEpoch: number;
+	readonly physicalBindingId: string;
+	readonly dbDevice: number;
+	readonly dbInode: number;
+	readonly state: "held" | "active";
+}
+interface BindingState {
+	readonly resources: ModelRequestJournalAuthorityResources;
+	readonly requester: object;
+	readonly mode: "bootstrap-new" | "resume";
+	readonly rootSessionId: string;
+	readonly generation: object;
+	readonly raw: RawModelRequestJournalLeaseScope;
+	readonly record: AuthorityRecord;
+	open: boolean;
+}
+const bindings = new WeakMap<object, BindingState>();
+function recordAt(raw: RawModelRequestJournalLeaseScope): AuthorityRecord {
+	raw.assertHeld();
+	const fd = openSync(raw.recordPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+	try {
+		const stat = fstatSync(fd);
+		const named = lstatSync(raw.recordPath);
+		if (!stat.isFile() || stat.uid !== process.getuid?.() || (stat.mode & 0o7777) !== 0o600 || stat.nlink !== 1 || stat.dev !== named.dev || stat.ino !== named.ino || stat.size > 4096) throw new Error("Journal authority record rejected");
+		const value: unknown = JSON.parse(readFileSync(fd, "utf8"));
+		if (!closed(value, ["schemaVersion", "storeId", "authorityEpoch", "physicalBindingId", "dbDevice", "dbInode", "state"]) || value.schemaVersion !== 1 || value.storeId !== raw.storeId || !integer(value.authorityEpoch) || value.authorityEpoch < 1 || typeof value.physicalBindingId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value.physicalBindingId) || !integer(value.dbDevice) || !integer(value.dbInode) || value.state !== "active" && value.state !== "held") throw new Error("Journal authority record rejected");
+		return Object.freeze({schemaVersion: 1, storeId: value.storeId, authorityEpoch: value.authorityEpoch, physicalBindingId: value.physicalBindingId, dbDevice: value.dbDevice, dbInode: value.dbInode, state: value.state});
+	} finally { closeSync(fd); }
+}
+const CONTROL_COLUMNS = Object.freeze({
+	writer: "seq,id,tx_seq,created_at_ms,role,capabilities_json,agent_kind,omp_agent_id,depth,parent_writer_id,omp_session_id,token_hash,host_pid,component_version_id",
+	writer_event: "seq,id,tx_seq,created_at_ms,writer_id,event,reason",
+	store_config_event: "seq,id,tx_seq,created_at_ms,key,value_json,approval_id,writer_id",
+});
+function objectRow(value: unknown): Record<string, unknown> {
+	if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error("Journal control codec rejected");
+	return value as Record<string, unknown>;
+}
+function authenticationRow(value: unknown): ModelRequestWriterAuthenticationRow {
+	const row = objectRow(value);
+	if (!text(row.id) || !validRole(row.role) || typeof row.capabilities_json !== "string" || typeof row.token_hash !== "string" || !/^[0-9a-f]{64}$/.test(row.token_hash) || row.omp_session_id !== null && !text(row.omp_session_id) || row.omp_agent_id !== null && !text(row.omp_agent_id) || row.agent_kind !== null && row.agent_kind !== "main" && row.agent_kind !== "sub" || row.depth !== null && !integer(row.depth) || row.parent_writer_id !== null && !text(row.parent_writer_id)) throw new Error("Journal writer codec rejected");
+	const capabilities: unknown = JSON.parse(row.capabilities_json);
+	if (!Array.isArray(capabilities) || capabilities.length > 1 || capabilities.some(value => value !== "review") || JSON.stringify(capabilities) !== row.capabilities_json) throw new Error("Journal writer codec rejected");
+	return Object.freeze({id: row.id, role: row.role, capabilitiesJson: row.capabilities_json, tokenHash: row.token_hash, sessionId: row.omp_session_id, agentId: row.omp_agent_id, kind: row.agent_kind, depth: row.depth, parentWriterId: row.parent_writer_id});
+}
+function controlSnapshot(db: Database, storeId: string, requesterId: string, record: AuthorityRecord): ModelRequestWriterAuthenticationSnapshot {
+	if (objectRow(db.query("PRAGMA application_id").get()).application_id !== 0x4f534155 || objectRow(db.query("PRAGMA user_version").get()).user_version !== 20 || objectRow(db.query("SELECT store_id FROM store_meta WHERE singleton=1").get()).store_id !== storeId) throw new Error("Journal database schema rejected");
+	for (const [table, columns] of Object.entries(CONTROL_COLUMNS)) {
+		// All identifiers here are module-private literals, never caller input.
+		const definitions = db.query(`PRAGMA table_info(${table})`).all().map(objectRow);
+		const actual = definitions.map(value => value.name);
+		for (const [index, definition] of definitions.entries()) {
+			const name = definition.name;
+			if (typeof name !== "string") throw new Error("Journal control schema rejected");
+			const numeric = ["seq", "tx_seq", "created_at_ms", "depth", "host_pid"].includes(name);
+			const nullable = ["seq", "agent_kind", "omp_agent_id", "depth", "parent_writer_id", "omp_session_id", "host_pid", "component_version_id", "reason", "approval_id"].includes(name);
+			if (definition.cid !== index || definition.type !== (numeric ? "INTEGER" : "TEXT") || definition.notnull !== (nullable ? 0 : 1) || definition.pk !== (name === "seq" ? 1 : 0) || definition.dflt_value !== null) throw new Error("Journal control schema rejected");
+		}
+		const info = db.query("SELECT strict FROM pragma_table_list WHERE schema='main' AND name=? AND type='table'").get(table);
+		if (actual.join(",") !== columns || objectRow(info).strict !== 1) throw new Error("Journal control schema rejected");
+	}
+	const writers = new Map<string, {row: ModelRequestWriterAuthenticationRow; txSeq: number}>();
+	let writerSeq = 0;
+	let writerTx = 0;
+	for (const value of db.query("SELECT w.*,t.sealed FROM writer w LEFT JOIN tx_log t ON t.tx_seq=w.tx_seq ORDER BY w.seq").all()) {
+		const raw = objectRow(value);
+		const row = authenticationRow(raw);
+		if (!integer(raw.seq) || raw.seq <= writerSeq || !integer(raw.tx_seq) || raw.tx_seq < writerTx || raw.sealed !== 1 || !integer(raw.created_at_ms) || writers.has(row.id)) throw new Error("Journal writer order rejected");
+		writerSeq = raw.seq;
+		writerTx = raw.tx_seq;
+		writers.set(row.id, {row, txSeq: raw.tx_seq});
+	}
+	const inactive = new Map<string, number>();
+	let lastSeq = 0;
+	let lastTx = 0;
+	for (const value of db.query("SELECT e.*,t.writer_id AS tx_writer_id,t.sealed FROM writer_event e LEFT JOIN tx_log t ON t.tx_seq=e.tx_seq ORDER BY e.seq").all()) {
+		const row = objectRow(value);
+		const writer = typeof row.writer_id === "string" ? writers.get(row.writer_id) : undefined;
+		if (!integer(row.seq) || row.seq <= lastSeq || !integer(row.tx_seq) || row.tx_seq < lastTx || writer === undefined || writer.txSeq >= row.tx_seq || row.event !== "ended" && row.event !== "revoked" || row.sealed !== 1 || !text(row.id) || row.reason !== null && typeof row.reason !== "string") throw new Error("Journal writer event rejected");
+		const actor = typeof row.tx_writer_id === "string" ? writers.get(row.tx_writer_id) : undefined;
+		if (actor === undefined || actor.txSeq > row.tx_seq || inactive.has(actor.row.id) || row.event === "ended" && row.tx_writer_id !== row.writer_id || row.event === "revoked" && actor.row.role !== "operator-command" && actor.row.role !== "harness-core") throw new Error("Journal writer event attribution rejected");
+		if (!inactive.has(writer.row.id)) inactive.set(writer.row.id, row.tx_seq);
+		lastSeq = row.seq;
+		lastTx = row.tx_seq;
+	}
+	let latest: Record<string, unknown> | undefined;
+	lastSeq = 0;
+	lastTx = 0;
+	let lastEpoch = 0;
+	for (const value of db.query("SELECT e.*,t.writer_id AS tx_writer_id,t.op_name,t.sealed FROM store_config_event e LEFT JOIN tx_log t ON t.tx_seq=e.tx_seq WHERE e.key='budget_authority_epoch' ORDER BY e.seq").all()) {
+		const row = objectRow(value);
+		const writer = typeof row.writer_id === "string" ? writers.get(row.writer_id) : undefined;
+		if (!integer(row.seq) || row.seq <= lastSeq || !integer(row.tx_seq) || row.tx_seq < lastTx || writer === undefined || writer.txSeq > row.tx_seq || writer.row.role !== "operator-command" || row.tx_writer_id !== row.writer_id || row.sealed !== 1 || row.op_name !== "bootstrapModelRequestJournalAuthority" || typeof row.value_json !== "string" || row.approval_id !== null || !text(row.id) || !integer(row.created_at_ms)) throw new Error("Journal epoch attribution rejected");
+		const inactiveAt = inactive.get(writer.row.id);
+		if (inactiveAt !== undefined && inactiveAt <= row.tx_seq) throw new Error("Journal epoch writer inactive");
+		const epoch: unknown = JSON.parse(row.value_json);
+		if (!closed(epoch, ["schemaVersion", "authorityEpoch", "physicalBindingId"]) || epoch.schemaVersion !== 1 || !integer(epoch.authorityEpoch) || epoch.authorityEpoch <= lastEpoch || !text(epoch.physicalBindingId)) throw new Error("Journal epoch codec rejected");
+		latest = epoch;
+		lastSeq = row.seq;
+		lastTx = row.tx_seq;
+		lastEpoch = epoch.authorityEpoch;
+	}
+	if (latest === undefined || latest.authorityEpoch !== record.authorityEpoch || latest.physicalBindingId !== record.physicalBindingId) throw new Error("Journal epoch mismatch");
+	return Object.freeze({writer: writers.get(requesterId)?.row, inactive: inactive.has(requesterId)});
+}
+function verify(state: BindingState): AuthorityRecord {
+	if (!state.open || credentials.get(state.requester)?.generation !== state.generation || retired.has(state.requester)) throw new Error("Journal binding ended");
+	state.raw.assertHeld();
+	const record = recordAt(state.raw);
+	if (record.state !== "active" || JSON.stringify(record) !== JSON.stringify(state.record)) throw new Error("Journal authority changed");
+	const fd = openSync(state.resources.databasePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+	let db: Database | undefined;
+	try {
+		const stat = fstatSync(fd);
+		const named = lstatSync(state.resources.databasePath);
+		if (!stat.isFile() || stat.uid !== process.getuid?.() || (stat.mode & 0o7777) !== 0o600 || stat.dev !== named.dev || stat.ino !== named.ino || stat.dev !== record.dbDevice || stat.ino !== record.dbInode) throw new Error("Journal database identity rejected");
+		db = new Database(state.resources.databasePath, {readonly: true, strict: true});
+		db.exec("PRAGMA trusted_schema=OFF; PRAGMA query_only=ON; BEGIN");
+		const credential = credentials.get(state.requester);
+		if (credential === undefined) throw new Error("Journal requester unsupported");
+		const verdict = inspectModelRequestWriterCredential(state.requester, controlSnapshot(db, state.resources.storeId, credential.credential.writerId, record));
+		const allowed = state.mode === "bootstrap-new" ? BOOTSTRAP_ROLES : RESUME_ROLES;
+		if (!verdict.ok || !verdict.active || !validRole(verdict.row.role) || !allowed.includes(verdict.row.role) || verdict.row.sessionId !== null && verdict.row.sessionId !== state.rootSessionId) throw new Error("Journal requester rejected");
+		const moved = new Int32Array(1);
+		if (db.fileControl(20, moved) !== 0 || moved[0] !== 0) throw new Error("Journal database identity unavailable");
+		// Bun exposes an opaque handle index, not the actual SQLite file descriptor.
+		// HAS_MOVED does not establish fstat identity against this nofollow fd under swap-back.
+		// Positive issuance remains unsupported until that required native identity is available.
+		throw new Error("Journal SQLite descriptor identity unsupported");
+	} finally {
+		try { db?.close(); } finally { closeSync(fd); }
+	}
+}
+export async function withVerifiedModelRequestJournalBinding<T>(request: Readonly<{resources: ModelRequestJournalAuthorityResources; requester: object; mode: "bootstrap-new" | "resume"; rootSessionId: string}>, use: (binding: ModelRequestJournalLeaseBinding) => Promise<T>): Promise<T> {
+	if (!closed(request, ["resources", "requester", "mode", "rootSessionId"]) || !closed(request.resources, ["storeId", "databasePath"]) || !text(request.resources.storeId) || !text(request.resources.databasePath) || !isAbsolute(request.resources.databasePath) || request.requester === null || typeof request.requester !== "object" || request.mode !== "bootstrap-new" && request.mode !== "resume" || !text(request.rootSessionId)) throw new Error("Journal binding request rejected");
+	const stored = credentials.get(request.requester);
+	if (stored === undefined || retired.has(request.requester)) throw new Error("Journal requester unsupported");
+	const resources: ModelRequestJournalAuthorityResources = Object.freeze({...request.resources});
+	return withRawModelRequestJournalLeases({storeId: resources.storeId, control: "shared", maintenance: "shared", ownerId: stored.credential.writerId}, async raw => {
+		const state: BindingState = {resources, requester: request.requester, mode: request.mode, rootSessionId: request.rootSessionId, generation: stored.generation, raw, record: recordAt(raw), open: true};
+		try {
+			verify(state);
+			const binding = Object.freeze({runtimeIdentity: modelRequestJournalAuthorityRuntimeIdentity, rootSessionId: request.rootSessionId}) as ModelRequestJournalLeaseBinding;
+			bindings.set(binding, state);
+			const result = await use(binding);
+			verify(state);
+			return result;
+		} finally { state.open = false; }
+	});
+}
+export async function withVerifiedModelRequestJournalLeases<T>(binding: ModelRequestJournalLeaseBinding, registryId: string, use: (scope: ModelRequestJournalRootLeaseScope) => Promise<T>): Promise<T> {
+	const state = bindings.get(binding);
+	if (state === undefined || binding.runtimeIdentity !== modelRequestJournalAuthorityRuntimeIdentity || !text(registryId)) throw new Error("Journal binding unverified");
+	return withRawModelRequestJournalLeases({storeId: state.resources.storeId, control: "shared", maintenance: "shared", ownerId: credentials.get(state.requester)?.credential.writerId, registryId}, async raw => {
+		let open = true;
+		const assertActive = (): void => {
+			if (!open) throw new Error("Journal root scope ended");
+			raw.assertHeld();
+			verify(state);
+		};
+		try {
+			const record = verify(state);
+			const scope: ModelRequestJournalRootLeaseScope = Object.freeze({binding, runtimeIdentity: modelRequestJournalAuthorityRuntimeIdentity, registryId, rootSessionId: state.rootSessionId, storeId: state.resources.storeId, authorityEpoch: record.authorityEpoch, physicalBindingId: record.physicalBindingId, assertActive});
+			const result = await use(scope);
+			assertActive();
+			return result;
+		} catch (error) { state.open = false; throw error; } finally { open = false; }
+	});
+}

@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added fixed macOS model-request journal raw leases and shared credential retain/retire/inspect
+  operations, with alias retirement tombstones and real SQLite/OS rejection regressions.
+  Verified binding issuance remains blocked on a supported actual-SQLite-fd identity API;
+  this does not enable managed sending.
+
 ### Changed
 
 - `fetchWithRetry` and `isRetryableError` no longer retry an error that declares `retryable: false`.

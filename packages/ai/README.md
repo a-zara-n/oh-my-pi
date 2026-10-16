@@ -4,6 +4,17 @@ Unified LLM API with automatic model discovery, provider configuration, token an
 
 **Note**: This library only includes models that support tool calling (function calling), as this is essential for agentic workflows.
 
+### Managed session execution (work in progress)
+
+The internal `model-request-execution` context can carry an opaque journal binding from
+`@oh-my-pi/pi-utils/model-request-journal-authority`. Derived contexts retain that exact object.
+Managed authorization is currently closed: the authenticated connection between the manager's
+actual registry/header/owner receipt and the exact runtime execution is an unresolved design
+boundary. A binding, caller-resolved init promise, or gate pass cannot enable a managed send.
+This is an incomplete integration boundary, not a completed managed-runtime implementation.
+Ordinary contexts without a binding retain their existing sinkless behavior; this mechanism
+does not install journal lifecycle producers.
+
 ## Table of Contents
 
 - [Supported Providers](#supported-providers)
