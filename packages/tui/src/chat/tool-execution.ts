@@ -19,7 +19,6 @@ import {
 	type ToolRenderer,
 	toolRenderers,
 } from "../tools/index";
-import { readSourceFsPath } from "../tools/read";
 import { describeDefaultToolExecution, formatDefaultToolExecution } from "../tools/default-renderer";
 import { INTENT_FIELD, type TspCardStatus, type TspPreview, type TspText, type TspTone } from "@oh-my-pi/pi-wire";
 import { card, col, EMPTY_NODE, node, span, text, withHidden } from "../native/describe";
@@ -421,8 +420,8 @@ export class ToolExecutionComponent extends Container {
 		isError?: boolean;
 		details?: unknown;
 	};
-	// Unmodified filesystem target for read hyperlinks; #result.details stays display-safe.
-	#readLinkPath?: string;
+	// Machine paths remain verbatim; only #result.details is handed to display renderers.
+	#rawDetails: unknown;
 	// Edit preview state
 	#editMode?: EditMode;
 	#editDiffPreview?: PerFileDiffPreview[];
@@ -635,18 +634,9 @@ export class ToolExecutionComponent extends Container {
 		const partialResultPainted = this.#partialResultShapePainted;
 		this.#firstResultViewportRepaintShapePainted = false;
 		this.#partialResultShapePainted = false;
-		const rawDetails = result.details;
-		if (this.#toolName === "read" && isRecord(rawDetails)) {
-			this.#readLinkPath =
-				typeof rawDetails.resolvedPath === "string"
-					? rawDetails.resolvedPath
-					: typeof rawDetails.displayTarget === "string"
-						? rawDetails.displayTarget
-						: readSourceFsPath(rawDetails);
-		}
-		// `details` reaches renderers verbatim (live and on transcript replay) and
-		// carries raw file/command text (grep/read `displayContent`, diffs, paths);
-		// strip control sequences once here so no renderer can emit them.
+		this.#rawDetails = result.details;
+		// Renderers receive sanitized details for display; raw paths are available
+		// separately for links and media through the built-in render context.
 		const details = sanitizeTextDeep(result.details);
 		this.#result = details === result.details ? result : { ...result, details };
 		this.#resultVersion++;
@@ -1267,7 +1257,7 @@ export class ToolExecutionComponent extends Container {
 	#nativeResultImages(body: readonly NativeChild[] | undefined): NativeNode[] {
 		if (!this.#result || !this.#showImages) return [];
 		const shown = shownMedia(body);
-		const mediaPath = readMediaPath(this.#result.details);
+		const mediaPath = readMediaPath(this.#rawDetails);
 		if (mediaPath && shown.paths.has(mediaPath)) return [];
 		const images: NativeNode[] = [];
 		this.#getAllImageBlocks().forEach((image, index) => {
@@ -1574,6 +1564,10 @@ export class ToolExecutionComponent extends Container {
 				this.#contentBox.clear();
 
 				const renderContext = this.#buildRenderContext();
+				const rawPerFileResults =
+					isRecord(this.#rawDetails) && Array.isArray(this.#rawDetails.perFileResults)
+						? this.#rawDetails.perFileResults
+						: undefined;
 				this.#renderState.renderContext = renderContext;
 
 				for (let i = 0; i < perFileResults.length; i++) {
@@ -1585,9 +1579,13 @@ export class ToolExecutionComponent extends Container {
 					}
 					const fileBox = new Box(0, 0);
 					try {
+						const fileOptions = {
+							...this.#renderState,
+							renderContext: { ...renderContext, rawDetails: rawPerFileResults?.[i] },
+						};
 						const resultComponent = renderer.renderResult(
 							{ content: [], details: fileResult, isError: fileResult.isError },
-							this.#renderState,
+							fileOptions,
 							theme,
 						);
 						if (resultComponent) {
@@ -1711,7 +1709,7 @@ export class ToolExecutionComponent extends Container {
 
 		if (this.#result) {
 			const imageBlocks = this.#getAllImageBlocks();
-			const sourcePath = readMediaPath(this.#result.details);
+			const sourcePath = readMediaPath(this.#rawDetails);
 
 			for (let i = 0; i < imageBlocks.length; i++) {
 				const img = imageBlocks[i];
@@ -1818,7 +1816,9 @@ export class ToolExecutionComponent extends Container {
 			return Math.max(1, Math.min(maxSeconds, value));
 		};
 
-		if (this.#toolName === "read" && this.#readLinkPath) context.readLinkPath = this.#readLinkPath;
+		if (this.#renderer && !this.#tool?.renderResult && this.#rawDetails !== undefined) {
+			context.rawDetails = this.#rawDetails;
+		}
 		if (this.#toolName === "bash") {
 			// Bash needs render context even before a result exists. The renderer uses the pending-call args
 			// plus this context to keep the inline command preview visible while tool-call JSON is still streaming.
@@ -1899,7 +1899,7 @@ export class ToolExecutionComponent extends Container {
 					const dims = img.data ? (getImageDimensions(img.data, mimeType) ?? undefined) : undefined;
 					const placeholder = imageFallback(mimeType, dims);
 					return img.data
-						? linkedImageText(placeholder, { data: img.data, mimeType }, readMediaPath(this.#result?.details))
+						? linkedImageText(placeholder, { data: img.data, mimeType }, readMediaPath(this.#rawDetails))
 						: placeholder;
 				})
 				.join("\n");

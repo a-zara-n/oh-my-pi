@@ -17,7 +17,7 @@ import type {
 	ToolRenderer,
 } from "./renderer";
 import { ansi, compact, md } from "../native/describe";
-import { base64ImageNode, nativeMediaNode } from "../native/blobs";
+import { base64ImageNode, nativeMediaNode, readMediaPath } from "../native/blobs";
 import type { NativeChild, NativeNode } from "../native/node";
 import { fileHref, footnoteText, inlineErrorView, resultText } from "./native-view";
 import { numberedCode } from "./grouped-file-output";
@@ -310,6 +310,13 @@ export function readSourceFsPath(details: unknown): string | undefined {
 	return source.type === "path" && typeof source.value === "string" ? source.value : undefined;
 }
 
+function readLinkTarget(details: unknown): string | undefined {
+	if (!isRecord(details)) return undefined;
+	if (typeof details.resolvedPath === "string") return details.resolvedPath;
+	if (typeof details.displayTarget === "string") return details.displayTarget;
+	return readSourceFsPath(details);
+}
+
 function formatReadPathLink(
 	rawPath: string,
 	options: {
@@ -495,8 +502,7 @@ export const readToolRenderer = {
 		uiTheme: Theme,
 		args?: ReadRenderArgs,
 	): Component {
-		const readLinkPath = options.renderContext?.readLinkPath;
-		const linkPath = typeof readLinkPath === "string" ? readLinkPath : undefined;
+		const linkPath = readLinkTarget(options.renderContext?.rawDetails);
 		const urlDetails = result.details as ReadUrlToolDetails | undefined;
 		const baseRawPathForKind =
 			typeof args?.file_path === "string" ? args.file_path : typeof args?.path === "string" ? args.path : "";
@@ -691,8 +697,7 @@ export const readToolRenderer = {
 		options: RenderResultContextOptions,
 		args?: ReadRenderArgs,
 	): NativeToolView {
-		const readLinkPath = options.renderContext?.readLinkPath;
-		const linkPath = typeof readLinkPath === "string" ? readLinkPath : undefined;
+		const linkPath = readLinkTarget(options.renderContext?.rawDetails);
 		const details = result.details;
 		const rawPath = readRawPath(args);
 		const routed = readUrlCard(rawPath, details);
@@ -727,7 +732,8 @@ export const readToolRenderer = {
 
 		const contentText = details?.displayContent?.text ?? stripOutputNotice(resultText(result), details?.meta);
 		// A file Tern's media viewer shows (image, model, PDF, video, audio): the host loads it by path.
-		const media = options.media && details?.mediaPath ? nativeMediaNode(details.mediaPath, "media") : undefined;
+		const mediaPath = readMediaPath(options.renderContext?.rawDetails) ?? details?.mediaPath;
+		const media = options.media && mediaPath ? nativeMediaNode(mediaPath, "media") : undefined;
 		const imageBlock = result.content?.find(isImageBlock);
 		if (imageBlock) {
 			const detailText = contentText.trim();

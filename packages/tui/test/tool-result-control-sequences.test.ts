@@ -135,24 +135,57 @@ describe("tool result details with raw control sequences", () => {
 			);
 			component.updateResult({
 				content: [{ type: "text", text: "needle" }],
-				details: { resolvedPath: filename, displayContent: { text: LINE, startLine: 1 } },
+				details: { resolvedPath: filename, mediaPath: filename, displayContent: { text: LINE, startLine: 1 } },
 			});
 			const view = component.describe({
 				cols: 120,
 				reduceMotion: false,
 				dark: true,
-				supports: kind => kind === "tool",
+				supports: kind => kind === "tool" || kind === "media",
 				feature: () => true,
 			});
 			if (view.k !== "tool") throw new Error("Expected read tool node");
 			expect(view.p?.href).toBe(pathToFileURL(filename).href);
 			expect(view.p?.target).not.toContain("\x1b");
+			const media = (view.c ?? []).find(child => "k" in child && child.k === "media");
+			expect(media?.p?.path).toBe(filename);
 			const rendered = component.render(120).join("\n");
 			expect(rendered).toContain(pathToFileURL(filename).href);
 			expect(rendered).not.toContain(FILE_ESCAPES);
 		} finally {
 			await fs.rm(dir, { recursive: true, force: true });
 		}
+	});
+
+	it("write cards link to the original control-byte filename without displaying its controls", () => {
+		applyHyperlinkSetting("always");
+		const filename = `/tmp/fixture\x1b[?1049h.txt`;
+		const href = pathToFileURL(filename).href;
+		const component = new ToolExecutionComponent(
+			"write",
+			{ file_path: filename, content: "needle" },
+			{ useBuiltInRenderer: true },
+			undefined,
+			{ requestRender: vi.fn(), requestComponentRender: vi.fn(), resetDisplay: vi.fn() },
+			"/tmp",
+		);
+		component.updateResult({
+			content: [{ type: "text", text: "Wrote file" }],
+			details: { resolvedPath: filename },
+		});
+		const view = component.describe({
+			cols: 120,
+			reduceMotion: false,
+			dark: true,
+			supports: kind => kind === "tool",
+			feature: () => true,
+		});
+		if (view.k !== "tool") throw new Error("Expected write tool node");
+		expect(view.p?.href).toBe(href);
+		expect(view.p?.target).not.toContain("\x1b");
+		const rendered = component.render(120).join("\n");
+		expect(rendered).toContain(href);
+		expect(privateModeSequences(rendered)).toEqual([]);
 	});
 
 	it("keeps each grouped read target link on its original control-byte filename", () => {

@@ -27,7 +27,13 @@ import {
 import type { Theme, ThemeColor } from "../theme/theme";
 import type { Component } from "../tui";
 import type { OutputMeta } from "./output-meta";
-import type { NativeToolHead, NativeToolView, RenderResultOptions, ToolRenderer } from "./renderer";
+import type {
+	NativeToolHead,
+	NativeToolView,
+	RenderResultContextOptions,
+	RenderResultOptions,
+	ToolRenderer,
+} from "./renderer";
 import type { TspTone } from "@oh-my-pi/pi-wire";
 import { code, col, compact, keyed, node, span, text } from "../native/describe";
 import type { NativeChild, NativeNode } from "../native/node";
@@ -129,13 +135,32 @@ function gauge(p: number, theme: Theme): string {
 	});
 }
 
-function renderHit(hit: FindHit, rangeLimit: number, cwd: string | undefined, theme: Theme): string[] {
+/** Raw metadata is used only for file link targets, never for displayed text. */
+function findLinkTargets(details: FindToolDetails, rawDetails: unknown) {
+	const raw = rawDetails !== null && typeof rawDetails === "object" ? rawDetails : undefined;
+	const cwd = raw && "cwd" in raw && typeof raw.cwd === "string" ? raw.cwd : details.cwd;
+	const rawHits: unknown[] = raw && "hits" in raw && Array.isArray(raw.hits) ? raw.hits : [];
+	return {
+		cwd,
+		rel(hit: FindHit, index: number): string {
+			const candidate = rawHits[index];
+			return candidate !== null &&
+				typeof candidate === "object" &&
+				"rel" in candidate &&
+				typeof candidate.rel === "string"
+				? candidate.rel
+				: hit.rel;
+		},
+	};
+}
+
+function renderHit(hit: FindHit, rangeLimit: number, cwd: string | undefined, rawRel: string, theme: Theme): string[] {
 	// `scheme://` hits (e.g. virtual docs) are not files under `cwd`: link the
 	// URL itself instead of joining it onto a filesystem base.
 	const isUrlHit = splitUrlScheme(hit.rel) !== undefined;
 	const link = (text: string, line?: number): string => {
 		if (isUrlHit) return uriHyperlink(line === undefined ? hit.rel : `${hit.rel}:${line}`, text);
-		const absPath = cwd === undefined ? undefined : path.join(cwd, hit.rel);
+		const absPath = cwd === undefined ? undefined : path.join(cwd, rawRel);
 		return absPath === undefined ? text : fileHyperlink(absPath, text, { line });
 	};
 	const coverage = hit.truncated ? `${hit.linesSeen} lines judged, partial` : `${hit.linesSeen} lines judged`;
@@ -161,7 +186,7 @@ function scoreTone(p: number): TspTone {
  * One hit (§7.3 find): a 22px row of the score bar, the path and `12 lines
  * judged`, then its strongest ranges as numbered `code` (no path header).
  */
-function describeHit(hit: FindHit, rangeLimit: number, cwd: string | undefined): NativeNode {
+function describeHit(hit: FindHit, rangeLimit: number, cwd: string | undefined, rawRel: string): NativeNode {
 	const ranges = [...hit.ranges].sort((a, b) => b.p - a.p || a.start - b.start).slice(0, rangeLimit);
 	const tone = scoreTone(hit.contentScore);
 	const score = hit.contentScore.toFixed(2);
@@ -175,7 +200,7 @@ function describeHit(hit: FindHit, rangeLimit: number, cwd: string | undefined):
 				"muted",
 			),
 		],
-		href: isUrlHit || cwd === undefined ? undefined : fileHref(path.join(cwd, hit.rel)),
+		href: isUrlHit || cwd === undefined ? undefined : fileHref(path.join(cwd, rawRel)),
 		key: "hit",
 	});
 	const lang = getLanguageFromPath(hit.rel);
@@ -222,7 +247,7 @@ export const findToolRenderer = {
 
 	renderResult(
 		result: { content: Array<{ type: string; text?: string }>; details?: FindToolDetails; isError?: boolean },
-		options: RenderResultOptions,
+		options: RenderResultContextOptions,
 		uiTheme: Theme,
 		args?: FindRenderArgs,
 	): Component {
@@ -250,6 +275,7 @@ export const findToolRenderer = {
 		}
 
 		const { hits, stats, threshold } = details;
+		const linkTargets = findLinkTargets(details, options.renderContext?.rawDetails);
 		const description = quoteQuery(details.query);
 		const scope = details.scopePath === undefined ? [] : [`in ${details.scopePath}`];
 		const meta = [
@@ -296,8 +322,14 @@ export const findToolRenderer = {
 						maxCollapsed: COLLAPSED_HITS,
 						maxCollapsedLines: PREVIEW_LIMITS.EXPANDED_LINES,
 						itemType: "hit",
-						renderItem: hit =>
-							renderHit(hit, expanded ? RANGES_EXPANDED : RANGES_COLLAPSED, details.cwd, uiTheme),
+						renderItem: (hit, context) =>
+							renderHit(
+								hit,
+								expanded ? RANGES_EXPANDED : RANGES_COLLAPSED,
+								linkTargets.cwd,
+								linkTargets.rel(hit, context.index),
+								uiTheme,
+							),
 					},
 					uiTheme,
 				);
@@ -329,7 +361,7 @@ export const findToolRenderer = {
 	 */
 	describeResult(
 		result: { content: Array<{ type: string; text?: string }>; details?: FindToolDetails; isError?: boolean },
-		options: RenderResultOptions,
+		options: RenderResultContextOptions,
 		args?: FindRenderArgs,
 	): NativeToolView {
 		const details = result.details;
@@ -343,6 +375,7 @@ export const findToolRenderer = {
 			};
 		}
 		const { hits, stats, threshold } = details;
+		const linkTargets = findLinkTargets(details, options.renderContext?.rawDetails);
 		const scope = details.scopePath === undefined ? undefined : `in ${details.scopePath}`;
 		const failed = stats.errors > 0 ? [span(`${stats.errors} failed`, "warning")] : undefined;
 		const accounting = [
@@ -382,7 +415,7 @@ export const findToolRenderer = {
 			),
 			inline: true,
 			body: compact<NativeChild>([
-				...shown.map(hit => describeHit(hit, rangeLimit, details.cwd)),
+				...shown.map((hit, index) => describeHit(hit, rangeLimit, linkTargets.cwd, linkTargets.rel(hit, index))),
 				...failures,
 				foot,
 			]),
