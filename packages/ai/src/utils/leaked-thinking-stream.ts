@@ -50,7 +50,7 @@ import {
 	type StreamingPartialJsonCarrier,
 } from "@oh-my-pi/pi-utils/model-data";
 import { AssistantMessageEventStream } from "./event-stream";
-import { beginManagedOuterWorkFromCurrent } from "../model-request-journal-outer-work";
+import { beginManagedOuterWorkFromCurrent } from "../model-request/journal-outer-work";
 
 type StreamingToolCall = ToolCall & StreamingPartialJsonCarrier;
 

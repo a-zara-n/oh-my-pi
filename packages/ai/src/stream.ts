@@ -82,7 +82,7 @@ import {
 import { isModelRequestLocalStream } from "./model-request-execution";
 import { getModelRequestRuntime } from "./model-request-runtime";
 import { authorizeUninstrumentedAttempt } from "./utils/model-request-fetch";
-import { awaitManagedOuterWork, beginManagedOuterWorkFromCurrent } from "./model-request-journal-outer-work";
+import { awaitManagedOuterWork, beginManagedOuterWorkFromCurrent } from "./model-request/journal-outer-work";
 import { withTransportFetch } from "./utils/transport-fetch";
 
 function isGoogleVertexAuthenticatedModel(model: Model<Api>): boolean {
@@ -1555,18 +1555,19 @@ function streamSimpleRequest<TApi extends Api>(
 					runAttempt(lastKey, credentialId, oauthIdentity),
 				);
 				if (failure === undefined) return;
+				let retryFailure: AuthRetryFailure = failure;
 				while (true) {
 					// Caller aborted between attempts: don't mint a fresh token or fire
 					// another doomed request — emit the captured failure instead.
 					if (signal?.aborted) break;
 					let nextCredentialId: number | undefined;
 					let nextOAuthIdentity: OAuthRequestIdentity | undefined;
-					const nextKey = await awaitManagedOuterWork(
+					const nextKey: string | undefined = await awaitManagedOuterWork(
 						resolverWork,
 						resolveNextAuthRetryKey(
 							retryState,
 							apiKeyResolver,
-							failure.error,
+							retryFailure.error,
 							signal,
 							resolved => {
 								nextCredentialId = typeof resolved === "string" ? undefined : resolved?.credentialId;
@@ -1576,14 +1577,14 @@ function streamSimpleRequest<TApi extends Api>(
 					);
 					if (nextKey === undefined) break;
 					markNextModelRequestAttempt("auth-rotation");
-					const next = await awaitManagedOuterWork(
+					const next: AuthRetryFailure | undefined = await awaitManagedOuterWork(
 						resolverWork,
 						runAttempt(nextKey, nextCredentialId, nextOAuthIdentity),
 					);
-					if (!next) return;
-					failure = next;
+					if (next === undefined) return;
+					retryFailure = next;
 				}
-				emitFailure(failure);
+				emitFailure(retryFailure);
 			} finally {
 				await resolverWork.end();
 			}

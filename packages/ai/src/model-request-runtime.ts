@@ -42,7 +42,7 @@ import { buildModelRequestCoverage } from "./model-request-coverage";
 import {
 	beginManagedExecutionOuterWork,
 	type ManagedOuterWorkScope,
-} from "./model-request-journal-outer-work";
+} from "./model-request/journal-outer-work";
 
 export type { ModelRequestExecution } from "@oh-my-pi/pi-utils/model-request-journal-composition";
 
@@ -521,6 +521,7 @@ export class ModelRequestRuntime {
 			}
 			return { attemptId, lease: new GuardedLease(decision.lease, gateWork) };
 		} catch (error) {
+			gateWork.abortTransfer();
 			gateWork.noteFailure(error);
 			await gateWork.end();
 			throw error;
@@ -589,8 +590,10 @@ export class ModelRequestRuntime {
 					const late = parseDecision(value);
 					if (late?.type === "allow") {
 						const release = this.#releaseUnused(late.lease, attempt.signal?.aborted === true);
-						if (gateWork?.active) gateWork.track(release);
-						else void release.catch(() => {});
+						if (gateWork?.active) {
+							void release.catch(error => gateWork.noteFailure(error));
+							gateWork.track(release);
+						} else void release.catch(() => {});
 					}
 				}
 			},

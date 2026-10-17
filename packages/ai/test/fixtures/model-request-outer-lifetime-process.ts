@@ -8,6 +8,7 @@
  */
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import * as fs from "node:fs";
+import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { ModelRequestOutcome } from "@oh-my-pi/pi-utils/model-request-data";
@@ -29,9 +30,16 @@ import {
 	type ModelRequestLease,
 } from "../../src/model-request-gate";
 import { getModelRequestRuntime } from "../../src/model-request-runtime";
+import { registerCustomApi } from "../../src/api-registry";
+import { createMockModel, registerMockApi, streamMock } from "../../src/providers/mock";
+import { AssistantMessageEventStream } from "../../src/utils/event-stream";
+import { __providerInFlightForTesting, stream, streamSimple } from "../../src/stream";
+import type { Context } from "../../src/types";
 import { gatedSend } from "../../src/utils/model-request-fetch";
 import { modelRequestBuiltinFetch } from "../../src/utils/model-request-builtin-fetch";
+import { transportFetch } from "../../src/utils/transport-fetch";
 import {
+	errorReply,
 	helloContext,
 	loopbackModel,
 	scripted,
@@ -50,7 +58,24 @@ const scenarios = [
 	"dispatch-sync-throw-joins-response",
 	"guarded-settle-reentry",
 	"guarded-transfer-cleanup-on-settle-reject",
+	"gate-decision-unrecognizable",
+	"gate-deny-outer-rejected",
+	"a01-tf-debug-holds-wire",
+	"a02-inflight-heartbeat-flush-pending",
+	"a02-inflight-remove-lease-reject",
+	"a02-inflight-release-joins-raw",
+	"a03-header-resolver-pending",
+	"a03-header-resolver-reject",
+	"a04-auth-retry-recovered-fulfilled",
+	"a04-auth-retry-unrecovered-rejected",
+	"a05-uninstrumented-wrapper-pending",
+	"a06-leaked-thinking-inner-pending",
+	"a06-thinking-loop-inner-pending",
 ] as const;
+
+function streamContext(): Context {
+	return { systemPrompt: [], messages: [{ role: "user", content: "hi", timestamp: 0 }] };
+}
 if (!scenarios.some(value => value === scenario)) throw new Error(`unknown outer lifetime scenario: ${scenario}`);
 
 async function withReady(
@@ -367,6 +392,368 @@ async function runScenario(): Promise<Record<string, unknown>> {
 				]);
 				await close();
 				return { settled };
+			});
+		}
+		case "gate-decision-unrecognizable": {
+			registerModelRequestGate(
+				"outer-lifetime",
+				{ authorize: async () => ({ type: "not-a-decision" }) as ModelRequestDecision },
+				undefined,
+			);
+			const model = loopbackModel("openai-completions", "http://127.0.0.1:9");
+			return withReady(async ({ close }) => {
+				let failure: unknown;
+				try {
+					await runtime.authorize({
+						requestId: randomUUID(),
+						reason: "user",
+						kind: "chat",
+						model,
+						wire: undefined,
+					});
+				} catch (error) {
+					failure = error;
+				}
+				await close();
+				return {
+					message: failure instanceof Error ? failure.message : String(failure),
+				};
+			});
+		}
+		case "gate-deny-outer-rejected": {
+			registerModelRequestGate(
+				"outer-lifetime",
+				{ authorize: async () => ({ type: "deny", code: "budget", message: "over budget" }) },
+				undefined,
+			);
+			const model = loopbackModel("openai-completions", "http://127.0.0.1:9");
+			return withReady(async ({ close }) => {
+				let code = "";
+				try {
+					await runtime.authorize({
+						requestId: randomUUID(),
+						reason: "user",
+						kind: "chat",
+						model,
+						wire: undefined,
+					});
+				} catch (error) {
+					code = error instanceof Error ? error.message : String(error);
+				}
+				let closeError: string | undefined;
+				try {
+					await close();
+				} catch (error) {
+					closeError = error instanceof Error ? error.message : String(error);
+				}
+				return { denied: code.includes("over budget"), closeError };
+			});
+		}
+		case "a01-tf-debug-holds-wire": {
+			Bun.env.PI_REQ_DEBUG = "1";
+			registerModelRequestGate("outer-lifetime", { authorize: () => ({ type: "pass" }) }, undefined);
+			const holdBody = Promise.withResolvers<void>();
+			const loopback = await startLoopbackProvider(scripted(textReplyFor("dbg")));
+			const model = loopbackModel("openai-completions", loopback.origin);
+			const url = `${loopback.origin}/v1/chat/completions`;
+			return withReady(async ({ close }) => {
+				const body = new ReadableStream<Uint8Array>({
+					start(controller) {
+						void holdBody.promise.then(() => {
+							controller.enqueue(new TextEncoder().encode(JSON.stringify(helloContext())));
+							controller.close();
+						});
+					},
+				});
+				const tf = transportFetch(model, modelRequestBuiltinFetch);
+				const inflight = tf(url, {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body,
+				});
+				await Bun.sleep(30);
+				const wireBefore = loopback.requests.length;
+				const closeRace = await Promise.race([
+					close().then(() => "closed" as const),
+					new Promise<"pending">(resolve => setTimeout(() => resolve("pending"), 100)),
+				]);
+				holdBody.resolve();
+				await inflight;
+				await close();
+				loopback.stop();
+				delete Bun.env.PI_REQ_DEBUG;
+				return { wireBefore, closeRace };
+			});
+		}
+		case "a02-inflight-heartbeat-flush-pending": {
+			registerMockApi();
+			const root = await fsp.mkdtemp(path.join(os.tmpdir(), "omp-ol-inflight-"));
+			__providerInFlightForTesting.setRoot(root);
+			__providerInFlightForTesting.setHeartbeatTimings({ heartbeatMs: 5, heartbeatFlushTimeoutMs: 25 });
+			const resumeHeartbeat = Promise.withResolvers<void>();
+			__providerInFlightForTesting.setHeartbeatWriter(async write => {
+				await resumeHeartbeat.promise;
+				await write();
+			});
+			const started = Promise.withResolvers<void>();
+			const finish = Promise.withResolvers<void>();
+			const mock = createMockModel({
+				provider: "tests",
+				handler: async () => {
+					started.resolve();
+					await finish.promise;
+					return { content: ["ok"] };
+				},
+			});
+			return withReady(async ({ close }) => {
+				const s = streamSimple(mock.model, streamContext(), { maxInFlightRequests: { tests: 1 } });
+				const result = s.result();
+				await started.promise;
+				finish.resolve();
+				const msg = await result;
+				resumeHeartbeat.resolve();
+				await close();
+				await fsp.rm(root, { recursive: true, force: true });
+				__providerInFlightForTesting.setRoot(undefined);
+				__providerInFlightForTesting.setHeartbeatTimings(undefined);
+				__providerInFlightForTesting.setHeartbeatWriter(undefined);
+				return { text: msg.content[0] };
+			});
+		}
+		case "a02-inflight-remove-lease-reject": {
+			registerMockApi();
+			const root = await fsp.mkdtemp(path.join(os.tmpdir(), "omp-ol-inflight-"));
+			__providerInFlightForTesting.setRoot(root);
+			__providerInFlightForTesting.setLeaseRemover(async () => {
+				throw Object.assign(new Error("simulated lease removal failure"), { code: "EBUSY" });
+			});
+			const mock = createMockModel({
+				provider: "tests",
+				handler: async () => ({ content: ["ok"] }),
+			});
+			return withReady(async ({ close }) => {
+				const msg = await streamSimple(mock.model, streamContext(), {
+					maxInFlightRequests: { tests: 1 },
+				}).result();
+				let closeError: string | undefined;
+				try {
+					await close();
+				} catch (error) {
+					closeError = error instanceof Error ? error.message : String(error);
+				}
+				await fsp.rm(root, { recursive: true, force: true });
+				__providerInFlightForTesting.setRoot(undefined);
+				__providerInFlightForTesting.setLeaseRemover(undefined);
+				return { text: msg.content[0], closeError };
+			});
+		}
+		case "a02-inflight-release-joins-raw": {
+			registerMockApi();
+			const root = await fsp.mkdtemp(path.join(os.tmpdir(), "omp-ol-inflight-"));
+			__providerInFlightForTesting.setRoot(root);
+			const firstStarted = Promise.withResolvers<void>();
+			const releaseFirst = Promise.withResolvers<void>();
+			let callIndex = 0;
+			const mock = createMockModel({
+				provider: "tests",
+				handler: async () => {
+					callIndex++;
+					if (callIndex === 1) {
+						firstStarted.resolve();
+						await releaseFirst.promise;
+					}
+					return { content: [`r${callIndex}`] };
+				},
+			});
+			return withReady(async ({ close }) => {
+				const first = streamSimple(mock.model, streamContext(), { maxInFlightRequests: { tests: 1 } });
+				const firstResult = first.result();
+				await firstStarted.promise;
+				const second = streamSimple(mock.model, streamContext(), { maxInFlightRequests: { tests: 1 } });
+				const secondResult = second.result();
+				await Bun.sleep(50);
+				const blocked = await Promise.race([
+					close().then(() => "closed" as const),
+					new Promise<"pending">(resolve => setTimeout(() => resolve("pending"), 80)),
+				]);
+				releaseFirst.resolve();
+				await Promise.all([firstResult, secondResult]);
+				await close();
+				await fsp.rm(root, { recursive: true, force: true });
+				__providerInFlightForTesting.setRoot(undefined);
+				return { blocked, calls: callIndex };
+			});
+		}
+		case "a03-header-resolver-pending": {
+			registerModelRequestGate("outer-lifetime", { authorize: () => ({ type: "pass" }) }, undefined);
+			const hold = Promise.withResolvers<void>();
+			const loopback = await startLoopbackProvider(scripted(textReplyFor("hdr")));
+			const base = loopbackModel("openai-completions", loopback.origin);
+			const model = {
+				...base,
+				resolveHeaders: async () => {
+					await hold.promise;
+					return { "x-ol": "1" };
+				},
+			};
+			return withReady(async ({ close }) => {
+				const outer = stream(model, streamContext(), {
+					fetch: transportFetch(base, modelRequestBuiltinFetch),
+				});
+				const pending = await Promise.race([
+					close().then(() => "closed" as const),
+					new Promise<"pending">(resolve => setTimeout(() => resolve("pending"), 80)),
+				]);
+				hold.resolve();
+				await outer.result();
+				await close();
+				loopback.stop();
+				return { pending };
+			});
+		}
+		case "a03-header-resolver-reject": {
+			registerModelRequestGate("outer-lifetime", { authorize: () => ({ type: "pass" }) }, undefined);
+			const reject = new Error("header resolver failed");
+			const loopback = await startLoopbackProvider(scripted(textReplyFor("hdr")));
+			const base = loopbackModel("openai-completions", loopback.origin);
+			const model = {
+				...base,
+				resolveHeaders: async () => {
+					throw reject;
+				},
+			};
+			return withReady(async ({ close }) => {
+				let failure: unknown;
+				try {
+					await stream(model, streamContext(), {
+						fetch: transportFetch(base, modelRequestBuiltinFetch),
+					}).result();
+				} catch (error) {
+					failure = error;
+				}
+				let closeError: string | undefined;
+				try {
+					await close();
+				} catch (error) {
+					closeError = error instanceof Error ? error.message : String(error);
+				}
+				loopback.stop();
+				return { failure: failure === reject, closeError };
+			});
+		}
+		case "a04-auth-retry-recovered-fulfilled": {
+			registerModelRequestGate("outer-lifetime", { authorize: () => ({ type: "pass" }) }, undefined);
+			const loopback = await startLoopbackProvider((_req, i) =>
+				i === 0 ? errorReply(401, "bad key") : textReplyFor("recovered"),
+			);
+			const model = loopbackModel("openai-completions", loopback.origin);
+			return withReady(async ({ close }) => {
+				const msg = await streamSimple(model, streamContext(), {
+					apiKey: async ({ lastChance }) => (lastChance ? "key-rotate" : "key-first"),
+					fetch: transportFetch(model, modelRequestBuiltinFetch),
+				}).result();
+				await close();
+				loopback.stop();
+				return { stopReason: msg.stopReason, wireAttempts: loopback.requests.length };
+			});
+		}
+		case "a04-auth-retry-unrecovered-rejected": {
+			registerModelRequestGate("outer-lifetime", { authorize: () => ({ type: "pass" }) }, undefined);
+			const loopback = await startLoopbackProvider(scripted(errorReply(401, "bad key")));
+			const model = loopbackModel("openai-completions", loopback.origin);
+			return withReady(async ({ close }) => {
+				let failed = false;
+				try {
+					await streamSimple(model, streamContext(), {
+						apiKey: async ({ lastChance }) => (lastChance ? undefined : "key-first"),
+						fetch: transportFetch(model, modelRequestBuiltinFetch),
+					}).result();
+				} catch {
+					failed = true;
+				}
+				let closeError: string | undefined;
+				try {
+					await close();
+				} catch (error) {
+					closeError = error instanceof Error ? error.message : String(error);
+				}
+				loopback.stop();
+				return { failed, closeError };
+			});
+		}
+		case "a05-uninstrumented-wrapper-pending": {
+			registerModelRequestGate("outer-lifetime", { authorize: () => ({ type: "pass" }) }, undefined);
+			const hold = Promise.withResolvers<void>();
+			const api = `ol-ext-${randomUUID()}`;
+			registerCustomApi(api, (model, context, options) => {
+				const outer = new AssistantMessageEventStream();
+				void (async () => {
+					await hold.promise;
+					const inner = streamMock(model, context, options);
+					for await (const event of inner) {
+						outer.push(event);
+						if (outer.done) return;
+					}
+					if (!outer.done) outer.end(await inner.result());
+				})().catch(error => outer.fail(error));
+				return outer;
+			});
+			const mock = createMockModel({ provider: "ol-ext", handler: async () => ({ content: ["ext"] }) });
+			const model = { ...mock.model, api, provider: "ol-ext" };
+			return withReady(async ({ close }) => {
+				const outer = stream(model, streamContext());
+				const pending = await Promise.race([
+					close().then(() => "closed" as const),
+					new Promise<"pending">(resolve => setTimeout(() => resolve("pending"), 80)),
+				]);
+				hold.resolve();
+				await outer.result();
+				await close();
+				return { pending };
+			});
+		}
+		case "a06-leaked-thinking-inner-pending": {
+			registerMockApi();
+			const hold = Promise.withResolvers<void>();
+			const mock = createMockModel({
+				provider: "openrouter",
+				handler: async () => {
+					await hold.promise;
+					return { content: ["```thinking\nx\n```", "answer"] };
+				},
+			});
+			return withReady(async ({ close }) => {
+				const outer = streamSimple(mock.model, streamContext());
+				const pending = await Promise.race([
+					close().then(() => "closed" as const),
+					new Promise<"pending">(resolve => setTimeout(() => resolve("pending"), 80)),
+				]);
+				hold.resolve();
+				await outer.result();
+				await close();
+				return { pending };
+			});
+		}
+		case "a06-thinking-loop-inner-pending": {
+			registerMockApi();
+			const hold = Promise.withResolvers<void>();
+			const mock = createMockModel({
+				provider: "tests",
+				handler: async () => {
+					await hold.promise;
+					return { content: ["short ok"] };
+				},
+			});
+			return withReady(async ({ close }) => {
+				const outer = streamSimple(mock.model, streamContext());
+				const pending = await Promise.race([
+					close().then(() => "closed" as const),
+					new Promise<"pending">(resolve => setTimeout(() => resolve("pending"), 80)),
+				]);
+				hold.resolve();
+				await outer.result();
+				await close();
+				return { pending };
 			});
 		}
 		case "guarded-transfer-cleanup-on-settle-reject": {
