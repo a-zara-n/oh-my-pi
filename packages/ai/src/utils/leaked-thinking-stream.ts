@@ -78,8 +78,11 @@ function syncToolCall(target: StreamingToolCall, source: StreamingToolCall): voi
 export function wrapLeakedThinkingStream(inner: AssistantMessageEventStream): AssistantMessageEventStream {
 	const out = new AssistantMessageEventStream();
 	void (async () => {
-		const transferWork = openJournalOuterWorkFromCurrent();
+		// The begin belongs to the guarded region: a closing binding's refusal
+		// must fail the stream instead of orphaning it (A-06/X08).
+		let transferWork: JournalOuterWork | undefined;
 		try {
+			transferWork = openJournalOuterWorkFromCurrent();
 			let projector: LeakedThinkingProjector | undefined;
 			for await (const event of inner) {
 				switch (event.type) {

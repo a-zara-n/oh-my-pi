@@ -13,7 +13,6 @@ import {
 	deriveModelRequestExecution,
 	runWithModelRequestExecution,
 } from "@oh-my-pi/pi-ai/model-request-execution";
-import { isModelRequestDenied } from "@oh-my-pi/pi-ai/error";
 import {
 	getModelRequestGateInfo,
 	type ModelRequestDecision,
@@ -170,7 +169,7 @@ async function managedTransportBoundary(mode: "none" | "pass" | "deny"): Promise
 		const executions = [base, deriveModelRequestExecution(base, { purpose: "advisor" })];
 		const custom = { wire: 0 };
 		registerFakeTransport(custom);
-		const denied: boolean[] = [];
+		const refused: boolean[] = [];
 		for (const execution of executions) {
 			const requests: readonly (() => Promise<unknown>)[] = [
 				() => fetch(`${server.url}managed-fetch`),
@@ -187,11 +186,14 @@ async function managedTransportBoundary(mode: "none" | "pass" | "deny"): Promise
 				() => stream(fixtureModel, context, { apiKey: "unused" }).result(),
 			];
 			for (const request of requests) {
+				// The refusal class changed with the composition-owned boundary: a
+				// managed execution without an authenticated composition is refused
+				// before the gate, not converted into a gate denial.
 				try {
-					const result: unknown = await runWithModelRequestExecution(execution, request);
-					denied.push(isModelRequestDenied(result));
-				} catch (error) {
-					denied.push(isModelRequestDenied(error));
+					await runWithModelRequestExecution(execution, request);
+					refused.push(false);
+				} catch {
+					refused.push(true);
 				}
 			}
 		}
@@ -200,7 +202,7 @@ async function managedTransportBoundary(mode: "none" | "pass" | "deny"): Promise
 			managedWire,
 			customStarts: custom.wire,
 			gateCalls,
-			denied,
+			refused,
 			registered: getModelRequestGateInfo().registered,
 		};
 	} finally {

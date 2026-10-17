@@ -93,6 +93,11 @@ export function transportFetch(model: Model<Api>, fetchImpl: FetchImpl | undefin
 				session = isRequestDebugEnabled()
 					? await joinJournalOuterWork(debugWork, createFetchRequestDebugSession(input, sentInit))
 					: undefined;
+			} catch (error) {
+				// Debug preparation is part of this request's outer work: an
+				// unrecovered failure must reach the end outcome, not vanish (A-01).
+				debugWork?.noteFailure(error);
+				throw error;
 			} finally {
 				await debugWork?.end();
 			}

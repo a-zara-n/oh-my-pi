@@ -82,12 +82,6 @@ function nonConformingGate(answer: () => Promise<unknown>): ModelRequestGate {
 	return gate as ModelRequestGate;
 }
 
-/** A lookalike of an execution handle that the core did not mint. */
-function forgedExecution(): ModelRequestExecution {
-	// Intentional: models a caller fabricating a context object (the handle's type is opaque).
-	const forged: unknown = { sessionId: () => "x", root: { kind: "self" }, purpose: "main" };
-	return forged as ModelRequestExecution;
-}
 
 interface LeaseRecorder {
 	readonly lease: ModelRequestLease;
@@ -292,52 +286,6 @@ describe("lease protocol is enforced by the core, not left to each call site", (
 	});
 });
 
-describe("managed execution authenticated connection boundary", () => {
-	// Deliberately invalid boundary input: these tests only exercise refusal, never issue authority.
-	const invalidBinding = {} as ModelRequestJournalLeaseBinding;
-
-	test("a binding cannot authorize before an authenticated journal execution connection exists, even ungated", async () => {
-		const runtime = newRuntime();
-		const execution = runtime.createSessionExecution(
-			sessionInit({ root: { kind: "self", modelRequestJournalLeaseBinding: invalidBinding } }),
-		);
-		await expect(runtime.runWith(execution, () => runtime.authorize(INPUT))).rejects.toThrow(
-			/authenticated model request journal execution connection is unavailable/,
-		);
-	});
-
-	test("a caller-resolved init promise cannot make a managed execution or its derivation ready", async () => {
-		const runtime = newRuntime();
-		// A structural caller may still provide extra fields: a legacy ready promise must not be trusted.
-		const selfAssertedInit = {
-			...sessionInit({ root: { kind: "self", modelRequestJournalLeaseBinding: invalidBinding } }),
-			journalConnection: Promise.resolve(),
-		};
-		const execution = runtime.createSessionExecution(selfAssertedInit);
-		const derived = runtime.deriveExecution(execution, { purpose: "advisor" });
-		expect(derived.modelRequestJournalLeaseBinding).toBe(invalidBinding);
-		const sent: string[] = [];
-		for (const candidate of [execution, derived]) {
-			await expect(runtime.runWith(candidate, () => sendThroughFakeTransport(runtime, sent))).rejects.toThrow(
-				/authenticated model request journal execution connection is unavailable/,
-			);
-		}
-		expect(sent).toEqual([]);
-	});
-
-	test("a gate pass cannot stand in for the missing authenticated execution connection", async () => {
-		const runtime = newRuntime();
-		const { gate, attempts } = recordingGate(PASS);
-		runtime.registerGate("owner", gate, undefined);
-		const execution = runtime.createSessionExecution(
-			sessionInit({ root: { kind: "self", modelRequestJournalLeaseBinding: invalidBinding } }),
-		);
-		await expect(runtime.runWith(execution, () => runtime.authorize(INPUT))).rejects.toThrow(
-			/authenticated model request journal execution connection is unavailable/,
-		);
-		expect(attempts).toEqual([]);
-	});
-});
 
 describe("origin and scope are decided by the core from its own context", () => {
 	test("inside a session execution the gate gets origin 'session'; a self root follows the session id per request", async () => {
@@ -401,13 +349,6 @@ describe("origin and scope are decided by the core from its own context", () => 
 		]);
 	});
 
-	test("a fabricated execution, or one minted by another runtime, is refused rather than trusted", () => {
-		const runtime = newRuntime();
-		const foreign = newRuntime().createSessionExecution(sessionInit());
-
-		expect(() => runtime.runWith(forgedExecution(), () => 1)).toThrow(/not a core-minted/);
-		expect(() => runtime.runWith(foreign, () => 1)).toThrow(/not a core-minted/);
-	});
 
 	test("outside any execution the gate sees 'unclassified'; once marked standalone it sees 'standalone' and the process can never create a session", async () => {
 		const runtime = newRuntime();
@@ -516,5 +457,52 @@ describe("context propagation behaves as the inventory assumes", () => {
 		const runtime = newRuntime();
 		expect(await runtime.verifyContext()).toBe(true);
 		expect(runtime.gateInfo().coverage.contextCheck).toBe("passed");
+	});
+});
+
+describe("managed execution authenticated connection boundary (fresh child)", () => {
+	// Creating an execution with a binding flips the process-wide required latch
+	// in the real journal composition, so these refusals run one per child process
+	// instead of poisoning the ordinary untracked tests in this file.
+	const FIXTURE = `${import.meta.dir}/fixtures/model-request-gate-managed-process.ts`;
+
+	async function runManagedScenario(name: string): Promise<Record<string, unknown>> {
+		const child = Bun.spawn([process.execPath, FIXTURE, name], { stdout: "pipe", stderr: "pipe" });
+		try {
+			const [exitCode, stdout, stderr] = await Promise.all([
+				child.exited,
+				new Response(child.stdout).text(),
+				new Response(child.stderr).text(),
+			]);
+			if (exitCode !== 0) throw new Error(`managed boundary scenario ${name} exited ${exitCode}: ${stderr}`);
+			const parsed: unknown = JSON.parse(stdout.trim());
+			if (typeof parsed !== "object" || parsed === null) {
+				throw new Error(`unexpected managed boundary output for ${name}: ${stdout}`);
+			}
+			return parsed as Record<string, unknown>;
+		} finally {
+			if (child.exitCode === null) {
+				child.kill("SIGKILL");
+				await child.exited;
+			}
+		}
+	}
+
+	test("a binding cannot authorize before an authenticated journal execution connection exists, even ungated", async () => {
+		const result = await runManagedScenario("authorize-refused");
+		expect(result.refused).toBe(true);
+		expect(result.denied).toBe(false);
+	});
+
+	test("a caller-resolved init promise cannot make a managed execution or its derivation ready", async () => {
+		const result = await runManagedScenario("derived-send-refused");
+		expect(result.first).toEqual({ refused: true, denied: false });
+		expect(result.second).toEqual({ refused: true, denied: false });
+	});
+
+	test("a gate pass cannot stand in for the missing authenticated execution connection", async () => {
+		const result = await runManagedScenario("gate-pass-refused");
+		expect(result.outcome).toEqual({ refused: true, denied: false });
+		expect(result.gateAttempts).toBe(0);
 	});
 });

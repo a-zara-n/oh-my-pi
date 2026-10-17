@@ -400,11 +400,14 @@ export function guardThinkingLoopStream(
 	const checkAssistantContent = options?.loopGuard?.checkAssistantContent !== false;
 
 	void (async () => {
-		const transferWork = openJournalOuterWorkFromCurrent();
+		// The begin belongs to the guarded region: a closing binding's refusal
+		// must fail the stream instead of orphaning it (A-06/X08).
+		let transferWork: JournalOuterWork | undefined;
 		let thinkingArmed = true;
 		let textArmed = checkAssistantContent;
 		let textStarted = false;
 		try {
+			transferWork = openJournalOuterWorkFromCurrent();
 			for await (const event of inner) {
 				let detail: string | null = null;
 				if (event.type === "thinking_delta") {

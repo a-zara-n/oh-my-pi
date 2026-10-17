@@ -201,7 +201,9 @@ let providerInFlightHeartbeatFlushTimeoutMsOverride: number | undefined;
 let providerInFlightHeartbeatWriterOverride:
 	| ((writeProviderInFlightInfo: () => Promise<void>) => Promise<void>)
 	| undefined;
-let providerInFlightLeaseRemoverOverride: ((leasePath: string) => Promise<void>) | undefined;
+let providerInFlightWakeupWriterOverride:
+	| ((dir: string, writeWakeupFile: () => Promise<void>) => Promise<void>)
+	| undefined;
 let providerInFlightWaitObserverOverride: ((provider: string) => void) | undefined;
 let providerInFlightLockCreatedObserverOverride: ((lockDir: string) => Promise<void>) | undefined;
 let providerInFlightLockIdentifiedObserverOverride: ((lockDir: string) => Promise<void>) | undefined;
@@ -408,7 +410,11 @@ async function mkdirProviderInFlightLockDir(lockDir: string, signal?: AbortSigna
 	}
 }
 
-async function acquireProviderInFlightLock(provider: string, signal?: AbortSignal): Promise<() => Promise<void>> {
+async function acquireProviderInFlightLock(
+	provider: string,
+	signal?: AbortSignal,
+	slotWork?: JournalOuterWork,
+): Promise<() => Promise<void>> {
 	const lockDir = providerInFlightLockDir(provider);
 	await fs.mkdir(path.dirname(lockDir), { recursive: true });
 
@@ -443,7 +449,14 @@ async function acquireProviderInFlightLock(provider: string, signal?: AbortSigna
 		const staleLock = await readProviderInFlightStaleLock(lockDir);
 		if (staleLock) {
 			await releaseProviderInFlightStaleLock(lockDir, staleLock);
-			await signalProviderInFlightWaiters(provider);
+			// The wakeup write is an optimization — waiters also poll — but an
+			// unrecovered notification failure still belongs to this request's
+			// outer-work accounting rather than being discarded (A-02).
+			try {
+				await signalProviderInFlightWaiters(provider);
+			} catch (error) {
+				slotWork?.noteFailure(error);
+			}
 			continue;
 		}
 
@@ -486,7 +499,7 @@ async function tryAcquireProviderInFlightLease(
 	signal?: AbortSignal,
 	slotWork?: JournalOuterWork,
 ): Promise<ProviderInFlightLease | null> {
-	const releaseLock = await acquireProviderInFlightLock(provider, signal);
+	const releaseLock = await acquireProviderInFlightLock(provider, signal, slotWork);
 	try {
 		const dir = providerInFlightDir(provider);
 		await fs.mkdir(dir, { recursive: true });
@@ -542,10 +555,18 @@ async function tryAcquireProviderInFlightLease(
 }
 
 async function signalProviderInFlightWaitersInDir(dir: string): Promise<void> {
-	try {
-		await fs.mkdir(dir, { recursive: true });
+	// Failures propagate to the caller that owns the outer work; waiters still
+	// poll on their fallback timer, so the wakeup write stays an optimization
+	// without discarding unrecovered notification failures (A-02).
+	const write = async (): Promise<void> => {
 		await Bun.write(path.join(dir, ".wakeup"), String(Date.now()));
-	} catch {}
+	};
+	if (providerInFlightWakeupWriterOverride) {
+		await providerInFlightWakeupWriterOverride(dir, write);
+		return;
+	}
+	await fs.mkdir(dir, { recursive: true });
+	await write();
 }
 
 async function signalProviderInFlightWaiters(provider: string): Promise<void> {
@@ -702,6 +723,11 @@ export const __providerInFlightForTesting = {
 	setHeartbeatWriter(writer: ((writeProviderInFlightInfo: () => Promise<void>) => Promise<void>) | undefined): void {
 		providerInFlightHeartbeatWriterOverride = writer;
 	},
+	setWakeupWriter(
+		writer: ((dir: string, writeWakeupFile: () => Promise<void>) => Promise<void>) | undefined,
+	): void {
+		providerInFlightWakeupWriterOverride = writer;
+	},
 	setLeaseRemover(remover: ((leasePath: string) => Promise<void>) | undefined): void {
 		providerInFlightLeaseRemoverOverride = remover;
 	},
@@ -761,7 +787,9 @@ function withProviderInFlightLimit<TOptions extends Pick<StreamOptions, "signal"
 
 	const outer = new AssistantMessageEventStream();
 	void (async () => {
-		const slotWork = openJournalOuterWorkFromCurrent();
+		// A closing binding legitimately refuses new outer work; the stream must
+		// still fail its consumer and end any work that did register (A-02/X08).
+		let slotWork: JournalOuterWork | undefined;
 		let release: (() => Promise<void>) | undefined;
 		let releasePromise: Promise<void> | undefined;
 		const releaseOnce = () => {
@@ -786,6 +814,7 @@ function withProviderInFlightLimit<TOptions extends Pick<StreamOptions, "signal"
 			}
 		};
 		try {
+			slotWork = openJournalOuterWorkFromCurrent();
 			const startedWaitingAt = Date.now();
 			release = await joinJournalOuterWork(
 				slotWork,
@@ -923,10 +952,14 @@ function withResolvedModelHeaders<TApi extends Api>(
 
 	const outer = new AssistantMessageEventStream();
 	void (async () => {
-		const headerWork = openJournalOuterWorkFromCurrent();
-		const rawResolver = resolveHeaders(signal);
-		if (headerWork) headerWork.join(rawResolver);
+		// The begin and the caller-provided resolver's synchronous start both
+		// belong to the guarded region: a closing binding's refusal or a resolver
+		// that throws immediately must fail the stream, not orphan it (A-03).
+		let headerWork: JournalOuterWork | undefined;
 		try {
+			headerWork = openJournalOuterWorkFromCurrent();
+			const rawResolver = resolveHeaders(signal);
+			if (headerWork) headerWork.join(rawResolver);
 			const headers = await joinJournalOuterWork(headerWork, untilAborted(signal, () => rawResolver));
 			signal?.throwIfAborted();
 			const inner = run({ ...model, resolveHeaders: undefined, headers: headers ? { ...headers } : undefined });
@@ -937,7 +970,7 @@ function withResolvedModelHeaders<TApi extends Api>(
 			if (!outer.done) outer.end(await joinJournalOuterWork(headerWork, inner.result()));
 		} catch (error) {
 			headerWork?.noteFailure(error);
-			outer.fail(error);
+			if (!outer.done) outer.fail(error);
 		} finally {
 			await headerWork?.end();
 		}
@@ -1010,8 +1043,11 @@ function gateUninstrumentedTransport(
 	if (!runtime.hasGate() && (execution === undefined || execution.journalState === "untracked")) return create();
 	const outer = new AssistantMessageEventStream();
 	void (async () => {
-		const transportWork = openJournalOuterWorkFromCurrent();
+		// The begin belongs to the guarded region: a closing binding's refusal
+		// must fail the stream instead of orphaning it (A-05/X08).
+		let transportWork: JournalOuterWork | undefined;
 		try {
+			transportWork = openJournalOuterWorkFromCurrent();
 			await joinJournalOuterWork(transportWork, authorizeUninstrumentedAttempt(model, "chat", signal));
 			assertCurrentJournalExecutionReady();
 			const inner = create();
@@ -1022,7 +1058,7 @@ function gateUninstrumentedTransport(
 			if (!outer.done) outer.end(await joinJournalOuterWork(transportWork, inner.result()));
 		} catch (error) {
 			transportWork?.noteFailure(error);
-			outer.fail(error);
+			if (!outer.done) outer.fail(error);
 		} finally {
 			await transportWork?.end();
 		}
@@ -1539,7 +1575,9 @@ function streamSimpleRequest<TApi extends Api>(
 			return undefined;
 		};
 		void (async () => {
-			const resolverWork = openJournalOuterWorkFromCurrent();
+			// The begin belongs to the guarded region: a closing binding's refusal
+			// must fail the stream instead of orphaning it (A-04/X08).
+			let resolverWork: JournalOuterWork | undefined;
 			const emitFailure = (failure: AuthRetryFailure): void => {
 				resolverWork?.noteFailure(failure.error);
 				emitBufferedEvents(outer, failure.bufferedEvents);
@@ -1550,6 +1588,7 @@ function streamSimpleRequest<TApi extends Api>(
 				}
 			};
 			try {
+				resolverWork = openJournalOuterWorkFromCurrent();
 				let lastKey: string | undefined;
 				let credentialId: number | undefined;
 				let oauthIdentity: OAuthRequestIdentity | undefined;
@@ -1618,6 +1657,9 @@ function streamSimpleRequest<TApi extends Api>(
 					retryFailure = next;
 				}
 				emitFailure(retryFailure);
+			} catch (error) {
+				resolverWork?.noteFailure(error);
+				if (!outer.done) outer.fail(error);
 			} finally {
 				await resolverWork?.end();
 			}
