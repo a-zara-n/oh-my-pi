@@ -82,7 +82,7 @@ import {
 import { isModelRequestLocalStream } from "./model-request-execution";
 import { getModelRequestRuntime } from "./model-request-runtime";
 import { authorizeUninstrumentedAttempt } from "./utils/model-request-fetch";
-import { beginCurrentExecutionOuterWork } from "./utils/journal-outer-work";
+import { awaitManagedOuterWork, beginManagedOuterWorkFromCurrent } from "./model-request-journal-outer-work";
 import { withTransportFetch } from "./utils/transport-fetch";
 
 function isGoogleVertexAuthenticatedModel(model: Model<Api>): boolean {
@@ -732,7 +732,7 @@ function withProviderInFlightLimit<TOptions extends Pick<StreamOptions, "signal"
 
 	const outer = new AssistantMessageEventStream();
 	void (async () => {
-		const slotWork = beginCurrentExecutionOuterWork();
+		const slotWork = beginManagedOuterWorkFromCurrent();
 		let release: (() => Promise<void>) | undefined;
 		let releasePromise: Promise<void> | undefined;
 		const releaseOnce = () => {
@@ -890,7 +890,7 @@ function withResolvedModelHeaders<TApi extends Api>(
 
 	const outer = new AssistantMessageEventStream();
 	void (async () => {
-		const headerWork = beginCurrentExecutionOuterWork();
+		const headerWork = beginManagedOuterWorkFromCurrent();
 		const rawResolver = resolveHeaders(signal);
 		headerWork.track(rawResolver);
 		try {
@@ -977,7 +977,7 @@ function gateUninstrumentedTransport(
 	if (!runtime.hasGate() && (execution === undefined || execution.journalState === "untracked")) return create();
 	const outer = new AssistantMessageEventStream();
 	void (async () => {
-		const transportWork = beginCurrentExecutionOuterWork();
+		const transportWork = beginManagedOuterWorkFromCurrent();
 		try {
 			await transportWork.track(authorizeUninstrumentedAttempt(model, "chat", signal));
 			assertCurrentJournalExecutionReady();
@@ -1515,13 +1515,14 @@ function streamSimpleRequest<TApi extends Api>(
 		};
 
 		void (async () => {
-			const resolverWork = beginCurrentExecutionOuterWork();
+			const resolverWork = beginManagedOuterWorkFromCurrent();
 			try {
 				let lastKey: string | undefined;
 				let credentialId: number | undefined;
 				let oauthIdentity: OAuthRequestIdentity | undefined;
 				try {
-					const resolved = await resolverWork.track(
+					const resolved = await awaitManagedOuterWork(
+						resolverWork,
 						apiKeyResolver({ lastChance: false, error: undefined, signal }),
 					);
 					lastKey = resolvedApiKeyBearer(resolved);
@@ -1530,7 +1531,7 @@ function streamSimpleRequest<TApi extends Api>(
 				} catch (error) {
 					// A thrown resolver is a broker/OAuth/network failure, not a missing
 					// key — surface the cause instead of masking it as "No API key".
-					resolverWork.noteFailure(error);
+					if (resolverWork.active) resolverWork.noteFailure(error);
 					outer.fail(
 						new AIError.ConfigurationError(
 							`Failed to resolve API key for provider ${model.provider}: ${error instanceof Error ? error.message : String(error)}`,
@@ -1541,7 +1542,7 @@ function streamSimpleRequest<TApi extends Api>(
 				}
 				if (lastKey === undefined) {
 					if (getProviderDefinition(model.provider)?.allowsMissingApiKey) {
-						const failure = await resolverWork.track(runAttempt());
+						const failure = await awaitManagedOuterWork(resolverWork, runAttempt());
 						if (failure) emitFailure(failure);
 						return;
 					}
@@ -1549,15 +1550,19 @@ function streamSimpleRequest<TApi extends Api>(
 					return;
 				}
 				const retryState = createAuthRetryKeyState(lastKey);
-				let failure = await resolverWork.track(runAttempt(lastKey, credentialId, oauthIdentity));
-				if (!failure) return;
+				let failure: AuthRetryFailure | undefined = await awaitManagedOuterWork(
+					resolverWork,
+					runAttempt(lastKey, credentialId, oauthIdentity),
+				);
+				if (failure === undefined) return;
 				while (true) {
 					// Caller aborted between attempts: don't mint a fresh token or fire
 					// another doomed request — emit the captured failure instead.
 					if (signal?.aborted) break;
 					let nextCredentialId: number | undefined;
 					let nextOAuthIdentity: OAuthRequestIdentity | undefined;
-					const nextKey = await resolverWork.track(
+					const nextKey = await awaitManagedOuterWork(
+						resolverWork,
 						resolveNextAuthRetryKey(
 							retryState,
 							apiKeyResolver,
@@ -1571,7 +1576,10 @@ function streamSimpleRequest<TApi extends Api>(
 					);
 					if (nextKey === undefined) break;
 					markNextModelRequestAttempt("auth-rotation");
-					const next = await resolverWork.track(runAttempt(nextKey, nextCredentialId, nextOAuthIdentity));
+					const next = await awaitManagedOuterWork(
+						resolverWork,
+						runAttempt(nextKey, nextCredentialId, nextOAuthIdentity),
+					);
 					if (!next) return;
 					failure = next;
 				}

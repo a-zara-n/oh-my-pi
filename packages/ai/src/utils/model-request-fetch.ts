@@ -35,7 +35,10 @@ import {
 } from "../model-request-runtime";
 import { copyResponseMetadata } from "./request-debug";
 import { assertModelRequestBuiltinFetch, modelRequestBuiltinFetch } from "./model-request-builtin-fetch";
-import { ExecutionOuterWorkScope } from "./journal-outer-work";
+import {
+	beginManagedExecutionOuterWork,
+	type ManagedOuterWorkScope,
+} from "../model-request-journal-outer-work";
 
 /**
  * Ordinary untracked wrapping hint and auxiliary transport mapping. Public
@@ -232,7 +235,7 @@ function observeResponse(
 	lease: ModelRequestLease,
 	response: Response,
 	signal: AbortSignal | undefined,
-	requestWork?: ExecutionOuterWorkScope,
+	requestWork?: ManagedOuterWorkScope,
 ): { readonly response: Response; readonly settlement: Promise<void> } {
 	observeQuietly("observeResponse", () =>
 		lease.observeResponse({ status: response.status, headers: responseHeaders(response.headers) }),
@@ -244,7 +247,7 @@ function observeResponse(
 			try {
 				await settleQuietly(lease, { type: "response-ended", status: response.status });
 			} catch (error) {
-				requestWork?.noteFailure(error);
+				if (requestWork?.active) requestWork.noteFailure(error);
 			} finally {
 				resolveSettlement();
 			}
@@ -262,7 +265,7 @@ function observeResponse(
 			try {
 				await settleQuietly(lease, outcome);
 			} catch (error) {
-				requestWork?.noteFailure(error);
+				if (requestWork?.active) requestWork.noteFailure(error);
 			} finally {
 				resolveSettlement();
 			}
@@ -322,7 +325,8 @@ function observeResponse(
 	return { response: wrapped, settlement };
 }
 
-function retainResponseBodyOuterWork(requestWork: ExecutionOuterWorkScope, settlement: Promise<void>): void {
+function retainResponseBodyOuterWork(requestWork: ManagedOuterWorkScope, settlement: Promise<void>): void {
+	if (!requestWork.active) return;
 	requestWork.track(settlement);
 	void settlement.finally(() => requestWork.end());
 }
@@ -379,7 +383,7 @@ async function sendRequired(
 	execution: ModelRequestExecution,
 	permit: ModelRequestPermit,
 	signal: AbortSignal | undefined,
-	requestWork: ExecutionOuterWorkScope,
+	requestWork: ManagedOuterWorkScope,
 ): Promise<Response> {
 	const { input, init, transport } = args;
 	const lease = permit.lease;
@@ -495,8 +499,9 @@ export async function gatedSend(args: GatedSendArgs): Promise<Response> {
 	const runtime = getModelRequestRuntime();
 	const execution = currentDispatchExecution(runtime);
 	assertJournalExecutionReady(execution);
-	const requestWork = ExecutionOuterWorkScope.begin(execution);
-	if (execution !== undefined && execution.journalState !== "untracked") {
+	const managed = execution !== undefined && execution.journalState !== "untracked";
+	const requestWork = beginManagedExecutionOuterWork(execution);
+	if (managed) {
 		if (
 			runtime !== canonicalRuntime ||
 			runtime.authorize !== canonicalAuthorize ||
@@ -516,13 +521,7 @@ export async function gatedSend(args: GatedSendArgs): Promise<Response> {
 			);
 		}
 	}
-	if (!runtime.hasGate() && (execution === undefined || execution.journalState === "untracked")) {
-		try {
-			return await requestWork.track(args.send());
-		} finally {
-			await requestWork.end();
-		}
-	}
+	if (!runtime.hasGate() && !managed) return args.send();
 	const { input, init } = args;
 	const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
 	const link = nextModelRequestAttemptLink();
@@ -556,16 +555,10 @@ export async function gatedSend(args: GatedSendArgs): Promise<Response> {
 		await requestWork.end();
 		throw error;
 	}
-	if (execution !== undefined && execution.journalState !== "untracked") {
-		return sendRequired(args, runtime, execution, permit, signal ?? undefined, requestWork);
+	if (managed) {
+		return sendRequired(args, runtime, execution!, permit, signal ?? undefined, requestWork);
 	}
-	if (lease === undefined) {
-		try {
-			return await requestWork.track(args.send());
-		} finally {
-			await requestWork.end();
-		}
-	}
+	if (lease === undefined) return args.send();
 	const effectiveSignal = signal ?? undefined;
 	if (effectiveSignal?.aborted) {
 		try {

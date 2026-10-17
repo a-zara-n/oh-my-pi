@@ -39,7 +39,10 @@ import type {
 	ModelRequestWire,
 } from "./model-request-gate";
 import { buildModelRequestCoverage } from "./model-request-coverage";
-import { ExecutionOuterWorkScope } from "./utils/journal-outer-work";
+import {
+	beginManagedExecutionOuterWork,
+	type ManagedOuterWorkScope,
+} from "./model-request-journal-outer-work";
 
 export type { ModelRequestExecution } from "@oh-my-pi/pi-utils/model-request-journal-composition";
 
@@ -151,14 +154,14 @@ function resolveUntrackedScope(init: ModelRequestExecutionInit): ModelRequestSco
 /** Wraps a gate-issued lease so the core cannot violate the lease protocol (order, once-only settle). */
 class GuardedLease implements ModelRequestLease {
 	readonly #lease: ModelRequestLease;
-	readonly #gateWork: ExecutionOuterWorkScope | undefined;
+	readonly #gateWork: ManagedOuterWorkScope | undefined;
 	#begun = false;
 	#settled: Promise<void> | undefined;
 
-	constructor(lease: ModelRequestLease, gateWork?: ExecutionOuterWorkScope) {
+	constructor(lease: ModelRequestLease, gateWork?: ManagedOuterWorkScope) {
 		this.#lease = lease;
 		this.#gateWork = gateWork?.active ? gateWork : undefined;
-		if (this.#gateWork) this.#gateWork.transfer();
+		this.#gateWork?.transfer();
 	}
 
 	beginSend(): void {
@@ -482,7 +485,7 @@ export class ModelRequestRuntime {
 		const signal = input.signal;
 		if (signal?.aborted) throw signal.reason ?? new AbortError("model request aborted before authorization");
 
-		const gateWork = ExecutionOuterWorkScope.begin(execution);
+		const gateWork = beginManagedExecutionOuterWork(execution);
 		const attempt = this.#buildAttempt(attemptId, input, execution);
 		try {
 			const raced = await this.#raceGate(registration, attempt, gateWork);
@@ -562,7 +565,7 @@ export class ModelRequestRuntime {
 	async #raceGate(
 		registration: GateRegistration,
 		attempt: ModelRequestAttempt,
-		gateWork?: ExecutionOuterWorkScope,
+		gateWork?: ManagedOuterWorkScope,
 	): Promise<RaceResult> {
 		const gateCall = (async () => registration.gate.authorize(attempt))();
 		if (gateWork?.active) gateWork.track(gateCall);
