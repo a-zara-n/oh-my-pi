@@ -1,10 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import * as path from "node:path";
 
+const ROOT = path.resolve(import.meta.dir, "../../..");
 const FIXTURE = path.join(import.meta.dir, "fixtures/model-request-outer-lifetime-process.ts");
-const BOOTSTRAP = path.resolve(import.meta.dir, "../../../scripts/audit-library-bootstrap.ts");
+const BOOTSTRAP = path.join(ROOT, "scripts/audit-library-bootstrap.ts");
 
-/** AC-OL-02/03/06/10/12/14 consumer-visible subprocess regressions (parent executes). */
+/**
+ * AC-OL-02/03/06/10/12/14 consumer-visible regressions (parent executes).
+ *
+ * Each case is a fresh managed-only subprocess with audit bootstrap. Never mix
+ * normal untracked journal proofs or `installFixtureGate` in-process work with
+ * these native managed scenarios (required latch / gate registration are not reversible).
+ */
 const SCENARIOS: ReadonlyArray<{
 	readonly name: string;
 	readonly rows: readonly string[];
@@ -73,6 +80,8 @@ const SCENARIOS: ReadonlyArray<{
 
 async function runScenario(name: string): Promise<Record<string, unknown>> {
 	const child = Bun.spawn([process.execPath, "--preload", BOOTSTRAP, FIXTURE, name], {
+		cwd: ROOT,
+		stdin: "ignore",
 		stdout: "pipe",
 		stderr: "pipe",
 		timeout: 60_000,
