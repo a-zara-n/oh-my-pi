@@ -4,6 +4,11 @@
 
 ### Added
 
+- Added the closed SQLite factory `purpose` option: omitted/`general` preserves guarded
+  general RO backup use, while `authority-control` requires explicit readonly/non-creating
+  options and the fixed native authorizer. The verifier selects that purpose internally;
+  callers cannot supply their connection/purpose as authentication proof. The native
+  three-command ABI is unchanged. Purpose/backup regressions await parent verification.
 - Added the isolated audit SQLite preload, a fixed source-owned VFS control codec, exclusive
   STORE_ID/database creation and per-connection identity/generation registry. The authority reader
   now verifies actual owned main/WAL/shm and live writer generations in one real RO snapshot rather

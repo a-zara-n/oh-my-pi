@@ -69,6 +69,15 @@ mac("owned SQLite fixed control", () => {
 		finally { memory.close(); }
 		expect(() => openModelRequestJournalDatabase("file:/tmp/forbidden?immutable=1")).toThrow();
 		expect(() => openModelRequestJournalDatabase(":memory:", {readonly: true, create: true})).toThrow();
+		for (const options of [
+			{purpose: "unknown"},
+			{purpose: "general", unknown: true},
+			{purpose: "authority-control"},
+			{purpose: "authority-control", readonly: true},
+			{purpose: "authority-control", readonly: false, create: false},
+			{purpose: "authority-control", readonly: true, create: true},
+			{purpose: "authority-control", readonly: true, create: false},
+		]) expect(() => Reflect.apply(openModelRequestJournalDatabase, undefined, [":memory:", options])).toThrow();
 		const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "owned-reopen-")));
 		try {
 			const created = createModelRequestJournalDatabase(path.join(directory, "state.sqlite3"));
@@ -125,5 +134,44 @@ mac("owned SQLite fixed control", () => {
 				} finally { reader.close(); }
 			} finally { fs.rmSync(directory, {recursive: true, force: true}); }
 		}
+	});
+
+	test("general RO keeps backup capability while authority-control RO has fixed native restrictions", () => {
+		const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "owned-purpose-")));
+		const filename = path.join(directory, "state.sqlite3");
+		const backupPath = path.join(directory, "copy.sqlite3");
+		const forbiddenPath = path.join(directory, "forbidden.sqlite3");
+		try {
+			const created = createModelRequestJournalDatabase(filename);
+			try {
+				created.database.exec("CREATE TABLE evidence(value TEXT) STRICT; INSERT INTO evidence VALUES('retained')");
+				const general = openModelRequestJournalDatabase(filename, {readonly: true, create: false, purpose: "general"});
+				try {
+					general.exec("PRAGMA query_only=ON");
+					try {
+						general.exec("PRAGMA query_only=OFF");
+						general.query("VACUUM INTO ?").run(backupPath);
+					} finally { general.exec("PRAGMA query_only=ON"); }
+					expect(general.query<{query_only: number}, []>("PRAGMA query_only").get()?.query_only).toBe(1);
+					expect(assertModelRequestJournalDatabase(general).inode).toBe(assertModelRequestJournalDatabase(created.database).inode);
+					expect(() => general.exec("UPDATE evidence SET value='forbidden'")).toThrow();
+				} finally { general.close(); }
+				const backup = openModelRequestJournalDatabase(backupPath, {readonly: true, create: false});
+				try {
+					expect(backup.query<{value: string}, []>("SELECT value FROM evidence").get()?.value).toBe("retained");
+					expect(assertModelRequestJournalDatabase(backup).inode).not.toBe(assertModelRequestJournalDatabase(created.database).inode);
+				} finally { backup.close(); }
+				const authority = openModelRequestJournalDatabase(filename, {readonly: true, create: false, purpose: "authority-control"});
+				try {
+					expect(authority.query<{query_only: number}, []>("PRAGMA query_only").get()?.query_only).toBe(1);
+					expect(authority.query<{trusted_schema: number}, []>("PRAGMA trusted_schema").get()?.trusted_schema).toBe(0);
+					expect(authority.query<{value: string}, []>("SELECT value FROM evidence").get()?.value).toBe("retained");
+					expect(() => authority.exec("PRAGMA query_only=OFF")).toThrow();
+					expect(() => authority.query("VACUUM INTO ?").run(forbiddenPath)).toThrow();
+					expect(fs.existsSync(forbiddenPath)).toBe(false);
+					expect(assertModelRequestJournalDatabase(authority).inode).toBe(assertModelRequestJournalDatabase(created.database).inode);
+				} finally { authority.close(); }
+			} finally { created.database.close(); }
+		} finally { fs.rmSync(directory, {recursive: true, force: true}); }
 	});
 });

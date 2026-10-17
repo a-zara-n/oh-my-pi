@@ -1,4 +1,4 @@
-# Audit-owned SQLite (DES-004 revision 9)
+# Audit-owned SQLite (DES-004 native and factory contracts)
 
 This directory is an isolated, source-owned patch to the canonical SQLite unix
 VFS, not an addon, syscall interposer, or fd getter. It must be selected through
@@ -65,6 +65,35 @@ results; this document does not claim acceptance from source inspection alone.
   This repository records acquisition metadata rather than checking in the
   large upstream archive or generated amalgamation. The local patch is under
   the repository's license.
+
+## Closed factory purpose (DES-004 revision 11)
+
+`@oh-my-pi/pi-utils/model-request-journal-sqlite-control` keeps the same three
+operations: `openModelRequestJournalDatabase`, `createModelRequestJournalDatabase`
+and `assertModelRequestJournalDatabase`. Open options are exactly `readonly?`,
+`create?`, `strict?`, `safeIntegers?` (booleans), plus
+`purpose?: "general" | "authority-control"`. Unknown fields/values are rejected;
+`purpose` is consumed by the factory and never forwarded to Bun's constructor.
+
+Omitted purpose means `general`. Store writer, general query/verification,
+backup source/output and pre-migration connections retain this purpose.
+General actual-RO connections still require native inspect/arm commands 1/2 in
+the audit runtime, retain all fd/sidecar/usage-time guards, and cannot write
+their main database. Their consumer may perform its existing checked
+`query_only OFF → VACUUM INTO → finally query_only ON` backup sequence.
+The copy remains non-authoritative; neither successful SQL nor the same store
+ID proves active authority, readiness, or restore cutover.
+
+`authority-control` requires explicit `readonly:true` and `create:false`,
+an actual owned file rather than `:memory:`, and successful commands 1/2/3
+before return. Native unsupported/failed control rejects even outside a
+required runtime. The authority verifier fixes this literal at its own open
+site; it does not accept a caller connection, options or purpose. Command 3
+keeps trusted schema disabled, query-only enabled and the fixed native
+authorizer; attempts to disable query-only or run VACUUM/ATTACH remain rejected.
+There is no operation to remove the restriction from an existing connection.
+A caller selecting this literal only restricts its own connection and gains
+no verified binding. The native ABI and its three commands are unchanged.
 
 ## Fixed ABI
 

@@ -22,6 +22,7 @@ export interface ModelRequestJournalDatabaseOptions {
 	readonly create?: boolean;
 	readonly strict?: boolean;
 	readonly safeIntegers?: boolean;
+	readonly purpose?: "general" | "authority-control";
 }
 export interface ModelRequestJournalDatabaseIdentity {
 	readonly device: number;
@@ -141,28 +142,34 @@ function live(state: ConnectionState): ControlResult {
 	}
 }
 function optionsOf(options: ModelRequestJournalDatabaseOptions): ModelRequestJournalDatabaseOptions {
-	if (options === null || typeof options !== "object" || Reflect.ownKeys(options).some(key => typeof key !== "string" || !["readonly", "create", "strict", "safeIntegers"].includes(key))) throw new Error("Journal SQLite options rejected");
-	const {readonly, create, strict, safeIntegers} = options;
+	if (options === null || typeof options !== "object" || Reflect.ownKeys(options).some(key => typeof key !== "string" || !["readonly", "create", "strict", "safeIntegers", "purpose"].includes(key))) throw new Error("Journal SQLite options rejected");
+	const {readonly, create, strict, safeIntegers, purpose} = options;
 	for (const value of [readonly, create, strict, safeIntegers]) if (value !== undefined && typeof value !== "boolean") throw new Error("Journal SQLite options rejected");
 	if (readonly && create) throw new Error("Journal SQLite options rejected");
-	return {readonly, create, strict, safeIntegers};
+	if (purpose !== undefined && purpose !== "general" && purpose !== "authority-control") throw new Error("Journal SQLite purpose rejected");
+	if (purpose === "authority-control" && (readonly !== true || create !== false)) throw new Error("Journal authority SQLite requires readonly:true and create:false");
+	return {readonly, create, strict, safeIntegers, purpose: purpose ?? "general"};
 }
 /** Ordinary runtimes retain Bun behavior. Managed diagnostics always require the fixed native control. */
 export function openModelRequestJournalDatabase(filename: string, options: ModelRequestJournalDatabaseOptions = {}): Database {
 	if (typeof filename !== "string" || filename.length === 0 || filename.includes("\0") || filename.startsWith("file:")) throw new Error("Journal SQLite filename rejected");
-	const normalized = optionsOf(options);
+	const {purpose, ...normalized} = optionsOf(options);
+	if (purpose === "authority-control" && filename === ":memory:") throw new Error("Journal authority SQLite requires an owned file");
 	const database = new Database(filename, normalized);
 	try {
 		// A memory-only version probe has no unix file and can never be authority evidence.
 		if (filename === ":memory:") return database;
 		const initial = control(database, 1);
 		if (initial === undefined) {
-			if (Reflect.get(globalThis, Symbol.for("omp.audit.sqlite.required.v1")) === true) throw new Error("Journal audit SQLite control unavailable");
+			if (purpose === "authority-control" || Reflect.get(globalThis, Symbol.for("omp.audit.sqlite.required.v1")) === true) throw new Error("Journal audit SQLite control unavailable");
 			return database;
 		}
 		const armed = control(database, 2, {device: initial.main.device, inode: initial.main.inode});
 		if (armed === undefined || armed.connectionGeneration !== initial.connectionGeneration) throw new Error("Journal SQLite arm rejected");
-		if (normalized.readonly) control(database, 3);
+		if (purpose === "authority-control") {
+			const fixed = control(database, 3);
+			if (fixed === undefined || fixed.connectionGeneration !== armed.connectionGeneration) throw new Error("Journal authority SQLite control rejected");
+		}
 		const state: ConnectionState = {database, filename: path.resolve(filename), readonly: normalized.readonly === true, initial: armed, closed: false};
 		states.set(database, state);
 		let references: Set<WeakRef<ConnectionState>> | undefined;
