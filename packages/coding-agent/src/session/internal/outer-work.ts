@@ -29,7 +29,15 @@ async function drainDetachedPromises(tracked: Set<Promise<unknown>>, failures: u
 	}
 }
 
-class JournalOuterWorkScope {
+export interface JournalOuterWorkScope {
+	readonly active: boolean;
+	noteFailure(error: unknown): void;
+	trackDetached(promise: Promise<unknown>): void;
+	complete(primaryError?: unknown): Promise<void>;
+	run<T>(work: () => Promise<T>): Promise<T>;
+}
+
+class JournalOuterWorkScopeImpl implements JournalOuterWorkScope {
 	readonly #handle: JournalWorkHandle | undefined;
 	readonly #tracked = new Set<Promise<unknown>>();
 	#failures: unknown[] = [];
@@ -83,18 +91,18 @@ class JournalOuterWorkScope {
 	}
 }
 
-const noopJournalOuterWorkScope = new JournalOuterWorkScope(undefined);
+const noopJournalOuterWorkScope: JournalOuterWorkScope = new JournalOuterWorkScopeImpl(undefined);
 
 export function journalOuterWorkFromBinding(
 	binding: ModelRequestJournalLeaseBinding | undefined,
 ): JournalOuterWorkScope {
 	if (binding === undefined) return noopJournalOuterWorkScope;
-	return new JournalOuterWorkScope(beginJournalBindingWork(binding));
+	return new JournalOuterWorkScopeImpl(beginJournalBindingWork(binding));
 }
 
 export function journalOuterWorkFromExecution(execution: ModelRequestExecution | undefined): JournalOuterWorkScope {
 	if (execution === undefined) return noopJournalOuterWorkScope;
 	const handle = beginJournalExecutionWork(execution);
 	if (handle === undefined) return noopJournalOuterWorkScope;
-	return new JournalOuterWorkScope(handle);
+	return new JournalOuterWorkScopeImpl(handle);
 }

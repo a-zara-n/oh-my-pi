@@ -1,0 +1,619 @@
+import "../../../../scripts/audit-library-bootstrap";
+import { describe, expect, test, vi } from "bun:test";
+import { Agent, type AgentEvent } from "@oh-my-pi/pi-agent-core";
+import type { CustomMessage } from "@oh-my-pi/pi-agent-core";
+import { runWithModelRequestExecution } from "@oh-my-pi/pi-ai/model-request-execution";
+import { createAgentSession } from "../../src/sdk";
+import * as sdkModule from "../../src/sdk";
+import { Settings } from "../../src/config/settings";
+import { ModelRegistry } from "../../src/config/model-registry";
+import { startMemoryStartupTask } from "../../src/memories";
+import { hindsightBackend } from "../../src/hindsight/backend";
+import { loadMnemopiModules, MnemopiSessionState, setMnemopiSessionState } from "../../src/mnemopi/state";
+import { loadMnemopiConfig } from "../../src/mnemopi/config";
+import { startSharpshooterScheduler } from "../../src/sharpshooter/scheduler";
+import { maybeStartSharpshooterExtraction } from "../../src/sharpshooter/extract";
+import { ChainJudge } from "../../src/judgment";
+import {
+	createAgentSession as legacyShimCreateAgentSession,
+	DefaultResourceLoader,
+} from "../../src/extensibility/legacy-pi-coding-agent-shim";
+import { journalOuterWorkFromBinding } from "../../src/session/internal/outer-work";
+import { childModelRequestRootOf } from "../../src/session/model-request-context";
+import { runSubprocess } from "../../src/task/executor";
+import { testSetExtensionHandlerTimeoutMs } from "../../src/extensibility/extensions/runner";
+import { ExtensionToolWrapper } from "../../src/extensibility/extensions/wrapper";
+import { Type } from "../../src/extensibility/legacy-typebox";
+import type { AgentTool } from "@oh-my-pi/pi-agent-core";
+import { R11JournalFixture } from "../../../utils/test/fixtures/model-request-journal-r11";
+import { createInMemoryAuthStorage } from "../helpers/agent-session-setup";
+import {
+	expectBindingAcceptsOuterWork,
+	openManagedAgentHarness,
+	withManagedExecution,
+} from "./journal-outer-work-managed-harness";
+
+const mac = process.platform === "darwin" ? describe : describe.skip;
+
+mac("journal outer work canonical source callers", () => {
+	test("S-01/AC-OL-01: createAgentSession holds binding startup work until settingsManager first await settles", async () => {
+		const fixture = new R11JournalFixture();
+		const settingsReady = Promise.withResolvers<Settings>();
+		try {
+			const root = fixture.open();
+			await fixture.withBinding(root, async binding => {
+				const authStorage = createInMemoryAuthStorage();
+				const settings = Settings.isolated({ "compaction.enabled": false, "memory.enabled": false });
+				const startup = createAgentSession({
+					modelRequestJournalLeaseBinding: binding,
+					authStorage,
+					settingsManager: settingsReady.promise,
+					modelRegistry: new ModelRegistry(authStorage, undefined, { ignoreLocalModelConfig: true }),
+					disableExtensionDiscovery: true,
+					bindProcessState: false,
+					cwd: fixture.directory,
+					agentDir: fixture.directory,
+				});
+				await Promise.resolve();
+				expectBindingAcceptsOuterWork(binding);
+				settingsReady.resolve(settings);
+				const { session } = await startup;
+				await session.dispose();
+				authStorage.close();
+			});
+		} finally {
+			settingsReady.resolve(Settings.isolated());
+			await fixture.close();
+		}
+	});
+
+	test("S-02/AC-OL-02: message_update queue drain via AgentSession agent event entry", async () => {
+		const fixture = new R11JournalFixture();
+		try {
+			const root = fixture.open();
+			await fixture.withBinding(root, async binding => {
+				const principal = await fixture.ready(binding, root);
+				const harness = await openManagedAgentHarness(principal, binding);
+				const releaseFirst = Promise.withResolvers<void>();
+				const secondDone = Promise.withResolvers<void>();
+				const order: string[] = [];
+				harness.api.on("message_update", async event => {
+					if (event.assistantMessageEvent.type !== "text_delta") return;
+					const delta = event.assistantMessageEvent.delta;
+					order.push(`start:${delta}`);
+					if (delta === "A") await releaseFirst.promise;
+					order.push(`end:${delta}`);
+					if (delta === "B") secondDone.resolve();
+				});
+				await withManagedExecution(principal.execution, async () => {
+					harness.emitMessageUpdate("A");
+					harness.emitMessageUpdate("B");
+					releaseFirst.resolve();
+					await secondDone.promise;
+				});
+				expect(order).toEqual(["start:A", "end:A", "start:B", "end:B"]);
+				await harness.dispose();
+			});
+		} finally {
+			await fixture.close();
+		}
+	});
+
+	test("S-03/AC-OL-02: sendCustomMessage detached extension emit holds binding until dispatch settles", async () => {
+		const fixture = new R11JournalFixture();
+		try {
+			const root = fixture.open();
+			await fixture.withBinding(root, async binding => {
+				const principal = await fixture.ready(binding, root);
+				const harness = await openManagedAgentHarness(principal, binding);
+				const gate = Promise.withResolvers<void>();
+				let detachedDone = false;
+				harness.api.on("message_start", async () => {
+					await gate.promise;
+					detachedDone = true;
+				});
+				const message: CustomMessage = {
+					role: "custom",
+					customType: "outer-work-probe",
+					content: "idle",
+					display: true,
+					timestamp: Date.now(),
+				};
+				await withManagedExecution(principal.execution, async () => {
+					const pending = harness.session.sendCustomMessage(message);
+					await Promise.resolve();
+					expectBindingAcceptsOuterWork(binding);
+					gate.resolve();
+					await pending;
+				});
+				expect(detachedDone).toBe(true);
+				await harness.dispose();
+			});
+		} finally {
+			await fixture.close();
+		}
+	});
+
+	test("S-04b/AC-OL-02: message_end extension tail via agent emitExternalEvent entry", async () => {
+		const fixture = new R11JournalFixture();
+		try {
+			const root = fixture.open();
+			await fixture.withBinding(root, async binding => {
+				const principal = await fixture.ready(binding, root);
+				const harness = await openManagedAgentHarness(principal, binding);
+				const gate = Promise.withResolvers<void>();
+				harness.api.on("message_end", async () => {
+					await gate.promise;
+				});
+				await withManagedExecution(principal.execution, async () => {
+					harness.emitMessageEnd();
+					await Promise.resolve();
+					expectBindingAcceptsOuterWork(binding);
+					gate.resolve();
+					await Bun.sleep(0);
+				});
+				await harness.dispose();
+			});
+		} finally {
+			await fixture.close();
+		}
+	});
+
+	test("S-04c/AC-OL-02: sendCustomMessage admitSubmission path holds binding until submission settles", async () => {
+		const fixture = new R11JournalFixture();
+		try {
+			const root = fixture.open();
+			await fixture.withBinding(root, async binding => {
+				const principal = await fixture.ready(binding, root);
+				const harness = await openManagedAgentHarness(principal, binding);
+				const gate = Promise.withResolvers<void>();
+				harness.api.on("message_end", async () => {
+					await gate.promise;
+				});
+				const message: CustomMessage = {
+					role: "custom",
+					customType: "submission-probe",
+					content: "x",
+					display: true,
+					timestamp: Date.now(),
+				};
+				await withManagedExecution(principal.execution, async () => {
+					const pending = harness.session.sendCustomMessage(message);
+					expectBindingAcceptsOuterWork(binding);
+					gate.resolve();
+					await pending;
+				});
+				await harness.dispose();
+			});
+		} finally {
+			await fixture.close();
+		}
+	});
+
+	test("S-06/AC-OL-13: runAutolearnCapture entry holds binding until capture callback settles", async () => {
+		const fixture = new R11JournalFixture();
+		try {
+			const root = fixture.open();
+			await fixture.withBinding(root, async binding => {
+				const principal = await fixture.ready(binding, root);
+				const harness = await openManagedAgentHarness(principal, binding);
+				const gate = Promise.withResolvers<void>();
+				await withManagedExecution(principal.execution, async () => {
+					const pending = harness.session.runAutolearnCapture(async signal => {
+						await gate.promise;
+						expect(signal.aborted).toBe(false);
+					});
+					expectBindingAcceptsOuterWork(binding);
+					gate.resolve();
+					await pending;
+				});
+				await harness.dispose();
+			});
+		} finally {
+			await fixture.close();
+		}
+	});
+
+	test("S-07/AC-OL-13: startMemoryStartupTask entry joins void startup pipeline", async () => {
+		const fixture = new R11JournalFixture();
+		try {
+			const root = fixture.open(path.join(fixture.directory, "mem-start.jsonl"));
+			await fixture.withBinding(root, async binding => {
+				const principal = await fixture.ready(binding, root);
+				const harness = await openManagedAgentHarness(principal, binding);
+				const settings = Settings.isolated({
+					"compaction.enabled": false,
+					"memory.enabled": true,
+				});
+				const registry = new ModelRegistry(harness.authStorage, undefined, { ignoreLocalModelConfig: true });
+				await withManagedExecution(principal.execution, async () => {
+					startMemoryStartupTask({
+						session: harness.session,
+						settings,
+						modelRegistry: registry,
+						agentDir: fixture.directory,
+						taskDepth: 0,
+					});
+					await harness.session.settleMemoryBackend();
+				});
+				await harness.dispose();
+			});
+		} finally {
+			await fixture.close();
+		}
+	});
+
+	test("S-07/AC-OL-13: applyMemoryBackend settings transition entry", async () => {
+		const fixture = new R11JournalFixture();
+		try {
+			const root = fixture.open();
+			await fixture.withBinding(root, async binding => {
+				const principal = await fixture.ready(binding, root);
+				const harness = await openManagedAgentHarness(principal, binding);
+				await withManagedExecution(principal.execution, async () => {
+					const pending = harness.session.applyMemoryBackend();
+					expectBindingAcceptsOuterWork(binding);
+					await pending;
+				});
+				await harness.dispose();
+			});
+		} finally {
+			await fixture.close();
+		}
+	});
+
+	test("S-07b/AC-OL-13: hindsightBackend.start tracks mental-model bootstrap on session handle", async () => {
+		const fixture = new R11JournalFixture();
+		try {
+			const root = fixture.open();
+			await fixture.withBinding(root, async binding => {
+				const principal = await fixture.ready(binding, root);
+				const harness = await openManagedAgentHarness(principal, binding);
+				const settings = Settings.isolated({
+					"compaction.enabled": false,
+					"memory.backend": "hindsight",
+					"hindsight.baseUrl": "http://127.0.0.1:1",
+					"hindsight.mentalModelsEnabled": true,
+				});
+				await withManagedExecution(principal.execution, async () => {
+					const started = hindsightBackend.start({
+						session: harness.session,
+						settings,
+						modelRegistry: harness.session.modelRegistry,
+						agentDir: fixture.directory,
+						taskDepth: 0,
+					});
+					if (started !== undefined) await started;
+					const state = harness.session.getHindsightSessionState();
+					if (state?.mentalModelsLoadPromise) await state.mentalModelsLoadPromise;
+				});
+				await harness.dispose();
+			});
+		} finally {
+			await fixture.close();
+		}
+	});
+
+	test("S-07c/AC-OL-14: session.dispose joins detached Mnemopi consolidate on same handle", async () => {
+		const fixture = new R11JournalFixture();
+		try {
+			const root = fixture.open();
+			await fixture.withBinding(root, async binding => {
+				const principal = await fixture.ready(binding, root);
+				const harness = await openManagedAgentHarness(principal, binding);
+				const hold = Promise.withResolvers<void>();
+				const settings = Settings.isolated({ "memory.backend": "mnemopi", "compaction.enabled": false });
+				const config = loadMnemopiConfig(settings, fixture.directory);
+				const state = new MnemopiSessionState({
+					sessionId: harness.session.sessionId,
+					config,
+					session: harness.session,
+				});
+				setMnemopiSessionState(harness.session, state);
+				const consolidate = vi.spyOn(state, "consolidate").mockImplementation(async () => {
+					await hold.promise;
+				});
+				await withManagedExecution(principal.execution, async () => {
+					const pending = harness.session.dispose({ mnemopiConsolidateTimeoutMs: 1 });
+					await Bun.sleep(5);
+					expectBindingAcceptsOuterWork(binding);
+					hold.resolve();
+					await pending;
+				});
+				consolidate.mockRestore();
+			});
+		} finally {
+			await fixture.close();
+		}
+	});
+
+	test("S-07c/AC-OL-14: mnemopi backend start uses allSettled parallel module load", async () => {
+		await expect(loadMnemopiModules()).resolves.toBeUndefined();
+	});
+
+	test("S-08/AC-OL-13: sharpshooter scheduler tick and extraction entries", async () => {
+		const fixture = new R11JournalFixture();
+		try {
+			const root = fixture.open();
+			await fixture.withBinding(root, async binding => {
+				const principal = await fixture.ready(binding, root);
+				const harness = await openManagedAgentHarness(principal, binding);
+				const settings = Settings.isolated({ "compaction.enabled": false, "memory.backend": "sharpshooter" });
+				await withManagedExecution(principal.execution, async () => {
+					const stop = startSharpshooterScheduler({
+						agentDir: fixture.directory,
+						cwd: fixture.directory,
+						settings,
+						modelRegistry: harness.session.modelRegistry,
+						sessionId: harness.session.sessionId,
+					});
+					stop();
+					maybeStartSharpshooterExtraction({
+						session: harness.session,
+						settings,
+						modelRegistry: harness.session.modelRegistry,
+						agentDir: fixture.directory,
+						message: {
+							role: "user",
+							content: "We decided to use Postgres for the ledger schema going forward.",
+							timestamp: Date.now(),
+						},
+					});
+					await Bun.sleep(0);
+				});
+				await harness.dispose();
+			});
+		} finally {
+			await fixture.close();
+		}
+	});
+
+	test("S-09/AC-OL-13: legacy shim createAgentSession begins before loader.reload await", async () => {
+		const fixture = new R11JournalFixture();
+		const reloadGate = Promise.withResolvers<void>();
+		try {
+			const root = fixture.open();
+			await fixture.withBinding(root, async binding => {
+				const principal = await fixture.ready(binding, root);
+				const loader = new DefaultResourceLoader({ cwd: fixture.directory, agentDir: fixture.directory });
+				const originalReload = loader.reload.bind(loader);
+				loader.reload = async () => {
+					await reloadGate.promise;
+					return originalReload();
+				};
+				const authStorage = createInMemoryAuthStorage();
+				await runWithModelRequestExecution(principal.execution, async () => {
+					const pending = legacyShimCreateAgentSession({
+						modelRequestRoot: childModelRequestRootOf(principal.execution),
+						modelRequestJournalLeaseBinding: binding,
+						resourceLoader: loader,
+						authStorage,
+						disableExtensionDiscovery: true,
+						bindProcessState: false,
+						cwd: fixture.directory,
+						agentDir: fixture.directory,
+						settings: Settings.isolated({ "compaction.enabled": false, "memory.enabled": false }),
+					});
+					await Promise.resolve();
+					expectBindingAcceptsOuterWork(binding);
+					reloadGate.resolve();
+					const { session } = await pending;
+					await session.dispose();
+				});
+				authStorage.close();
+			});
+		} finally {
+			reloadGate.resolve();
+			await fixture.close();
+		}
+	});
+
+	test("S-10/AC-OL-13: ExtensionRunner tool_call handler flush reject with late registration on handler outer work", async () => {
+		const fixture = new R11JournalFixture();
+		testSetExtensionHandlerTimeoutMs(25);
+		try {
+			const root = fixture.open();
+			await fixture.withBinding(root, async binding => {
+				const principal = await fixture.ready(binding, root);
+				const harness = await openManagedAgentHarness(principal, binding);
+				const extension = harness.runner.extensions[0];
+				if (!extension) throw new Error("missing extension");
+				harness.runner.onToolRegistered(async () => {
+					throw new Error("flush reject");
+				});
+				const tool: AgentTool = {
+					name: "probe",
+					label: "probe",
+					description: "probe",
+					parameters: Type.Object({}),
+					approval: "read",
+					execute: async () => ({ content: [{ type: "text", text: "ok" }] }),
+				};
+				harness.api.on("tool_call", async () => {
+					await Promise.withResolvers<void>().promise;
+				});
+				const wrapped = new ExtensionToolWrapper(tool, harness.runner);
+				await withManagedExecution(principal.execution, async () => {
+					const pending = wrapped.execute("id", {});
+					await Bun.sleep(30);
+					const listener = extension.toolRegistrationListeners?.values().next().value;
+					listener?.("probe");
+					await expect(pending).rejects.toThrow();
+				});
+				await harness.dispose();
+			});
+		} finally {
+			testSetExtensionHandlerTimeoutMs(EXTENSION_HANDLER_TIMEOUT_MS);
+			await fixture.close();
+		}
+	});
+
+	test("S-12/AC-OL-14: agent_end dispatch entry holds binding until maintenance settles", async () => {
+		const fixture = new R11JournalFixture();
+		try {
+			const root = fixture.open();
+			await fixture.withBinding(root, async binding => {
+				const principal = await fixture.ready(binding, root);
+				const harness = await openManagedAgentHarness(principal, binding);
+				const gate = Promise.withResolvers<void>();
+				harness.api.on("session_stop", async () => {
+					await gate.promise;
+				});
+				await withManagedExecution(principal.execution, async () => {
+					const event: AgentEvent = { type: "agent_end", messages: [] };
+					const pending = harness.agent.emitExternalEvent(event);
+					await Promise.resolve();
+					expectBindingAcceptsOuterWork(binding);
+					gate.resolve();
+					await pending;
+				});
+				await harness.dispose();
+			});
+		} finally {
+			await fixture.close();
+		}
+	});
+
+	test("S-12/AC-OL-14: checkCompaction continuation stays on agent_end outer-work scope", async () => {
+		const fixture = new R11JournalFixture();
+		try {
+			const root = fixture.open();
+			await fixture.withBinding(root, async binding => {
+				const principal = await fixture.ready(binding, root);
+				const harness = await openManagedAgentHarness(principal, binding);
+				const settings = harness.session.settings;
+				settings.set("compaction.enabled", true);
+				const gate = Promise.withResolvers<void>();
+				harness.api.on("session_before_compact", async () => {
+					await gate.promise;
+				});
+				await withManagedExecution(principal.execution, async () => {
+					const assistant = {
+						role: "assistant" as const,
+						content: [{ type: "text" as const, text: "x".repeat(400_000) }],
+						api: "mock",
+						provider: "mock",
+						model: "mock",
+						usage: {
+							input: 0,
+							output: 0,
+							cacheRead: 0,
+							cacheWrite: 0,
+							totalTokens: 0,
+							cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+						},
+						stopReason: "stop" as const,
+						timestamp: Date.now(),
+					};
+					const pending = harness.agent.emitExternalEvent({ type: "agent_end", messages: [assistant] });
+					await Promise.resolve();
+					expectBindingAcceptsOuterWork(binding);
+					gate.resolve();
+					await pending;
+				});
+				await harness.dispose();
+			});
+		} finally {
+			await fixture.close();
+		}
+	});
+
+	test("G-01/AC-OL-14: ChainJudge.withCandidate entry holds outer work through candidate run", async () => {
+		const fixture = new R11JournalFixture();
+		try {
+			const root = fixture.open();
+			await fixture.withBinding(root, async binding => {
+				const principal = await fixture.ready(binding, root);
+				const authStorage = createInMemoryAuthStorage();
+				const settings = Settings.isolated({ "roles.judge": ["local/qwen2.5-1.5b"] });
+				const registry = new ModelRegistry(authStorage, undefined, { ignoreLocalModelConfig: true });
+				await withManagedExecution(principal.execution, async () => {
+					const judge = new ChainJudge({ settings, registry, purpose: "outer-work-probe" });
+					const answer = await judge.withCandidate(async () => ({ ok: true }));
+					expect(answer).toEqual({ ok: true });
+				});
+				authStorage.close();
+			});
+		} finally {
+			await fixture.close();
+		}
+	});
+
+	test("S-05/AC-OL-11: runSubprocess abort joins late createAgentSession dispose via executor spawn path", async () => {
+		const fixture = new R11JournalFixture();
+		const createGate = Promise.withResolvers<void>();
+		const disposeSeen = Promise.withResolvers<void>();
+		const createSpy = vi.spyOn(sdkModule, "createAgentSession").mockImplementation(async () => {
+			await createGate.promise;
+			return {
+				session: {
+					dispose: async () => {
+						disposeSeen.resolve();
+					},
+					sessionManager: { getSessionFile: () => null, getCwd: () => fixture.directory },
+					settings: Settings.isolated(),
+				},
+				extensionsResult: { extensions: [], errors: [] },
+			} as Awaited<ReturnType<typeof sdkModule.createAgentSession>>;
+		});
+		try {
+			const root = fixture.open();
+			await fixture.withBinding(root, async binding => {
+				const principal = await fixture.ready(binding, root);
+				const controller = new AbortController();
+				const subprocess = runSubprocess({
+					cwd: fixture.directory,
+					agent: { name: "task", description: "test", systemPrompt: "test", source: "bundled" },
+					task: "work",
+					index: 0,
+					id: "outer-work-spawn",
+					settings: Settings.isolated({ "compaction.enabled": false }),
+					modelRegistry: {
+						refresh: async () => {},
+						getAvailable: () => [],
+						getApiKey: async () => "test-key",
+					} as never,
+					onProgress: () => {},
+					enableLsp: false,
+					signal: controller.signal,
+					modelRequestRoot: childModelRequestRootOf(principal.execution),
+				});
+				await Promise.resolve();
+				controller.abort();
+				createGate.resolve();
+				await subprocess.catch(() => {});
+				await disposeSeen.promise;
+			});
+		} finally {
+			createSpy.mockRestore();
+			createGate.resolve();
+			await fixture.close();
+		}
+	});
+
+	test("drain loop: late trackDetached during complete settles before endJournalWork", async () => {
+		const fixture = new R11JournalFixture();
+		try {
+			const root = fixture.open();
+			await fixture.withBinding(root, async binding => {
+				const scope = journalOuterWorkFromBinding(binding);
+				let nestedDone = false;
+				const gate = Promise.withResolvers<void>();
+				scope.trackDetached(
+					gate.promise.then(() => {
+						const inner = Promise.withResolvers<void>();
+						scope.trackDetached(inner.promise.then(() => {
+							nestedDone = true;
+						}));
+						inner.resolve();
+					}),
+				);
+				gate.resolve();
+				await scope.complete();
+				expect(nestedDone).toBe(true);
+			});
+		} finally {
+			await fixture.close();
+		}
+	});
+});
