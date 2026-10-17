@@ -1,6 +1,6 @@
 /**
- * Package-private outer journal work scopes for coding-agent canonical producers.
- * Not a package export (`package.json` denies this subpath); import only via relative paths.
+ * Canonical-producer outer journal scopes (package-internal only).
+ * `package.json` denies `./session/internal/*`; import via relative paths within this package.
  */
 import type { ModelRequestExecution } from "@oh-my-pi/pi-ai/model-request-execution";
 import type { ModelRequestJournalLeaseBinding } from "@oh-my-pi/pi-utils/model-request-journal-authority";
@@ -16,6 +16,17 @@ function combineJournalWorkErrors(errors: unknown[]): unknown | undefined {
 	if (failures.length === 0) return undefined;
 	if (failures.length === 1) return failures[0];
 	return new AggregateError(failures, "Journal outer work failed");
+}
+
+/** Drain every detached future; late registrations during settlement stay in the set until empty. */
+async function drainDetachedPromises(tracked: Set<Promise<unknown>>, failures: unknown[]): Promise<void> {
+	while (tracked.size > 0) {
+		const batch = [...tracked];
+		const settled = await Promise.allSettled(batch);
+		for (const result of settled) {
+			if (result.status === "rejected") failures.push(result.reason);
+		}
+	}
 }
 
 class JournalOuterWorkScope {
@@ -50,13 +61,10 @@ class JournalOuterWorkScope {
 			if (primaryError !== undefined) throw primaryError;
 			return;
 		}
-		this.#ended = true;
 		const failures = [...this.#failures];
 		if (primaryError !== undefined) failures.push(primaryError);
-		const settled = await Promise.allSettled([...this.#tracked]);
-		for (const result of settled) {
-			if (result.status === "rejected") failures.push(result.reason);
-		}
+		await drainDetachedPromises(this.#tracked, failures);
+		this.#ended = true;
 		const error = combineJournalWorkErrors(failures);
 		endJournalWork(this.#handle, error === undefined ? { type: "fulfilled" } : { type: "rejected", error });
 		if (error !== undefined) throw error;
@@ -90,5 +98,3 @@ export function journalOuterWorkFromExecution(execution: ModelRequestExecution |
 	if (handle === undefined) return noopJournalOuterWorkScope;
 	return new JournalOuterWorkScope(handle);
 }
-
-export type { JournalOuterWorkScope };

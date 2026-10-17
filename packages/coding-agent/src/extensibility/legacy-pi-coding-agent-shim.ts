@@ -61,7 +61,7 @@ import {
 	truncateTail,
 } from "@oh-my-pi/pi-tui/tools/streaming-output";
 import { childModelRequestRootOf, resolveModelRequestRootSource } from "../session/model-request-context";
-import { journalOuterWorkFromBinding } from "../session/journal-outer-work";
+import { journalOuterWorkFromBinding } from "../session/internal/outer-work";
 import type { SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
 import type { Tool, ToolSession } from "../tools";
 import { BashTool } from "../tools/bash";

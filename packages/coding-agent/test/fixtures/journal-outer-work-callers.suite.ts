@@ -2,9 +2,20 @@ import "../../../../scripts/audit-library-bootstrap";
 import { describe, expect, test } from "bun:test";
 import { beginJournalBindingWork, endJournalWork } from "@oh-my-pi/pi-utils/model-request-journal-composition";
 import { loadMnemopiModules } from "../../src/mnemopi/state";
+import { journalOuterWorkFromBinding } from "../../src/session/internal/outer-work";
 import { R11JournalFixture } from "../../../utils/test/fixtures/model-request-journal-r11";
 
 const mac = process.platform === "darwin" ? describe : describe.skip;
+
+async function drainDetachedPromises(tracked: Set<Promise<unknown>>, failures: unknown[]): Promise<void> {
+	while (tracked.size > 0) {
+		const batch = [...tracked];
+		const settled = await Promise.allSettled(batch);
+		for (const result of settled) {
+			if (result.status === "rejected") failures.push(result.reason);
+		}
+	}
+}
 
 async function runBindingOuterWork(
 	binding: Parameters<typeof beginJournalBindingWork>[0],
@@ -22,10 +33,7 @@ async function runBindingOuterWork(
 	} catch (error) {
 		primaryError = error;
 	}
-	const settled = await Promise.allSettled([...tracked]);
-	for (const result of settled) {
-		if (result.status === "rejected") failures.push(result.reason);
-	}
+	await drainDetachedPromises(tracked, failures);
 	const error =
 		primaryError ??
 		(failures.length === 0
@@ -77,6 +85,34 @@ mac("coding-agent outer journal work callers (AC-OL consumer fixtures)", () => {
 						);
 					}),
 				).rejects.toBe(childFailure);
+			});
+		} finally {
+			await fixture.close();
+		}
+	});
+
+	test("AC-OL-13/S-10: late detached future registered during drain settles before endJournalWork", async () => {
+		const fixture = new R11JournalFixture();
+		try {
+			const root = fixture.open();
+			await fixture.withBinding(root, async binding => {
+				const scope = journalOuterWorkFromBinding(binding);
+				let lateSettled = false;
+				const gate = Promise.withResolvers<void>();
+				scope.trackDetached(
+					gate.promise.then(() => {
+						const late = Promise.withResolvers<void>();
+						scope.trackDetached(
+							late.promise.then(() => {
+								lateSettled = true;
+							}),
+						);
+						late.resolve();
+					}),
+				);
+				gate.resolve();
+				await scope.complete();
+				expect(lateSettled).toBe(true);
 			});
 		} finally {
 			await fixture.close();

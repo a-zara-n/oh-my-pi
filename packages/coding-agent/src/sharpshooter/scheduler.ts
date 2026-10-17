@@ -1,6 +1,6 @@
 import { bindModelRequestExecution, getModelRequestExecution } from "@oh-my-pi/pi-ai/model-request-execution";
 import { logger } from "@oh-my-pi/pi-utils";
-import { journalOuterWorkFromExecution } from "../session/journal-outer-work";
+import { journalOuterWorkFromExecution } from "../session/internal/outer-work";
 
 import type { ModelRegistry } from "../config/model-registry";
 import type { Settings } from "../config/settings";

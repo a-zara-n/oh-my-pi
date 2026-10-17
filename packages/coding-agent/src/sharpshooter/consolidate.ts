@@ -30,7 +30,7 @@ import {
 
 import { cfgSharpshooterIntervalMinutes } from "./settings";
 import { getModelRequestExecution } from "@oh-my-pi/pi-ai/model-request-execution";
-import { journalOuterWorkFromExecution } from "../session/journal-outer-work";
+import { journalOuterWorkFromExecution } from "../session/internal/outer-work";
 
 const PROJECT_DOC_TOKEN_LIMIT = 6000;
 

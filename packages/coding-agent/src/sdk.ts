@@ -181,7 +181,7 @@ import {
 	type SecretObfuscator,
 } from "./secrets";
 import { AgentSession, type InitialRetryFallbackState, type PlanYolo, type Prewalk } from "./session/agent-session";
-import { journalOuterWorkFromBinding } from "./session/journal-outer-work";
+import { journalOuterWorkFromBinding } from "./session/internal/outer-work";
 import {
 	createAuthStorageSettingsSync,
 	discoverAuthStorage as discoverAuthStorageFromConfig,

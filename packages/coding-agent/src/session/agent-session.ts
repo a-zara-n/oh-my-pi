@@ -364,7 +364,7 @@ import {
 	type ModelRequestRootAssignment,
 	withModelRequestExecution,
 } from "./model-request-context";
-import { journalOuterWorkFromExecution, type JournalOuterWorkScope } from "./journal-outer-work";
+import { journalOuterWorkFromExecution } from "./internal/outer-work";
 import {
 	buildReplanTitleContext,
 	CHECKPOINT_ACTIVE_REMINDER_TYPE,
@@ -1054,8 +1054,8 @@ export class AgentSession implements SettingsScope {
 	#postPromptTasks = new Set<Promise<unknown>>();
 	#postPromptTasksPromise: Promise<void> | undefined = undefined;
 	/** Outer journal work for the in-flight `agent_end` maintenance pass (compaction continuations). */
-	#journalOuterWorkScope: JournalOuterWorkScope | undefined;
-	#agentEndOuterWork: JournalOuterWorkScope | undefined;
+	#journalOuterWorkScope: ReturnType<typeof journalOuterWorkFromExecution> | undefined;
+	#agentEndOuterWork: ReturnType<typeof journalOuterWorkFromExecution> | undefined;
 	#postPromptTasksResolve: (() => void) | undefined = undefined;
 	#postPromptTasksAbortController = new AbortController();
 	/**
