@@ -8,7 +8,10 @@
  * without pinning the exact refusal wording.
  */
 import { isModelRequestDenied } from "@oh-my-pi/pi-ai/error";
-import { createModelRequestSessionExecution } from "@oh-my-pi/pi-ai/model-request-execution";
+import {
+	createModelRequestSessionExecution,
+	runWithModelRequestExecution,
+} from "@oh-my-pi/pi-ai/model-request-execution";
 import {
 	getModelRequestRuntime,
 	type ModelRequestAuthorizationInput,
@@ -67,7 +70,6 @@ async function refusal(promise: Promise<unknown>): Promise<{ refused: boolean; d
 	}
 }
 
-if (!scenarios.some(value => value === scenario)) throw new Error(`unknown managed boundary scenario: ${scenario}`);
 
 const runtime = getModelRequestRuntime();
 let result: Record<string, unknown>;
@@ -95,4 +97,7 @@ switch (scenario) {
 		result = { outcome, gateAttempts: gate.attempts };
 		break;
 	}
+	default:
+		throw new Error(`unknown managed boundary scenario: ${scenario}`);
 }
+process.stdout.write(`${JSON.stringify(result)}\n`);
