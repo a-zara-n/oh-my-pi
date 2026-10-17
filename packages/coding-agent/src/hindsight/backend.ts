@@ -11,6 +11,10 @@ import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import { logger, prompt } from "@oh-my-pi/pi-utils";
 import type { AgentSession } from "../session/agent-session";
 import type { Settings } from "../config/settings";
+import {
+	beginDetachedAgentSessionOuterWork,
+	type AgentSessionDetachedOuterWork,
+} from "../session/internal/agent-session-outer-work";
 import { memoryToolRefs } from "../memory-backend/tool-names";
 import type { MemoryBackend, MemoryBackendStartOptions, MemoryPromptPreparation } from "../memory-backend/types";
 import hindsightInstructions from "../prompts/system/hindsight-instructions.md" with { type: "text" };
@@ -268,6 +272,27 @@ async function installPrimaryState(
 	const config = loadHindsightConfig(settings);
 	if (!isHindsightConfigured(config)) return undefined;
 
+	// Begin the bootstrap's journal work handle BEFORE the retain-queue flush
+	// awaits below: a binding that moves to closing while an existing state
+	// flushes refuses new work begins, and the mental-model bootstrap started
+	// after those awaits still needs a handle acquired before them.
+	const bootstrapWork = beginDetachedAgentSessionOuterWork(session);
+	try {
+		return await installConfiguredPrimaryState(session, config, banksSet, bootstrapWork);
+	} catch (error) {
+		// The pre-begun handle would otherwise never settle, leaving the binding's
+		// outer-work drain waiting forever; the install failure still propagates.
+		bootstrapWork.settle(Promise.resolve(), () => {});
+		throw error;
+	}
+}
+
+async function installConfiguredPrimaryState(
+	session: AgentSession,
+	config: HindsightConfig,
+	banksSet: Set<string>,
+	bootstrapWork: AgentSessionDetachedOuterWork,
+): Promise<HindsightSessionState | undefined> {
 	const client = createHindsightClient(config);
 	const scope = computeBankScope(config, session.sessionManager.getCwd());
 
@@ -315,13 +340,18 @@ async function installPrimaryState(
 	// `mentalModelsLoadPromise`. Subsequent turns see the populated cache
 	// because `runMentalModelLoad` calls `refreshBaseSystemPrompt`.
 	if (config.mentalModelsEnabled) {
-		const loadPromise = state.runMentalModelLoad(scope);
-		// The RAW bootstrap is held on a self-contained journal work handle inside
-		// HindsightSessionState.runMentalModelLoad; this deadline-settled wrapper is
-		// consumer-facing only and must not be tracked as outer work.
+		const loadPromise = state.runMentalModelLoad(scope, bootstrapWork);
+		// The RAW bootstrap settles on the work handle begun before this install's
+		// flush awaits (see HindsightSessionState.runMentalModelLoad); this
+		// deadline-settled wrapper is consumer-facing only and must not be tracked
+		// as outer work.
 		state.mentalModelsLoadPromise = loadPromise.catch(err => {
 			logger.debug("Hindsight: mental-model bootstrap failed", { bankId: state.bankId, error: String(err) });
 		});
+	} else {
+		// No bootstrap will settle the pre-begun handle; end it now so the
+		// binding's outer-work drain never waits on an unused handle.
+		bootstrapWork.settle(Promise.resolve(), () => {});
 	}
 	return state;
 }

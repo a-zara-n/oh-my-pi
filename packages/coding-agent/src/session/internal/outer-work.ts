@@ -77,10 +77,13 @@ class JournalOuterWorkScopeImpl implements JournalOuterWorkScope {
 			if (primaryError !== undefined) throw primaryError;
 			return;
 		}
-		const failures = [...this.#failures];
-		if (primaryError !== undefined) failures.push(primaryError);
 		await drainDetachedPromises(this.#tracked);
 		this.#ended = true;
+		// Snapshot only after the drain: a failure noted while the last tracked
+		// future settles (late registration, SDK activation) must still reach the
+		// terminal outcome instead of the pre-drain copy.
+		const failures = [...this.#failures];
+		if (primaryError !== undefined) failures.push(primaryError);
 		const error = combineJournalWorkErrors(failures);
 		endJournalWork(this.#handle, error === undefined ? { type: "fulfilled" } : { type: "rejected", error });
 		if (error !== undefined) throw error;

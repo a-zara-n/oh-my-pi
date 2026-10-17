@@ -8,7 +8,25 @@ export interface AgentSessionOuterWorkBridge {
 	run<T>(work: () => Promise<T>): Promise<T>;
 	trackDetached(promise: Promise<unknown>): void;
 	noteFailure(error: unknown): void;
-	detachObserved(promise: Promise<unknown>, onError: (error: unknown) => void): void;
+	beginDetached(): AgentSessionDetachedOuterWork;
+}
+
+/**
+ * A journal work handle begun while the binding still accepted work and settled
+ * later with the raw producer future. Acquire it before starting the producer —
+ * a binding that closes in between refuses new begins, and the raw future must
+ * already have its accounting home so settlement never needs a new begin.
+ */
+export interface AgentSessionDetachedOuterWork {
+	settle(promise: Promise<unknown>, onError: (error: unknown) => void): void;
+}
+
+/** Observe a raw future directly when no journal work handle could be acquired. */
+export function observeDetachedOuterWork(promise: Promise<unknown>, onError: (error: unknown) => void): void {
+	void promise.then(
+		() => {},
+		error => onError(error),
+	);
 }
 
 const agentSessionOuterWorkBridgeKey = Symbol("agentSessionOuterWorkBridge");
@@ -44,23 +62,16 @@ export function noteAgentSessionOuterWorkFailure(session: AgentSession, error: u
 }
 
 /**
- * Own a detached producer on a self-contained journal work handle that the consumer does
- * not await: the caller keeps its bounded return while the raw promise stays held on the
- * open handle until settlement. `onError` observes the rejection after the journal `end`
- * accounting, so a void call site never turns it into an unhandled fatal.
+ * Begin a self-contained journal work handle for a producer the consumer will not
+ * await, so the caller keeps its bounded return. Acquire this before starting the
+ * producer: a binding that moved to closing in between refuses new begins, and the
+ * fallback then only observes the raw future. `settle` holds the raw promise on the
+ * open handle for its full lifetime, with `onError` observing the accounted
+ * rejection (journal `end` happens first), so a void call site never turns it into
+ * an unhandled fatal.
  */
-export function detachAgentSessionOuterWork(
-	session: AgentSession,
-	promise: Promise<unknown>,
-	onError: (error: unknown) => void,
-): void {
+export function beginDetachedAgentSessionOuterWork(session: AgentSession): AgentSessionDetachedOuterWork {
 	const bridge = outerWorkBridge(session);
-	if (bridge === undefined) {
-		void promise.then(
-			() => {},
-			error => onError(error),
-		);
-		return;
-	}
-	bridge.detachObserved(promise, onError);
+	if (bridge === undefined) return { settle: observeDetachedOuterWork };
+	return bridge.beginDetached();
 }

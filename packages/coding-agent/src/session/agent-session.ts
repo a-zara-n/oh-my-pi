@@ -364,7 +364,11 @@ import {
 	type ModelRequestRootAssignment,
 	withModelRequestExecution,
 } from "./model-request-context";
-import { bindAgentSessionOuterWorkBridge } from "./internal/agent-session-outer-work";
+import {
+	bindAgentSessionOuterWorkBridge,
+	type AgentSessionDetachedOuterWork,
+	observeDetachedOuterWork,
+} from "./internal/agent-session-outer-work";
 import { journalOuterWorkFromExecution, type JournalOuterWorkScope } from "./internal/outer-work";
 import {
 	buildReplanTitleContext,
@@ -1914,7 +1918,7 @@ export class AgentSession implements SettingsScope {
 			run: work => this.#runJournalOuterWork(work),
 			trackDetached: promise => this.#trackJournalOuterWork(promise),
 			noteFailure: error => this.#noteJournalOuterWorkFailure(error),
-			detachObserved: (promise, onError) => this.#detachJournalOuterWork(promise, onError),
+			beginDetached: () => this.#beginDetachedJournalOuterWork(),
 		});
 		this.#sideStreamBase = config.sideStreamFn ?? streamSimple;
 		this.#onPayload = config.onPayload;
@@ -3040,23 +3044,27 @@ export class AgentSession implements SettingsScope {
 	}
 
 	/**
-	 * Own a detached producer on its own self-contained journal work handle. Unlike
+	 * Begin a self-contained journal work handle for a detached producer. Unlike
 	 * {@link #runJournalOuterWork} this never swaps the ambient outer-work scope, so
 	 * the awaited caller's own tracking is unaffected and the consumer keeps its
-	 * bounded return; the raw promise stays held on the open handle until it settles,
-	 * with `onError` observing the accounted rejection (journal `end` happens first).
+	 * bounded return; `settle` holds the raw promise on the open handle until it
+	 * settles, with `onError` observing the accounted rejection (journal `end`
+	 * happens first). The handle is begun eagerly, before the producer starts, so a
+	 * binding that has since moved to closing never strands the raw future on
+	 * observation alone.
 	 */
-	#detachJournalOuterWork(promise: Promise<unknown>, onError: (error: unknown) => void): void {
+	#beginDetachedJournalOuterWork(): AgentSessionDetachedOuterWork {
 		try {
 			const scope = journalOuterWorkFromExecution(this.#modelRequestExecution);
-			void scope.run(() => promise).catch(error => onError(error));
+			return {
+				settle: (promise, onError) => {
+					void scope.run(() => promise).catch(error => onError(error));
+				},
+			};
 		} catch {
-			// Begin refused (closing/faulted family takes no new work): observe the raw
-			// promise directly so the failure still surfaces to the caller.
-			void promise.then(
-				() => {},
-				error => onError(error),
-			);
+			// Begin refused (closing/faulted family takes no new work): settling then
+			// observes the raw promise directly so the failure still surfaces to the caller.
+			return { settle: observeDetachedOuterWork };
 		}
 	}
 
