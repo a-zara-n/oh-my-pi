@@ -44,6 +44,110 @@ No build, tests, linter, formatter, loader probe, or runtime smoke was executed 
 the native implementation worker. Parent integration must establish those
 results; this document does not claim acceptance from source inspection alone.
 
+## Ordinary and named-owned SQLite
+
+Selecting the library does not make every Database managed. Default `unix` and
+the other upstream VFS variants retain their original ordinary open/access/
+delete, locking, transaction, journal/WAL/shm, VACUUM and close semantics under
+the unchanged compile options. Ordinary files/parents need not be 0600/0700;
+legal post-open chmod, URI modes, ATTACH/super-journals and memory scratch do not
+create owned state. Ordinary native commands 1/2/3 return NOTFOUND, even after
+SQL, transactions or WAL use: there is no late-enrollment path.
+
+The fixed nondefault source-owned POSIX variant is **`omp-owned-v1`**. The audit
+factory selects it with an internally encoded `file:` URI's `vfs` parameter,
+while retaining its existing object options and private registration protocol.
+No new factory method, public command, setter, fd/pointer/proof API or global
+syscall hook is introduced. Choosing the name alone is not JS factory or
+authority proof. External caller URI input remains the factory's rejection
+boundary; native actual-fd/namespace records, not the URI or filename property,
+remain the proof inputs.
+
+The owned timing is the original timing, not lazy command-1 enrollment:
+
+- SQLite resolves the URI VFS before Btree/Pager open (`src/main.c:3272–3273`,
+  `:3351`, `:3643–3644`). The named variant uses the same source-owned unix
+  callbacks and POSIX finder, and is registered without replacing default unix
+  (`src/os_unix.c:8472–8494`, `:8504–8542`).
+- The existing private-parent check remains before the named main's actual
+  open. Its fd/stat/parent/generation context and owned methods are attached
+  before unixOpen returns, therefore before the first 100-byte main-header read
+  (`src/btree.c:2712–2716`, `src/pager.c:3956–3964`). Failed named parent/mode
+  startup is rejected during open, not deferred to inspect.
+- Commands 1/2 inspect and irreversibly arm that already-owned lifetime.
+  Pending mutation/sidecar use, armed identity/namespace/stat/generation faults,
+  readonly recovery/extension restrictions and sticky-fault cleanup stay guarded.
+  Command 3 fixes actual native readonly/query-only/authorizer policy before
+  the authority factory returns and before its first consumer SELECT.
+
+Pager canonicalization still produces the real main/-journal/-wal filenames
+and retains its selected VFS (`src/pager.c:4834–4862`, `:4954–4995`).
+Sidecars associate with SQLite's exact main object, never a URI/pathname registry.
+Ordinary and named-owned POSIX connections may share an upstream inode/shm node;
+guards consult this connection's state, not whether another user stamped the
+node. Existing readonly readmark capability, RO recovery rejection and immutable
+node generations remain distinct from ordinary shared-node capabilities.
+
+Implicit owned disk ATTACH and VACUUM output inherit the named VFS. An explicit
+ordinary/foreign disk `vfs=` override is rejected in ATTACH core **before child
+open**, including VACUUM INTO's internal ATTACH; otherwise that URI would escape
+the early owned boundary. Memory scratch remains memory. Owned output still
+requires exclusive creation, binds to the real source and remains
+non-authoritative; ordinary VACUUM preserves SQLite's existing empty-output
+behavior. Owned path-only deletion stays forbidden; ordinary xDelete keeps its
+complete upstream body. Owned journal/WAL deletion still uses checked live fds.
+
+### Regression cause and parent-only commands
+
+At base `f75ee2c`, `apply-patch.ts:20–36` imposed owned policy/attachment on
+every unix open. Every ordinary main acquired unarmed state; write checking
+(`owned-vfs.c:176–181`) and sidecar attachment (`:464–466`) converted its normal
+DDL into sticky IOERR_AUTH/7178. A legal post-open mode change could also fail
+the premature stat snapshot. [INFERENCE, source path] These are the rejecting
+paths; the supplied runtime observations do not identify which callback failed
+first. The fix selects intent before open, not by ignoring a fault, splitting
+SQL, or enrolling an ordinary connection afterward.
+
+After integrating both native and factory changes, run from the integration
+checkout. Preserve the prior build under an unused name; the output directory
+must be new. `/tmp/sqlite` denotes the existing pristine canonical source from
+the reproduce instructions; use its actual acquired location if different.
+
+```sh
+mv native/audit-sqlite/build native/audit-sqlite/build-before-named-vfs
+bun scripts/build-audit-sqlite.ts /tmp/sqlite "$PWD/native/audit-sqlite/build"
+DIAGNOSTIC=/Users/azara/.omp/agent/sessions/-.omp/2026-10-12T15-07-06-406Z_01a130a7-3326-77fa-9bba-93fd49852bd2/local/d37-sqlite-ddl-runtime-diagnostic.ts
+bun "$DIAGNOSTIC" plain-default
+bun --preload "$PWD/scripts/audit-library-bootstrap.ts" "$DIAGNOSTIC" plain-selected
+bun --preload "$PWD/scripts/audit-library-bootstrap.ts" "$DIAGNOSTIC" owned-selected
+/usr/bin/clang -std=c11 -D_DARWIN_C_SOURCE -arch arm64 -mmacosx-version-min=14.0 -I native/audit-sqlite/build/build native/audit-sqlite/ordinary-compat.c "$PWD/native/audit-sqlite/build/libomp-audit-sqlite.dylib" -Wl,-rpath,"$PWD/native/audit-sqlite/build" -o native/audit-sqlite/build/ordinary-compat
+native/audit-sqlite/build/ordinary-compat
+bun test --preload "$PWD/scripts/audit-library-bootstrap.ts" ./packages/utils/test/model-request-journal-sqlite-control.test.ts ./packages/utils/test/model-request-journal-authority-sqlite.test.ts
+RECOVERY=/Users/azara/.omp/agent/sessions/-.omp/2026-10-12T15-07-06-406Z_01a130a7-3326-77fa-9bba-93fd49852bd2/local/sa-r9-ro-wal-recovery-smoke.ts
+bun "$RECOVERY" "$PWD/native/audit-sqlite/build/libomp-audit-sqlite.dylib" require-fixed
+```
+
+The build automatically recomputes ordered patch SHA256, patched-source SHA256,
+post-sign dylib SHA256 and the final manifest. Do not mix an old manifest with a
+new dylib. No source pin, public ABI 1/64-word layout, commands 1/2/3, manifest
+schema or build hash-input list changes are needed. The d37 artifact imports the
+factory from `/Users/azara/work/omp-fork-sa-r9-integration`; integrate there before
+running that unchanged artifact.
+
+`ordinary-compat.c` links the actual new dylib and retains its printed fresh
+fixture tree. It covers ordinary DDL/index/master, permissions/URI/metadata,
+tx/rollback/ATTACH/temp/VACUUM, real crash-left rollback/WAL recovery and cleanup,
+ordinary late-enrollment rejection, named startup refusal before command 1,
+decoded named-URI paths, both mixed WAL/node opening orders, readonly
+policy-before-first-SELECT/readmarks, owned RW/RO copies, managed VFS-escape
+refusal before file creation, pending child writes, identity/namespace/metadata
+stickiness and close propagation. It does not replace JS private-registry or
+controlled fault acceptance. Parent must also retain unsupported/foreign/
+unregistered diagnostics, exact managed close-only/output I/O/close faults,
+same-snapshot/generation checks and cold/cached RO recovery byte-preservation
+with legitimate RW recovery. No fixture/build/test/diagnostic run is claimed here.
+
+
 ## Canonical provenance and license
 
 - SQLite 3.54.1; source ID:
@@ -160,12 +264,13 @@ aborts rather than reusing a lifetime.
 and reference to a per-main recursive-mutex state. WAL/main-journal `xOpen`
 associates through SQLite's public `sqlite3_database_file_object(zPath)` exact
 pager relationship, never a global last-open or pathname lookup. The only
-registered/openable disk VFS for managed use is `unix` with POSIX locking;
-alternate unix locking names, immutable/nolock modes, anonymous disk temporary
-files, and unassociated super-journals are rejected. Temporary work is compiled
-into memory. The version probe may use `:memory:` but never as fd evidence.
+disk VFS for managed use is the nondefault source-owned `omp-owned-v1` POSIX
+variant; default `unix` remains ordinary. Alternate locking names,
+immutable/nolock modes, anonymous disk temporary files and unassociated
+super-journals are rejected for managed opens. Temporary work is compiled into
+memory. The version probe may use `:memory:` but never as fd evidence.
 
-Every concrete file callback is wrapped under the connection lifetime mutex:
+Every concrete owned file callback is wrapped under the connection lifetime mutex:
 read, write, truncate, sync, size, lock/reserved-lock, file-control/size-hint,
 sector/capability, shm-map/lock/barrier/unmap, fetch/unfetch, close and reopen.
 Main mmap is disabled at compilation. Mutating calls require an armed writer;
@@ -223,12 +328,13 @@ No HAS_MOVED, unsafe offset, global syscall hook, fd dup, fd export, foreign
 library struct, or caller-owned SQLite object is accepted as proof.
 
 This does not claim arbitrary same-uid content-write/rename immunity beyond
-DES-004/RK-7 or replace the root/maintenance lease. Path-only xAccess validates
-the trusted namespace but is never descriptor proof. Path-only xDelete is
-deliberately rejected: core journal deletion reopens through its exact pager if
-necessary, guards that live owned journal, then unlinks relative to the owned
-directory before close; WAL deletion similarly guards/unlinks before close.
-Shm deletion is checked while its last live node fd/reference is still owned.
+DES-004/RK-7 or replace the root/maintenance lease. Named-owned path-only
+xAccess validates the trusted namespace but is never descriptor proof.
+Named-owned path-only xDelete is deliberately rejected: core journal deletion
+reopens through its exact pager if necessary, guards that live owned journal,
+then unlinks relative to the owned directory before close; owned WAL deletion
+similarly guards/unlinks before close. Ordinary access/deletion stays upstream.
+Owned shm deletion is checked while its last live node fd/reference is owned.
 These checks do not claim atomic immunity to nonparticipant same-uid renames
 between validation and unlink; supported writer/maintenance operations require
 the existing lease. Parent acceptance must exercise checkpoint,

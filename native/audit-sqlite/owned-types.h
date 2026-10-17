@@ -7,6 +7,7 @@
 #define OMP_SQLITE_MAGIC 0x4f4d5053u
 #define OMP_SQLITE_WORDS 64
 #define OMP_SQLITE_BYTES 256
+#define OMP_SQLITE_VFS "omp-owned-v1"
 
 typedef struct OmpSqliteState OmpSqliteState;
 struct OmpSqliteState {
@@ -40,3 +41,4 @@ struct OmpSqliteState {
 };
 static int ompSqliteShmCheck(struct unixFile*, struct unixShmNode*);
 static void ompSqliteCloseFailure(struct unixFile*);
+static const sqlite3_io_methods ompSqliteMethods;

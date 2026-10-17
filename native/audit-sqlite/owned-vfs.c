@@ -1,4 +1,9 @@
 /* Compiled inside SQLite's own os_unix.c, never an interposed VFS/addon. */
+/* Intent is selected by SQLite before xOpen, never inferred from SQL or from
+** an inspect/arm request on an ordinary connection. */
+static int ompSqliteOwnedVfs(const sqlite3_vfs *vfs){
+  return vfs && strcmp(vfs->zName,OMP_SQLITE_VFS)==0;
+}
 static _Atomic(sqlite3_uint64) ompSqliteNextGeneration = 1;
 static sqlite3_uint64 ompSqliteGeneration(void){
   sqlite3_uint64 n = atomic_fetch_add(&ompSqliteNextGeneration, 1);
@@ -144,6 +149,9 @@ static int ompSqliteShmCheck(unixFile *p, unixShmNode *node){
   OmpSqliteState *s = p->ompState;
   struct stat now, named;
   const char *leaf = node->zFilename ? strrchr(node->zFilename,'/') : 0;
+  /* A shared node can have ordinary and owned POSIX users. Only this main's
+  ** lifetime decides whether the owned checks apply; never the node's stamp. */
+  if( !s && !ompSqliteOwnedVfs(p->pVfs) ) return SQLITE_OK;
   if( !s || s->fault || !s->armed || !s->mainFile || node->pInode!=p->pInode
       || node->hShm<0 || !ompSqliteStat(node->hShm, &now) )
     return ompSqliteFault(s);
@@ -184,7 +192,9 @@ static int ompSqliteWriteCheck(unixFile *p){
 ** another xShmMap when the page is cached. The shared node's O_RDWR capability
 ** permits readmarks; it does not grant this main connection recovery rights. */
 static int ompSqliteWalRecoveryCheck(sqlite3_file *id){
-  unixFile *p=(unixFile*)id; OmpSqliteState *s=p->ompState; int rc;
+  unixFile *p; OmpSqliteState *s; int rc;
+  if( !id || id->pMethods!=&ompSqliteMethods ) return SQLITE_OK;
+  p=(unixFile*)id; s=p->ompState;
   sqlite3_mutex_enter(s->mutex);
   rc=ompSqliteCheck(p);
   if( rc==SQLITE_OK && s->readonly ) rc=SQLITE_READONLY_RECOVERY;
@@ -467,13 +477,31 @@ static int ompSqliteAttach(unixFile *p, const char *path, int flags){
   sqlite3_mutex_leave(s->mutex);
   return rc;
 }
+static int ompSqliteBtreeOwned(Btree *bt){
+  sqlite3_file *id=bt ? sqlite3PagerFile(sqlite3BtreePager(bt)) : 0;
+  return id && id->pMethods==&ompSqliteMethods;
+}
+/* An owned connection's implicit ATTACH inherits its VFS. An explicit URI
+** must not escape to ordinary/foreign disk I/O before output/child creation.
+** Canonical memory databases still never open a disk file. */
+static int ompSqliteAttachVfsCheck(sqlite3 *db, sqlite3_vfs *vfs,
+                                 const char *path, int flags){
+  int i;
+  if( ompSqliteOwnedVfs(vfs) || !path || !path[0]
+      || strcmp(path,":memory:")==0 || (flags&SQLITE_OPEN_MEMORY)
+      || sqlite3IsMemdb(vfs) ) return SQLITE_OK;
+  for(i=0; i<db->nDb; i++){
+    if( ompSqliteBtreeOwned(db->aDb[i].pBt) ) return SQLITE_CANTOPEN;
+  }
+  return SQLITE_OK;
+}
 /* These functions are called only by the patched VACUUM core. They are not
 ** exported symbols or file-control commands and accept no JS destination DTO. */
 static int ompSqliteVacuumSourceCheck(sqlite3_file *id, int result){
   unixFile *p;
   OmpSqliteState *s;
   int rc;
-  if( !id || id->pMethods!=&ompSqliteMethods ) return SQLITE_IOERR_AUTH;
+  if( !id || id->pMethods!=&ompSqliteMethods ) return result;
   p=(unixFile*)id; s=p->ompState;
   sqlite3_mutex_enter(s->mutex);
   rc=ompSqliteCheck(p);
@@ -491,6 +519,7 @@ static int ompSqliteVacuumBind(sqlite3_file *source, sqlite3_file *destination){
   struct stat actual;
   int rc;
   int creation=SQLITE_OPEN_CREATE|SQLITE_OPEN_EXCLUSIVE|SQLITE_OPEN_READWRITE;
+  if( !source || source->pMethods!=&ompSqliteMethods ) return SQLITE_OK;
   if( !source || !destination || source->pMethods!=&ompSqliteMethods
       || destination->pMethods!=&ompSqliteMethods || source==destination )
     return SQLITE_IOERR_AUTH;
@@ -529,6 +558,7 @@ static int ompSqliteVacuumFinish(sqlite3_file *source, sqlite3_file *destination
   unixFile *to;
   OmpSqliteState *s;
   int rc;
+  if( !source || source->pMethods!=&ompSqliteMethods ) return result;
   if( !destination || destination->pMethods!=&ompSqliteMethods )
     return ompSqliteVacuumSourceCheck(source,SQLITE_IOERR_AUTH);
   to=(unixFile*)destination; s=to->ompState;

@@ -3,6 +3,8 @@
 ** the same exact-main association, generational and usage-time guards. */
 static int ompSqliteDeleteJournal(Pager *pPager, int syncDirectory){
   int rc;
+  if( !pPager->fd || pPager->fd->pMethods!=&ompSqliteMethods )
+    return sqlite3OsDelete(pPager->pVfs,pPager->zJournal,syncDirectory);
   if( !isOpen(pPager->jfd) ){
     int flags=SQLITE_OPEN_READONLY|SQLITE_OPEN_MAIN_JOURNAL;
     rc=sqlite3OsOpen(pPager->pVfs,pPager->zJournal,pPager->jfd,flags,0);
