@@ -1,4 +1,7 @@
 import { resolveExtraCa, withExtraCaInit } from "@oh-my-pi/pi-utils";
+import { assertJournalExecutionReady } from "@oh-my-pi/pi-utils/model-request-journal-composition";
+import { ModelRequestDeniedError } from "../error/model-request-denied";
+import { getModelRequestRuntime } from "../model-request-runtime";
 import { coworkFetch } from "../providers/cowork-fetch";
 import { withInferenceUserAgent } from "../providers/inference-headers";
 import type { FetchImpl, Model } from "../types";
@@ -6,6 +9,7 @@ import type { Api } from "@oh-my-pi/pi-utils/model-data";
 import { getProxyForProvider, withProxyInit } from "./proxy";
 import { gatedSend, markFetchGated } from "./model-request-fetch";
 import { createFetchRequestDebugSession, isRequestDebugEnabled } from "./request-debug";
+import { assertModelRequestBuiltinFetch } from "./model-request-builtin-fetch";
 
 /** Stamped on a fetch already built by {@link transportFetch}. */
 const TRANSPORT_FETCH = Symbol("omp.transportFetch");
@@ -53,6 +57,29 @@ export function transportFetch(model: Model<Api>, fetchImpl: FetchImpl | undefin
 	if (base.preconnect) ungated.preconnect = base.preconnect;
 	const fetch: TransportFetch = async (input, init) => {
 		const sentInit = prepare(input, init);
+		const execution = getModelRequestRuntime().currentExecution();
+		assertJournalExecutionReady(execution);
+		if (execution !== undefined && execution.journalState !== "untracked") {
+			try {
+				assertModelRequestBuiltinFetch(base);
+			} catch (error) {
+				throw new ModelRequestDeniedError("transport-unsupported", "required model request needs the startup builtin fetch", {
+					cause: error,
+				});
+			}
+			// All debug/body snapshot awaits finish before entering the journal admission path.
+			// The required sender never hides an async preparation step inside its I/O callback.
+			const session = isRequestDebugEnabled() ? await createFetchRequestDebugSession(input, sentInit) : undefined;
+			const response = await gatedSend({
+				model,
+				kind: "chat",
+				input,
+				init: sentInit,
+				transport: base,
+				send: () => base(input, sentInit),
+			});
+			return session === undefined ? response : session.wrapResponse(response);
+		}
 		return gatedSend({ model, kind: "chat", input, init: sentInit, transport: base, send: () => send(input, sentInit) });
 	};
 	if (base.preconnect) fetch.preconnect = base.preconnect;

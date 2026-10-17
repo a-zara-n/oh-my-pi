@@ -171,6 +171,10 @@ booleans and callback registration are not transport evidence. The leaf itself
 does not select SQLite, load a provider, or change ordinary untracked custom-fetch
 and Cowork behavior.
 
+For a required transport, request-debug snapshot/file preparation is awaited
+before entering `gatedSend`, and response-debug wrapping stays after the returned
+response. The ordinary untracked sender retains its existing debug/Cowork path.
+
 This requires trusted startup to run before extensions, configuration or other
 untrusted JavaScript. It is not an in-process JavaScript sandbox and does not
 prove that a builtin call starts DNS, TLS or socket writes synchronously.
