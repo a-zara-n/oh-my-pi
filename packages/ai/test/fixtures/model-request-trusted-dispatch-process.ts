@@ -26,10 +26,11 @@ import { withRawModelRequestJournalLeases } from "@oh-my-pi/pi-utils/model-reque
 import { openModelRequestJournalDatabase } from "@oh-my-pi/pi-utils/model-request-journal-sqlite-control";
 import { registerModelRequestGate, type ModelRequestLease } from "../../src/model-request-gate";
 import { getModelRequestRuntime } from "../../src/model-request-runtime";
+import { complete } from "../../src/stream";
 import { modelRequestBuiltinFetch } from "../../src/utils/model-request-builtin-fetch";
 import { buildModelRequestWire, gatedSend, gateFetch, markFetchGated } from "../../src/utils/model-request-fetch";
 import { transportFetch } from "../../src/utils/transport-fetch";
-import { loopbackModel, startLoopbackProvider } from "../helpers/model-request-loopback";
+import { helloContext, loopbackModel, startLoopbackProvider, textReplyFor } from "../helpers/model-request-loopback";
 
 // Each invocation gets a fresh monotonic gate latch. The --preload is mandatory:
 // no environment flag, replacement fetch, or test-issued ready/binding proof is used.
@@ -43,6 +44,7 @@ const scenarios = [
 	"prepare-await-revoke",
 	"authorize-accessor",
 	"marked-before-required",
+	"forged-transport-stamp", "internal-current-accessor",
 ] as const;
 if (!scenarios.some(value => value === scenario)) throw new Error("unknown trusted dispatch scenario");
 let auxiliaryTwinCalls = 0;
@@ -296,8 +298,11 @@ async function dispatchRegression(context: ReadyContext): Promise<object> {
 	}
 	const hold = Promise.withResolvers<void>();
 	const held = scenario === "same-stack-release" || scenario === "dispatch-before-revoke";
-	const server = startLoopbackProvider(() => ({ status: 200, chunks: ["builtin-loopback"], ...(held ? { holdUntil: hold.promise } : {}) }));
-	const model = loopbackModel("openai-completions", server.origin);
+	const api = scenario === "forged-transport-stamp" ? "openai-responses" : "openai-completions";
+	const server = startLoopbackProvider(() => scenario === "forged-transport-stamp"
+		? textReplyFor(api, "core-provider-completed")
+		: { status: 200, chunks: ["builtin-loopback"], ...(held ? { holdUntil: hold.promise } : {}) });
+	const model = loopbackModel(api, server.origin);
 	const controller = new AbortController();
 	const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(10_000)]);
 	const outcomes: ModelRequestOutcome[] = [];
@@ -309,6 +314,15 @@ async function dispatchRegression(context: ReadyContext): Promise<object> {
 	let fakeLeaseCalls = 0;
 	let forgedAuthorizeCalls = 0;
 	let authorizePropertyReads = 0;
+	let executionPropertyReads = 0;
+	let forgedExecutionCalls = 0;
+	let copiedTransportSymbols = 0;
+	let modelStopReason: string | undefined;
+	const gatePurposes: Array<string | undefined> = [];
+	const alternateExecution = scenario === "internal-current-accessor"
+		? runtime.deriveExecution(context.execution, { purpose: "advisor" })
+		: undefined;
+	if (alternateExecution !== undefined) assertJournalExecutionReady(alternateExecution);
 	let responseResolved = false;
 	let revokePromise: Promise<void> | undefined;
 	const rootProbe = Promise.withResolvers<{ acquired: boolean; responsePending: boolean; error?: string }>();
@@ -338,9 +352,15 @@ async function dispatchRegression(context: ReadyContext): Promise<object> {
 	};
 	if (scenario !== "no-gate") {
 		registerModelRequestGate("native-trusted-dispatch-regression", {
-			async authorize() {
+			async authorize(attempt) {
 				gateCalls++;
-				if (scenario === "deny" || scenario === "fake-supplied" || scenario === "forged-authorize" || scenario === "authorize-accessor" || scenario === "marked-before-required") {
+				gatePurposes.push(attempt.scope?.purpose);
+				if (scenario === "internal-current-accessor") {
+					return attempt.scope?.purpose === "advisor"
+						? { type: "pass" }
+						: { type: "deny", code: "actual-scope-denied", message: "real gate denied the actual main scope" };
+				}
+				if (scenario === "deny" || scenario === "fake-supplied" || scenario === "forged-authorize" || scenario === "authorize-accessor" || scenario === "marked-before-required" || scenario === "forged-transport-stamp") {
 					return { type: "deny", code: "fixture-deny", message: "real gate denied" };
 				}
 				if (scenario === "gate-await-revoke") {
@@ -362,8 +382,9 @@ async function dispatchRegression(context: ReadyContext): Promise<object> {
 	let probe: { acquired: boolean; responsePending: boolean; error?: string } | undefined;
 	let inflight: { received: number; unsettled: boolean; responsePending: boolean; journalState: string } | undefined;
 	const originalAuthorize = runtime.authorize;
+	const originalCurrentExecution = runtime.currentExecution;
 	try {
-		let invoke: () => Promise<Response>;
+		let invoke: () => Promise<Response | undefined>;
 		if (scenario === "custom-sender") {
 			const queued = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
 				senderCalls++;
@@ -399,6 +420,34 @@ async function dispatchRegression(context: ReadyContext): Promise<object> {
 		} else if (scenario === "marked-before-required") {
 			if (markedBeforeRequired === undefined) throw new Error("missing pre-required marked fetch");
 			invoke = () => markedBeforeRequired(`${server.origin}/marked-before-required`, { signal });
+		} else if (scenario === "forged-transport-stamp") {
+			const genuine = transportFetch(model, undefined);
+			const supplied = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+				senderCalls++;
+				return modelRequestBuiltinFetch(input, init);
+			};
+			for (const symbol of Object.getOwnPropertySymbols(genuine)) {
+				const descriptor = Object.getOwnPropertyDescriptor(genuine, symbol);
+				if (descriptor === undefined) throw new Error("genuine transport lost an own symbol");
+				Object.defineProperty(supplied, symbol, descriptor);
+				copiedTransportSymbols++;
+			}
+			// Exercise the actual stream dispatcher/provider/transport chain,
+			// not just a factory's return identity.
+			invoke = async () => {
+				const reply = await complete(model, helloContext(), { apiKey: "loopback-key", fetch: supplied, signal });
+				modelStopReason = reply.stopReason;
+				if (reply.stopReason === "error" || reply.stopReason === "aborted") {
+					throw new Error(reply.errorMessage ?? "core provider rejected supplied transport");
+				}
+				return undefined;
+			};
+		} else if (scenario === "internal-current-accessor") {
+			invoke = () => gatedSend({
+				model, kind: "chat", input: `${server.origin}/internal-current-accessor`, init: { signal },
+				transport: modelRequestBuiltinFetch,
+				send: async () => { senderCalls++; return modelRequestBuiltinFetch(`${server.origin}/internal-current-accessor`, { signal }); },
+			});
 		} else {
 			invoke = () => transportFetch(model, undefined)(`${server.origin}/builtin`, { method: "POST", body: "real-request", signal });
 		}
@@ -423,12 +472,29 @@ async function dispatchRegression(context: ReadyContext): Promise<object> {
 				},
 			});
 		}
+		if (scenario === "internal-current-accessor") {
+			if (alternateExecution === undefined) throw new Error("missing genuine alternate execution");
+			Object.defineProperty(runtime, "currentExecution", {
+				configurable: true,
+				get() {
+					executionPropertyReads++;
+					if (executionPropertyReads !== 3 && executionPropertyReads !== 4) return originalCurrentExecution;
+					return () => {
+						forgedExecutionCalls++;
+						if (forgedExecutionCalls === 2) {
+							Object.defineProperty(runtime, "currentExecution", { configurable: true, writable: true, value: originalCurrentExecution });
+						}
+						return alternateExecution;
+					};
+				},
+			});
+		}
 		// Attach both continuations immediately, including on negative scenarios.
 		const sending = (async () => {
 			try {
 				const response = await invoke();
 				responseResolved = true;
-				body = await response.text();
+				if (response !== undefined) body = await response.text();
 			}
 			catch (caught) { rejected = true; error = caught instanceof Error ? caught.message : String(caught); }
 		})();
@@ -460,11 +526,14 @@ async function dispatchRegression(context: ReadyContext): Promise<object> {
 			gateCalls, beginCalls, responseHeads, chunks, senderCalls, fakeLeaseCalls,
 			forgedAuthorizeCalls, authorizePropertyReads, outcomes, probe, inflight, rootReacquired: true,
 			auxiliaryTwinCalls,
+			executionPropertyReads, forgedExecutionCalls, copiedTransportSymbols, modelStopReason, gatePurposes,
+			alternateJournalState: alternateExecution?.journalState,
 			verifiedReacquireRejected,
 			journalStateAfter: context.execution.journalState,
 		};
 	} finally {
 		Object.defineProperty(runtime, "authorize", { configurable: true, writable: true, value: originalAuthorize });
+		Object.defineProperty(runtime, "currentExecution", { configurable: true, writable: true, value: originalCurrentExecution });
 		controller.abort();
 		hold.resolve();
 		server.stop();

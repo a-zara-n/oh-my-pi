@@ -11,7 +11,8 @@ type Scenario =
 	| "custom-sender" | "fake-supplied" | "forged-authorize" | "leaf-replay"
 	| "same-stack-release" | "dispatch-before-revoke"
 	| "gate-await-revoke" | "begin-epoch-change" | "begin-database-close"
-	| "prepare-await-revoke" | "authorize-accessor" | "marked-before-required";
+	| "prepare-await-revoke" | "authorize-accessor" | "marked-before-required"
+	| "forged-transport-stamp" | "internal-current-accessor";
 
 async function probe(scenario: Scenario): Promise<Record<string, unknown>> {
 	const fixture = path.join(import.meta.dir, "fixtures/model-request-trusted-dispatch-process.ts");
@@ -149,6 +150,22 @@ describe("D37 canonical required-ready builtin dispatch (native authority)", () 
 		expect(await probe("marked-before-required")).toMatchObject({
 			rejected: true, received: 0, gateCalls: 1,
 			beginCalls: 0, senderCalls: 0, auxiliaryTwinCalls: 0,
+			outcomes: [], rootReacquired: true,
+		});
+	}, 30_000);
+
+	test.skipIf(!nativePreloaded)("copying genuine transport symbols onto a supplied sender cannot bypass the real provider's transport boundary", async () => {
+		expect(await probe("forged-transport-stamp")).toMatchObject({
+			rejected: true, received: 0, gateCalls: 0,
+			beginCalls: 0, senderCalls: 0, outcomes: [], rootReacquired: true,
+		});
+	}, 30_000);
+
+	test.skipIf(!nativePreloaded)("internal authorization and gate scope use the actual ALS execution, not an alternating currentExecution accessor", async () => {
+		expect(await probe("internal-current-accessor")).toMatchObject({
+			rejected: true, received: 0, gateCalls: 1,
+			forgedExecutionCalls: 0, gatePurposes: ["main"],
+			alternateJournalState: "required-ready", senderCalls: 0,
 			outcomes: [], rootReacquired: true,
 		});
 	}, 30_000);
