@@ -32,6 +32,9 @@ export interface ModelRequestJournalDatabaseInspection extends ModelRequestJourn
 	readonly transactionGeneration: bigint;
 	readonly transactionState: number;
 	readonly liveWriterGenerations: readonly bigint[];
+	readonly main: ModelRequestJournalDatabaseFileInspection;
+	readonly wal: ModelRequestJournalDatabaseFileInspection;
+	readonly shm: ModelRequestJournalDatabaseFileInspection;
 }
 export interface ModelRequestJournalCreatedDatabase {
 	readonly database: Database;
@@ -40,17 +43,20 @@ export interface ModelRequestJournalCreatedDatabase {
 	readonly identity: ModelRequestJournalDatabaseIdentity | undefined;
 	readonly initialization: ModelRequestJournalDatabaseInitialization;
 }
-interface OwnedFile {
-	readonly presence: number;
+export interface ModelRequestJournalDatabaseFileInspection extends ModelRequestJournalDatabaseIdentity {
+	readonly presence: 0 | 1 | 2;
 	readonly generation: bigint;
-	readonly device: number;
-	readonly inode: number;
+	readonly uid: number;
+	readonly mode: number;
+	readonly nlink: number;
 }
 interface ControlResult {
 	readonly connectionGeneration: bigint;
 	readonly transactionGeneration: bigint;
 	readonly transactionState: number;
-	readonly main: OwnedFile;
+	readonly main: ModelRequestJournalDatabaseFileInspection;
+	readonly wal: ModelRequestJournalDatabaseFileInspection;
+	readonly shm: ModelRequestJournalDatabaseFileInspection;
 }
 interface ConnectionState {
 	readonly database: Database;
@@ -85,7 +91,7 @@ function safeInteger(value: bigint): number {
 	if (!Number.isSafeInteger(number) || number < 0) throw new Error("Journal SQLite identity range rejected");
 	return number;
 }
-function file(buffer: Uint32Array, at: number, main: boolean): OwnedFile {
+function file(buffer: Uint32Array, at: number, main: boolean): ModelRequestJournalDatabaseFileInspection {
 	const presence = buffer[at]!;
 	const generation = uint64(buffer, at + 1);
 	const device = safeInteger(uint64(buffer, at + 3));
@@ -93,7 +99,7 @@ function file(buffer: Uint32Array, at: number, main: boolean): OwnedFile {
 	if (presence !== 0 && presence !== 1 && presence !== 2 || main && presence !== 1) throw new Error("Journal SQLite file state rejected");
 	if (presence === 1 && (generation === 0n || buffer[at + 7] !== process.getuid?.() || (buffer[at + 8]! & 0o7777) !== 0o600 || buffer[at + 9] !== 1)) throw new Error("Journal SQLite owned file rejected");
 	for (let index = at + 10; index < at + 16; index++) if (buffer[index] !== 0) throw new Error("Journal SQLite control reserved field rejected");
-	return Object.freeze({presence, generation, device, inode});
+	return Object.freeze({presence, generation, device, inode, uid: buffer[at + 7]!, mode: buffer[at + 8]!, nlink: buffer[at + 9]!});
 }
 function control(database: Database, command: 1 | 2 | 3, expected?: ModelRequestJournalDatabaseIdentity): ControlResult | undefined {
 	const buffer = new Uint32Array(WORDS);
@@ -119,9 +125,9 @@ function control(database: Database, command: 1 | 2 | 3, expected?: ModelRequest
 	const transactionState = buffer[10]!;
 	if (connectionGeneration === 0n || transactionState > 2) throw new Error("Journal SQLite generation rejected");
 	const main = file(buffer, 16, true);
-	file(buffer, 32, false);
-	file(buffer, 48, false);
-	return Object.freeze({connectionGeneration, transactionGeneration, transactionState, main});
+	const wal = file(buffer, 32, false);
+	const shm = file(buffer, 48, false);
+	return Object.freeze({connectionGeneration, transactionGeneration, transactionState, main, wal, shm});
 }
 function live(state: ConnectionState): ControlResult {
 	if (state.closed) throw new Error("Journal SQLite connection ended");
@@ -196,7 +202,7 @@ export function assertModelRequestJournalDatabase(database: Database): ModelRequ
 		generations.push(owned.connectionGeneration);
 	}
 	generations.sort((left, right) => left < right ? -1 : left > right ? 1 : 0);
-	return Object.freeze({device: actual.main.device, inode: actual.main.inode, connectionGeneration: actual.connectionGeneration, transactionGeneration: actual.transactionGeneration, transactionState: actual.transactionState, liveWriterGenerations: Object.freeze(generations)});
+	return Object.freeze({device: actual.main.device, inode: actual.main.inode, connectionGeneration: actual.connectionGeneration, transactionGeneration: actual.transactionGeneration, transactionState: actual.transactionState, liveWriterGenerations: Object.freeze(generations), main: actual.main, wal: actual.wal, shm: actual.shm});
 }
 /** Exclusive creation is not authority. Store's private initializer must authenticate and durably finish all phases. */
 export function createModelRequestJournalDatabase(databasePath: string): ModelRequestJournalCreatedDatabase {

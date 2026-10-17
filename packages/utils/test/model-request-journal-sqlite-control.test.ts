@@ -25,6 +25,11 @@ mac("owned SQLite fixed control", () => {
 					expect(reader.query<{value: string}, []>("SELECT value FROM evidence").get()?.value).toBe("kept");
 					const snapshot = assertModelRequestJournalDatabase(reader);
 					expect(snapshot.device).toBe(first.device);
+					expect(snapshot.main.presence).toBe(1);
+					expect(snapshot.wal.presence).toBe(1);
+					expect(snapshot.shm.presence).toBe(1);
+					expect(snapshot.wal.generation).toBeGreaterThan(0n);
+					expect(snapshot.shm.generation).toBeGreaterThan(0n);
 					expect(snapshot.inode).toBe(first.inode);
 					expect(snapshot.transactionState).toBe(1);
 					expect(snapshot.transactionGeneration).toBeGreaterThan(0n);
