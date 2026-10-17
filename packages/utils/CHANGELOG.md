@@ -43,6 +43,15 @@
   by main-file rename and `close(true)`. This is rename-before-close evidence, not proof of an
   xClose-only race or authority credential misissuance. Native close-status propagation and these
   factory regressions require the parent's rebuilt-artifact verification; workers did not run them.
+- Reconcile the actual File snapshot when an append's starting byte count differs from
+  the principal's committed count, retaining foreign committed rows and logical staging
+  together before adopting the new size. Facades reindex recovered rows; uncontended
+  appends keep their incremental path without rereading retained history.
+- Validate raw File appends as exactly one physical JSON record before title-slot
+  folding, sharing private closed entry-kind and canonical-ID checks with strict File
+  rewrites. Reject folded title-slot injections, multirow input and invalid row shapes
+  before writing bytes, without granting metadata/source authority or readiness.
+  Added actual child-process and consumer regressions; checks are delegated to integration.
 - Kept File principal logical reads and local projection changes independent of a contended
   writer lease; a second facade preserves the same principal's staged entries and selected leaf.
   Stale principal references cannot remove another principal's cache or mutation guard.

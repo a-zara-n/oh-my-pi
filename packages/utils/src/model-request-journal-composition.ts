@@ -29,7 +29,6 @@ import {
 } from "./model-request-journal-authority";
 import type { ModelRequestAgent, ModelRequestPurpose, ModelRequestScope } from "./model-request-data";
 import type {
-	FileEntry,
 	ModelRequestJournalAck,
 	ModelRequestJournalDescriptor,
 	ModelRequestLifecycleRecord,
@@ -2030,6 +2029,28 @@ function sourceEntry(entry: SessionEntry): boolean {
 	return entry.type === "model_usage" || entry.type === "message" && entry.message.role === "assistant";
 }
 
+// Match the canonical journal reader's closed SessionEntry kinds and IDs.
+// Keep this boundary private: accepting a physical row does not issue authority.
+const CLOSED_ENTRY_TYPES: Record<SessionEntry["type"], true> = {
+	message: true, model_usage: true, model_request_metadata: true, model_request_registry: true, thinking_level_change: true,
+	model_change: true, service_tier_change: true, compaction: true, branch_summary: true,
+	custom: true, custom_message: true, label: true, title_change: true, ttsr_injection: true,
+	session_init: true, mode_change: true, credential_pin: true, reset_boundary: true,
+};
+const CLOSED_ENTRY_ID = /^[A-Za-z0-9_-]+$/;
+
+function closedFileRow(value: unknown): SessionEntry {
+	if (!value || typeof value !== "object" || Array.isArray(value) ||
+		!("type" in value) || typeof value.type !== "string" || !Object.hasOwn(CLOSED_ENTRY_TYPES, value.type) ||
+		!("id" in value) || typeof value.id !== "string" || !CLOSED_ENTRY_ID.test(value.id) ||
+		!("parentId" in value) || (value.parentId !== null && typeof value.parentId !== "string")) unavailable();
+	if (value.type === "message" && (!("message" in value) || !value.message ||
+		typeof value.message !== "object" || Array.isArray(value.message) ||
+		!("role" in value.message) || typeof value.message.role !== "string")) unavailable();
+	if (value.type === "model_request_metadata" && !isModelRequestMetadataEntry(value)) unavailable();
+	return value as SessionEntry;
+}
+
 function strictFile(content: string): { header: SessionHeader; entries: SessionEntry[] } {
 	if (!content.endsWith("\n")) unavailable();
 	const values: unknown[] = [];
@@ -2049,20 +2070,18 @@ function strictFile(content: string): { header: SessionHeader; entries: SessionE
 	if ("modelRequestJournal" in first && first.modelRequestJournal !== undefined &&
 		!isModelRequestJournalDescriptor(first.modelRequestJournal)) unavailable();
 	const seen = new Set<string>([first.id]);
+	const entries: SessionEntry[] = [];
 	for (const value of values.slice(1)) {
-		if (!value || typeof value !== "object" || !("id" in value) || typeof value.id !== "string" ||
-			!("parentId" in value) || (value.parentId !== null && typeof value.parentId !== "string") ||
-			seen.has(value.id)) unavailable();
-		if ("type" in value && value.type === "model_request_metadata" && !isModelRequestMetadataEntry(value)) unavailable();
-		seen.add(value.id);
+		const entry = closedFileRow(value);
+		if (seen.has(entry.id)) unavailable();
+		seen.add(entry.id);
+		entries.push(entry);
 	}
-	// The boundary checks physical framing and entry identity. The canonical
-	// strict journal reader below validates every issued metadata field/sequence.
-	const file = values as FileEntry[];
-	const physicalHeader = file[0] as SessionHeader;
+	// The shared row boundary checks physical identity and closed entry kinds.
+	// The canonical strict reader below validates issued metadata/sequence.
+	const physicalHeader = first as SessionHeader;
 	const slot = parseTitleSlotFromContent(content);
 	const header = slot ? { ...physicalHeader, title: slot.title || undefined, titleSource: slot.source } : physicalHeader;
-	const entries = file.slice(1) as SessionEntry[];
 	if (header.modelRequestJournal) validateModelRequestJournal([header, ...entries]);
 	else if (entries.some(entry => entry.type === "model_request_metadata")) unavailable();
 	if (header.modelRequestRegistry) validateModelRequestRegistry(header, entries);
@@ -2541,13 +2560,13 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 
 	#guardAppend(line: string): void {
 		this.#assertLive();
-		const parsed = parseSessionContent(line);
-		const entry = parsed.entries[0];
-		if (!line.endsWith("\n") || parsed.malformedRecords > 0 || parsed.entries.length !== 1 || !entry ||
-			entry.type === "session" || ["model_request_metadata", "model_request_registry"].includes(entry.type) ||
-			typeof entry.id !== "string" || !entry.id || entry.id === this.#header.id ||
-			(entry.parentId !== null && typeof entry.parentId !== "string") ||
-			this.#committedById.has(entry.id) ||
+		// Parse exactly one physical JSONL record, before any title-slot folding.
+		if (!line.endsWith("\n") || line.indexOf("\n") !== line.length - 1) unavailable();
+		let value: unknown;
+		try { value = JSON.parse(line); } catch { unavailable(); }
+		const entry = closedFileRow(value);
+		if (entry.type === "model_request_metadata" || entry.type === "model_request_registry" ||
+			entry.id === this.#header.id || this.#committedById.has(entry.id) ||
 			(this.#header.modelRequestJournal || this.#header.modelRequestRegistry) && sourceEntry(entry)) unavailable();
 		if (this.#requiresCanonicalRewrite) this.#publishSync(this.#committedHeader ?? this.#header, this.#committedEntries);
 		this.#pendingAppend = { line, entry };
@@ -2559,6 +2578,17 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 		const entry = pending.entry;
 		this.#pendingAppend = undefined;
 		const previousCommittedLeaf = this.#committedEntries.at(-1)?.id ?? null;
+		// A foreign writer may have committed rows since our last observation.
+		// Advance the size only with the matching physical projection, retaining
+		// logical staging through the normal committed-snapshot merge.
+		if (size - Buffer.byteLength(line) !== this.#expectedSize) {
+			this.#refreshCommitted();
+			if (this.#leafId === previousCommittedLeaf && !this.#removedEntryIds.has(entry.id)) this.#leafId = entry.id;
+			// Facades recognize a single revision step as only their own append.
+			// A recovered snapshot also contains foreign rows and needs reindexing.
+			this.#projectionRevision++;
+			return;
+		}
 		this.#committedEntries.push(entry); this.#committedById.set(entry.id, entry);
 		if (!this.#entriesById.has(entry.id) && !this.#removedEntryIds.has(entry.id)) {
 			this.#entries.push(entry); this.#entriesById.set(entry.id, entry);
