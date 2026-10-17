@@ -1,3 +1,11 @@
+/**
+ * Managed native journal + gate outer-work regressions only.
+ *
+ * One argv scenario per fresh child process (`--preload` audit bootstrap). Do not
+ * add genuine-untracked `beginJournalExecutionWork` probes here: after bootstrap
+ * the required latch is irreversible in-process (see utils
+ * `model-request-journal-outer-work-untracked.suite.ts` for untracked proof).
+ */
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -6,14 +14,12 @@ import type { ModelRequestOutcome } from "@oh-my-pi/pi-utils/model-request-data"
 import {
 	retainModelRequestWriterCredential,
 	withVerifiedModelRequestJournalBinding,
-	type ModelRequestJournalLeaseBinding,
 } from "@oh-my-pi/pi-utils/model-request-journal-authority";
 import {
 	assertJournalExecutionReady,
 	closeJournalSession,
 	composeJournalSession,
 	openFileJournalCell,
-	type ModelRequestExecution,
 } from "@oh-my-pi/pi-utils/model-request-journal-composition";
 import { withRawModelRequestJournalLeases } from "@oh-my-pi/pi-utils/model-request-journal-leases";
 import { openModelRequestJournalDatabase } from "@oh-my-pi/pi-utils/model-request-journal-sqlite-control";
