@@ -148,6 +148,16 @@ authorizer grant. This prevents a reader-first open from publishing a global
 O_RDONLY-only node that would prevent later legitimate writers. Existing
 readonly-shm fallback stays intact; no descriptor is replaced/upgraded, and
 per-connection guards still prohibit RO creation/rebuild/truncate/extension.
+
+Core `walIndexRecover` also checks the actual owned main connection before its
+recovery locks or any mapped-memory mutation. The helper first runs the existing
+actual-fd/namespace/sticky-fault checks under that connection's lifetime mutex;
+only a valid read-only main receives `SQLITE_READONLY_RECOVERY`, without turning
+this permission rejection into a sticky namespace fault. Main readonly state,
+not the shared node's writable capability or the WAL fd's open flags, decides
+recovery permission. This applies even when `walIndexPage` returns a cached
+mapping without another `xShmMap`. Normal readmark locks/writes are unchanged;
+valid RW connections retain the original recovery path and BUSY semantics.
 Cleanup unlock/unmap/close still release resources after sticky faults but
 cannot return a live proof. The void shm barrier and integer capability callbacks
 latch faults; the next fallible I/O/control rejects them, and JS must re-inspect
@@ -263,6 +273,14 @@ Patch maintenance: the shared-memory pre-lock guard is anchored to the complete
 (`os_unix.c:4689–4690`) and is deliberately not an admissible single-occurrence
 preimage. This preserves that diagnostic while guarding the real DMS lifecycle
 function (`:4850–4852`) before its first lock operation.
+The recovery-entry preimage similarly includes the complete
+`walIndexRecover` opening and its local declarations (`src/wal.c:1422–1426`),
+with the same exact-one-occurrence rejection as other replacements. The
+source-owned static helper lives in the already-hashed `owned-vfs.c`; its call
+lives in the already-hashed `apply-patch.ts`. A fresh build therefore updates
+the ordered patch SHA256, patched-source SHA256 and signed artifact SHA256
+without changing the manifest schema, public commands 1/2/3, private opcodes,
+canonical source pin or build hash-input list.
 
 ### Terminal close acknowledgment and pinned-consumer contract
 
@@ -314,3 +332,35 @@ observed xClose-only swap window or authority callback false acknowledgment.
 Also cover ordinary successful close, sticky-fault cleanup, repeated Bun
 close/GC after an error, and reader-first RO/RW coexistence plus DMS release/
 retry on the same connection. No execution of these checks is claimed here.
+
+### Read-only WAL recovery boundary
+
+Canonical `src/wal.c:2787–2818` can take the WAL write lock after a malformed
+wal-index header and call `walIndexRecover`. That recovery copies hash tables
+and writes the shared header/checkpoint metadata (`:1571`, `:1604–1623`), not
+just allowed readmarks. Existing-region extension checks alone cannot block
+it: `walIndexPage` directly returns a cached mapping (`:837–846`). The WAL fd
+itself is normally opened READWRITE even for an RO main (`:1756–1760`).
+The guard is consequently at recovery entry and consults only the actual
+owned main's immutable per-connection readonly state after the existing guards.
+
+Parent-run regression fixture: use a new private 0700 directory, a fixture-only
+writer child that commits a small valid WAL, and an external process retaining
+the existing shm DMS shared lock. After the writer child exits, invalidate both
+48-byte wal-index headers in the existing 32 KiB shm via actual file I/O.
+An RO SELECT must reject without changing the complete shm bytes or main/WAL.
+A live RW connection in the same process must then recover and read the
+committed row while the RO connection/node remain alive. Run both cold-map and
+same-connection cached-map cases; prime the latter with a successful real RO
+transaction, inspect its actual shm record, then end that transaction before
+invalidating the header. No fake native callbacks or replaced descriptors are
+needed.
+
+The local `sa-r9-ro-wal-recovery-smoke.ts` artifact accepts an explicit native
+dylib path plus `observe` (identical before/after observations) or `require-fixed`
+(assert RO rejection/full-shm preservation and legitimate RW recovery).
+Cached-map coverage is derived from that prior real same-connection read and
+retained connection lifetime, not internal mapping instrumentation. This fixture
+does not prove an arbitrary concurrent mutation window, authority behavior, or
+replacement rejection; those retain their separate acceptance checks. The
+implementation worker did not execute this fixture or build/check commands.

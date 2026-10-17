@@ -180,6 +180,17 @@ static int ompSqliteWriteCheck(unixFile *p){
     rc = ompSqliteFault(s);
   return rc;
 }
+/* WAL recovery writes mapped hash/header/checkpoint memory without xWrite or
+** another xShmMap when the page is cached. The shared node's O_RDWR capability
+** permits readmarks; it does not grant this main connection recovery rights. */
+static int ompSqliteWalRecoveryCheck(sqlite3_file *id){
+  unixFile *p=(unixFile*)id; OmpSqliteState *s=p->ompState; int rc;
+  sqlite3_mutex_enter(s->mutex);
+  rc=ompSqliteCheck(p);
+  if( rc==SQLITE_OK && s->readonly ) rc=SQLITE_READONLY_RECOVERY;
+  sqlite3_mutex_leave(s->mutex);
+  return rc;
+}
 static void ompSqliteU64(u32 *p, sqlite3_uint64 value){
   p[0] = (u32)value; p[1] = (u32)(value>>32);
 }

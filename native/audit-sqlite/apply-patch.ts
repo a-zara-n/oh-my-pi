@@ -48,6 +48,16 @@ export function patchAmalgamation(canonical: string): string {
 	replace("  sqlite3_mutex_enter(pShmNode->pShmMutex);\n  if( pShmNode->isUnlocked ){", "  sqlite3_mutex_enter(pShmNode->pShmMutex);\n  rc=ompSqliteShmCheck(pDbFd,pShmNode);\n  if( rc!=SQLITE_OK ) goto shmpage_out;\n  if( pDbFd->ompState->readonly && bExtend && pShmNode->nRegion<=iRegion ){\n    rc=SQLITE_READONLY_CANTINIT; goto shmpage_out;\n  }\n  if( pShmNode->isUnlocked ){");
 	replace("static int unixLockSharedMemory(unixFile *pDbFd, unixShmNode *pShmNode){\n  struct flock lock;\n  int rc = SQLITE_OK;", "static int unixLockSharedMemory(unixFile *pDbFd, unixShmNode *pShmNode){\n  struct flock lock;\n  int rc = SQLITE_OK;\n  rc=ompSqliteShmCheck(pDbFd,pShmNode);\n  if( rc!=SQLITE_OK ) return rc;");
 	replace("    if( pShmNode->isReadonly ){\n      pShmNode->isUnlocked = 1;", "    if( pShmNode->isReadonly || pDbFd->ompState->readonly ){\n      pShmNode->isUnlocked = 1;");
+	// Recovery mutates an existing/cached mapping without xShmMap/xWrite.
+	// Check the actual main's per-connection authority at the core entry point.
+	replace("static int walIndexRecover(Wal *pWal){\n  int rc;                         /* Return Code */\n  i64 nSize;                      /* Size of log file */\n  u32 aFrameCksum[2] = {0, 0};\n  int iLock;                      /* Lock offset to lock for checkpoint */", `static int walIndexRecover(Wal *pWal){
+  int rc;                         /* Return Code */
+  i64 nSize;                      /* Size of log file */
+  u32 aFrameCksum[2] = {0, 0};
+  int iLock;                      /* Lock offset to lock for checkpoint */
+
+  rc=ompSqliteWalRecoveryCheck(pWal->pDbFd);
+  if( rc!=SQLITE_OK ) return rc;`);
 	// Path-only VFS deletion cannot establish actual owned-file identity. All
 	// supported journal/WAL deletes below are routed through a live unixFile.
 	const deleteStart = source.indexOf("static int unixDelete(");
