@@ -3231,40 +3231,56 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 		if (!state || state.cell !== this) unavailable();
 		if (state.closing) return state.closing;
 		if (state.closed) return Promise.resolve();
-		if (state.family.state !== "required-faulted" && state.family.state !== "required-revoked") state.family.state = "required-revoked";
+		const closingStates = new Set<JournalSessionState>([state]);
+		const previousCloses = new Set<Promise<void>>();
 		for (const family of this.#families) {
-			if (family.state !== "required-faulted" && family.state !== "required-revoked") family.state = "required-revoked";
+			const descendant = family.session && sessionStates.get(family.session);
+			if (!descendant || descendant.closed) continue;
+			if (descendant.closing) previousCloses.add(descendant.closing);
+			else closingStates.add(descendant);
 		}
-		const closing = this.#drainAndCloseSession(state, session);
-		state.closing = closing;
-		return closing;
+		const completion = Promise.withResolvers<void>();
+		// Claim the entire actual subtree before the first await. Previously accepted
+		// deep appends may finish through these private closing ancestors; new work
+		// still fails the ordinary revoked/closing checks.
+		for (const closingState of closingStates) {
+			closingState.closing = completion.promise;
+			if (closingState.family.state !== "required-faulted") closingState.family.state = "required-revoked";
+		}
+		const operation = this.#drainAndCloseSession([...closingStates], [...previousCloses]);
+		void operation.then(completion.resolve, completion.reject);
+		return completion.promise;
 	}
 
-	async #drainAndCloseSession(state: JournalSessionState, session: JournalSession): Promise<void> {
+	async #drainAndCloseSession(states: JournalSessionState[], previousCloses: readonly Promise<void>[]): Promise<void> {
 		const failures: unknown[] = [];
 		try {
-			// A descendant's close also takes the shared registry root. Finish all
-			// already accepted File work before starting any such close operation.
-			const cells = new Set<FileSessionPrincipalImpl>([this]);
-			for (const family of this.#families) if (family.cell) cells.add(family.cell);
-			const drains = await Promise.allSettled([...cells].map(cell => cell.flush()));
+			const cells = new Set(states.map(state => state.cell));
+			const drains = await Promise.allSettled([
+				...previousCloses, ...[...cells].map(cell => cell.flush()),
+			]);
 			for (const drain of drains) if (drain.status === "rejected") failures.push(drain.reason);
-			for (const family of this.#families) {
-				if (family.session && family.session !== session && family.cell) {
-					try { await family.cell.closeSession(family.session); }
-					catch (error) { failures.push(error); }
-				}
-			}
 			if (failures.length > 0) throw new AggregateError(failures, "Journal principal drain failed");
-			await withVerifiedModelRequestJournalLeases(state.binding, state.registryId, async scope => {
-				this.#assertOwnerScope(state, scope);
-				await principalCloseContext.run(state.root, () => state.root.#appendRegistry([
-					{ event: "member-closed", sessionId: this.getSessionId(), journalEpoch: state.journalEpoch, throughSeq: state.throughSeq, outcome: "closed" },
-					{ event: "owner-closed", ownerId: state.ownerId, sessionId: this.getSessionId(), journalEpoch: state.journalEpoch, throughSeq: state.throughSeq, outcome: "closed" },
-				]));
-				this.#assertOwnerScope(state, scope);
-			});
-		} finally { state.closed = true; this.#revoke("required-revoked"); }
+			// One owned graph operation closes deepest-first, without recursively
+			// awaiting another session's view of this same completion promise.
+			states.sort((left, right) => right.family.ancestors.length - left.family.ancestors.length);
+			for (const state of states) {
+				try {
+					await withVerifiedModelRequestJournalLeases(state.binding, state.registryId, async scope => {
+						state.cell.#assertOwnerScope(state, scope);
+						await principalCloseContext.run(state.root, () => state.root.#appendRegistry([
+							{ event: "member-closed", sessionId: state.cell.getSessionId(), journalEpoch: state.journalEpoch, throughSeq: state.throughSeq, outcome: "closed" },
+							{ event: "owner-closed", ownerId: state.ownerId, sessionId: state.cell.getSessionId(), journalEpoch: state.journalEpoch, throughSeq: state.throughSeq, outcome: "closed" },
+						]));
+						state.cell.#assertOwnerScope(state, scope);
+					});
+					state.closed = true;
+				} catch (error) { state.cell.#fail(error); failures.push(error); }
+			}
+			if (failures.length > 0) throw new AggregateError(failures, "Journal principal logical close failed");
+		} finally {
+			for (const state of states) state.cell.#revoke("required-revoked");
+		}
 	}
 }
 Object.freeze(FileSessionPrincipalImpl.prototype);

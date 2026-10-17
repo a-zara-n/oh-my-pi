@@ -359,6 +359,44 @@ mac("r11 actual File logical principal ownership", () => {
 			});
 		} finally { await fixture.close(); }
 	});
+	for (const [depth, closeDepth] of [[2, 0], [4, 1]] as const) {
+		test(`depth ${depth} accepted append drains before ancestor ${closeDepth} closes`, async () => {
+			const fixture = new R11JournalFixture();
+			try {
+				const rootCell = fixture.open();
+				await fixture.withBinding(rootCell, async binding => {
+					const root = await fixture.ready(binding, rootCell);
+					const chain: ReadyPrincipal[] = [root];
+					for (let level = 1; level <= depth; level++) {
+						chain.push(await fixture.ready(binding, fixture.open(), chain[level - 1],
+							{ ...mainAgent, kind: "sub", depth: level }, rootCell));
+					}
+					const deep = chain[depth]!, ancestor = chain[closeDepth]!;
+					const appended = appendJournalMetadata(deep.session, deep.execution, decision(deep.cell, rootCell));
+					const closing = closeJournalSession(ancestor.session);
+					const joined = Promise.all([appended, closing]);
+					expect(closeJournalSession(deep.session)).toBe(closing);
+					for (const member of chain.slice(closeDepth)) {
+						expect(() => assertJournalExecutionReady(member.execution)).toThrow();
+					}
+					const [ack] = await joined;
+					assertAck(ack, deep.cell, 1);
+					expect(metadata(deep.cell)).toHaveLength(1);
+					const closes = registry(rootCell).filter(entry =>
+						entry.record.sessionId === deep.cell.getSessionId() &&
+						(entry.record.event === "member-closed" || entry.record.event === "owner-closed"));
+					expect(closes).toHaveLength(2);
+					for (const entry of closes) expect(entry.record).toMatchObject({ throughSeq: 1, outcome: "closed" });
+					if (closeDepth !== 0) {
+						assertJournalExecutionReady(root.execution);
+						await appendJournalMetadata(root.session, root.execution, decision(rootCell, rootCell));
+						await closeJournalSession(root.session);
+					}
+					await Promise.all([...fixture.cells].reverse().map(cell => cell.close()));
+				});
+			} finally { await fixture.close(); }
+		});
+	}
 });
 
 mac("r11 actual File send admission closure", () => {

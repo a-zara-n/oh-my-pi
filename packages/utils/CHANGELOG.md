@@ -44,6 +44,9 @@
 - Drain all already accepted File queues before starting descendant logical closes: both
   source appends and close batches use the same real registry-root lease. This prevents a
   descendant close from racing an ancestor's still-running source acknowledgement.
+  The whole actual subtree now shares a private closing completion before the first await,
+  so deeper accepted appends can finish through closing ancestors while new work stays
+  revoked. Logical closed state is recorded only after the real close batch is acknowledged.
 - Added the isolated audit SQLite preload, a fixed source-owned VFS control codec, exclusive
   STORE_ID/database creation and per-connection identity/generation registry. The authority reader
   now verifies actual owned main/WAL/shm and live writer generations in one real RO snapshot rather
