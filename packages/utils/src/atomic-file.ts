@@ -1,5 +1,7 @@
 import * as fs from "node:fs";
-import { hasFsCode, isEexist, isEnoent, logger, toError } from "@oh-my-pi/pi-utils";
+import { hasFsCode, isEexist, isEnoent } from "./fs-error";
+import * as logger from "./logger";
+import { toError } from "./type-guards";
 
 /**
  * Publish a staged sibling file atomically, preserving an existing destination

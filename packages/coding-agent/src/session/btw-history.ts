@@ -3,7 +3,7 @@ import * as path from "node:path";
 import { type } from "@oh-my-pi/omptype";
 import { type BtwHistoryRecord, type BtwHistoryTurn, getBtwLatestTurn } from "@oh-my-pi/pi-tui/overlays/btw-history";
 import { acquireFileLock, type FileLockHandle, isEnoent, toError } from "@oh-my-pi/pi-utils";
-import { replaceFileAtomically } from "../utils/atomic-file";
+import { replaceFileAtomically } from "@oh-my-pi/pi-utils/atomic-file";
 
 export {
 	type BtwHistoryRecord,
