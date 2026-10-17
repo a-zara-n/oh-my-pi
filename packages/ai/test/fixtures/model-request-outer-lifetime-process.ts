@@ -421,29 +421,38 @@ async function runScenario(): Promise<Record<string, unknown>> {
 				scripted({ status: 200, chunks: ["hello"], holdUntil: hold.promise }),
 			);
 			const model = loopbackModel("openai-completions", loopback.origin);
+			const url = `${loopback.origin}/v1/chat/completions`;
 			return withManagedHarness(async harness => {
-				const response = await gatedSend({
+				// Do not await gatedSend before authority race: loopback holds the wire until
+				// `hold` is released from outside the send await (same pattern as a01 debug body).
+				const sendPromise = gatedSend({
 					model,
 					kind: "chat",
-					input: `${loopback.origin}/v1/chat/completions`,
+					input: url,
 					init: { method: "POST", body: JSON.stringify(helloContext()) },
 					transport: modelRequestBuiltinFetch,
 					send: () =>
-						modelRequestBuiltinFetch(`${loopback.origin}/v1/chat/completions`, {
+						modelRequestBuiltinFetch(url, {
 							method: "POST",
 							body: JSON.stringify(helloContext()),
 						}),
 				});
-				const { authorityRace, bindingState, osLeaseCount } = await raceAuthorityClose(harness, 80);
-				hold.resolve();
-				await response.text();
-				const authority = await finishAuthorityClose(harness);
-				loopback.stop();
-				return {
-					blockedBeforeRead: authorityRace,
-					bindingActiveDuringRace: bindingState === "active",
-					authorityOk: authority.ok,
-				};
+				try {
+					await loopback.arrived(1);
+					const { authorityRace, bindingState } = await raceAuthorityClose(harness, 80);
+					hold.resolve();
+					const response = await sendPromise;
+					await response.text();
+					const authority = await finishAuthorityClose(harness);
+					return {
+						blockedBeforeRead: authorityRace,
+						bindingActiveDuringRace: bindingState === "active",
+						authorityOk: authority.ok,
+					};
+				} finally {
+					hold.resolve();
+					loopback.stop();
+				}
 			});
 		}
 		case "pass-body-cancel-reject": {
