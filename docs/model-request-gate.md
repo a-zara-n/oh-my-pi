@@ -75,6 +75,22 @@ identity does not confer readiness. A separate ordinary subprocess covers
 untracked child/deep/derive/revive and parent-optional callers without a File
 principal.
 
+The warm-revive consumer regression is
+`bun packages/coding-agent/test/fixtures/model-request-warm-parent-process.ts`
+(pinned native SQLite on Darwin arm64). It reuses the real verifier/File fixture,
+creates SDK parent R and executor children A/B, parks A with conversational
+history and the executor's saved reviver, then has B's actual model turn invoke
+`write agent://A`. Provider traffic stays on the existing loopback helper and
+uses the built-in OpenAI completions transport with a unique fixture-only model.
+A safety gate permits only that model's exact loopback POST endpoint and denies
+every other attempt before dispatch; it does not replace journal admission.
+The probe installs no readiness setter, execution substitute or caller-issued
+send permission.
+It checks B's real write-turn context, successful saved warm revival, an
+outside-ALS revival, and continued rejection of a direct wrong-family handover.
+The standalone probe prints its stage on failure; merely reaching SDK startup
+or composing ready principals does not establish warm-revive success.
+
 The execution module (`@oh-my-pi/pi-ai/model-request-execution`) is internal and deliberately absent from the
 `@oh-my-pi/pi-ai` barrel, and no public option or request argument accepts an origin, scope or root. That is the whole
 extent of the guarantee: pi-ai's package `./*` export map still makes `model-request-execution` and

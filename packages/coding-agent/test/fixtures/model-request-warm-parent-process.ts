@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { getModelRequestExecution, resolveModelRequestScope } from "@oh-my-pi/pi-ai/model-request-execution";
+import { registerModelRequestGate } from "@oh-my-pi/pi-ai/model-request-gate";
 import { closeModelCache } from "@oh-my-pi/pi-catalog/model-cache";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -24,6 +25,9 @@ import { createInMemoryAuthStorage } from "../helpers/agent-session-setup";
 const A = "WarmSiblingA";
 const B = "WarmSiblingB";
 const WAKE = "warm-parent-regression-wake";
+const PROVIDER = "warm-parent-loopback";
+const MODEL = "warm-parent-loopback-model";
+const MODEL_PATTERN = `${PROVIDER}/${MODEL}`;
 const unavailable = /Model request journal capability is unavailable/;
 const fixture = new R11JournalFixture();
 const directory = fixture.directory;
@@ -33,7 +37,7 @@ const rootFile = manager.getSessionFile();
 assert(rootFile !== undefined);
 const rootCell = fixture.open(rootFile);
 const authStorage = createInMemoryAuthStorage();
-authStorage.keys.setRuntime("openai", "loopback-only-unused-key");
+authStorage.keys.setRuntime(PROVIDER, "loopback-only-unused-key");
 let stage = "native-authority";
 let rootSession: AgentSession | undefined;
 let writeStartedUnderB = false;
@@ -53,7 +57,7 @@ const server = startLoopbackProvider(request => {
 	if (writing) wakeDispatched = true;
 	const name = writing ? "write" : "yield";
 	const args = writing ? { path: `agent://${A}`, content: "wake from genuine sibling B" } : { type: "result", data: "done" };
-	const chunk = { id: "chatcmpl-warm-parent", object: "chat.completion.chunk", created: 0, model: "gpt-4o-mini" };
+	const chunk = { id: "chatcmpl-warm-parent", object: "chat.completion.chunk", created: 0, model: MODEL };
 	return sseReply([
 		{ ...chunk, choices: [{ index: 0, delta: { role: "assistant", tool_calls: [{ index: 0, id: `call_${name}_${server.requests.length}`,
 			type: "function", function: { name, arguments: JSON.stringify(args) } }] } }] },
@@ -62,15 +66,30 @@ const server = startLoopbackProvider(request => {
 		"[DONE]",
 	]);
 });
+// This gate is a send safety boundary, not a readiness/admission substitute. An
+// unexpected fallback/provider/endpoint is denied before any builtin network I/O.
+registerModelRequestGate("native-warm-parent-loopback-only", {
+	async authorize(attempt) {
+		const endpoint = attempt.wire === undefined ? undefined : new URL(attempt.wire.url);
+		if (attempt.model.provider !== PROVIDER || attempt.model.id !== MODEL ||
+			attempt.model.api !== "openai-completions" || endpoint?.origin !== server.origin ||
+			endpoint.pathname !== "/v1/chat/completions" || attempt.wire?.method !== "POST") {
+			return { type: "deny", code: "fixture-non-loopback", message: "Native warm-parent fixture refused a non-loopback attempt" };
+		}
+		return { type: "pass" };
+	},
+});
 const modelsPath = path.join(directory, "models.yml");
-fs.writeFileSync(modelsPath, JSON.stringify({ providers: { openai: {
+fs.writeFileSync(modelsPath, JSON.stringify({ providers: { [PROVIDER]: {
 	baseUrl: `${server.origin}/v1`, api: "openai-completions", apiKey: "loopback-only-unused-key",
+	models: [{ id: MODEL, name: "Native warm parent loopback", reasoning: false, input: ["text"],
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128_000, maxTokens: 4096 }],
 } } }));
 const settings = Settings.isolated({
 	"task.agentIdleTtlMs": 0, "task.enableLsp": false, "task.isolation.enabled": false,
 	"async.enabled": false, "compaction.enabled": false, "retry.enabled": false,
 	"todo.enabled": false, "todo.reminders": false, "advisor.enabled": false,
-	modelRoles: { default: "openai/gpt-4o-mini" },
+	modelRoles: { default: MODEL_PATTERN, smol: MODEL_PATTERN },
 });
 const modelRegistry = new ModelRegistry(authStorage, modelsPath, { settings,
 	cacheDbPath: path.join(directory, "models-cache.db") });
@@ -87,9 +106,12 @@ try {
 	await fixture.withBinding(rootCell, async binding => {
 		try {
 		stage = "sdk-root";
+		const model = modelRegistry.find(PROVIDER, MODEL);
+		assert(model !== undefined, "actual registry must resolve the unique loopback model");
+		assert.equal(model.baseUrl, `${server.origin}/v1`);
 		const root = await createAgentSession({
 			cwd: directory, agentDir: path.join(directory, "agent"), sessionManager: manager,
-			authStorage, modelRegistry, settings, bindProcessState: false,
+			authStorage, modelRegistry, settings, model, bindProcessState: false,
 			extensions: [], disableExtensionDiscovery: true, skills: [], rules: [], contextFiles: [],
 			promptTemplates: [], slashCommands: [], enableMCP: false, enableLsp: false,
 			skipPythonPreflight: true, agentId: "WarmRootR", modelRequestJournalLeaseBinding: binding,
@@ -106,7 +128,7 @@ try {
 				cwd: directory, artifactsDir: path.join(directory, "artifacts"),
 				agent: { name: "task", description: "native warm parent regression", systemPrompt: "test", tools: ["write"], source: "bundled" },
 				task: "report done", index: id === A ? 0 : 1, id, parentAgentId: "WarmRootR",
-				modelOverride: "openai/gpt-4o-mini", authStorage, modelRegistry, settings,
+				modelOverride: MODEL_PATTERN, authStorage, modelRegistry, settings,
 				modelRequestRoot: handover, enableLsp: false, enableMCP: false, enableIrc: true,
 				inheritedSessionAgents: [], skills: [], rules: [], contextFiles: [], promptTemplates: [],
 				preloadedExtensionPaths: [], preloadedPreparedExtensions: [], preloadedCustomToolPaths: [],
