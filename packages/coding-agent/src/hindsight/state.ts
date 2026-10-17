@@ -1,6 +1,7 @@
 import { logger } from "@oh-my-pi/pi-utils";
 import type { MemoryPromptPreparation } from "../memory-backend/types";
 import type { AgentSession } from "../session/agent-session";
+import { detachAgentSessionOuterWork } from "../session/internal/agent-session-outer-work";
 import { type BankScope, ensureBankExists } from "./bank";
 import type { HindsightApi, MemoryItemInput } from "./client";
 import type { HindsightConfig } from "./config";
@@ -499,6 +500,15 @@ export class HindsightSessionState {
 
 			await this.#loadAndPublishMentalModels(generation, previousSnippet, "MM load");
 		})();
+		// Hold the RAW bootstrap on a self-contained journal work handle for its full
+		// lifetime: the deadline settle below returns at the first-turn bound while the
+		// load keeps running, so tracking the deadline wrapper would leave the raw
+		// producer unheld after the deadline while still blocking the awaited startup
+		// path. The consumer stays bounded; the rejection reaches the journal
+		// accounting before the debug log observes it.
+		detachAgentSessionOuterWork(this.session, bootstrap, error => {
+			logger.debug("Hindsight: mental-model bootstrap failed", { bankId: this.bankId, error: String(error) });
+		});
 		await this.#settleMentalModelsLoadWithinDeadline(bootstrap, generation, previousSnippet);
 	}
 

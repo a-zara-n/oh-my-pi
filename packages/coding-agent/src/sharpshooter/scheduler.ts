@@ -70,11 +70,17 @@ export function startSharpshooterScheduler(options: SchedulerOptions): () => voi
 	// One interval serves every session on this bank. Each tick runs the oldest live holder's work, so a request is
 	// attributed to a session that is still alive, never to one that has already been disposed.
 	const holders = [holder];
-	const timer = setInterval(() => void holders[0]?.tick(), SCHEDULER_TICK_MS);
+	const timer = setInterval(() => {
+		const pending = holders[0]?.tick();
+		// The tick logs and ends its journal work handle as rejected before rethrowing;
+		// observe the remainder so this void call site cannot turn it into an
+		// unhandled-rejection fatal.
+		pending?.catch(() => {});
+	}, SCHEDULER_TICK_MS);
 	timer.unref();
 	const entry: SchedulerEntry = { timer, holders };
 	schedulers.set(bankDir, entry);
-	void holder.tick();
+	void holder.tick().catch(() => {});
 	return createDisposer(bankDir, entry, holder);
 }
 

@@ -1913,6 +1913,8 @@ export class AgentSession implements SettingsScope {
 		bindAgentSessionOuterWorkBridge(this, {
 			run: work => this.#runJournalOuterWork(work),
 			trackDetached: promise => this.#trackJournalOuterWork(promise),
+			noteFailure: error => this.#noteJournalOuterWorkFailure(error),
+			detachObserved: (promise, onError) => this.#detachJournalOuterWork(promise, onError),
 		});
 		this.#sideStreamBase = config.sideStreamFn ?? streamSimple;
 		this.#onPayload = config.onPayload;
@@ -3032,6 +3034,32 @@ export class AgentSession implements SettingsScope {
 	#trackJournalOuterWork(promise: Promise<unknown>): void {
 		this.#journalOuterWorkScope?.trackDetached(promise);
 	}
+	/** Record an unrecovered failure on the session's active outer-work scope (same open handle as the parent `run`). */
+	#noteJournalOuterWorkFailure(error: unknown): void {
+		this.#journalOuterWorkScope?.noteFailure(error);
+	}
+
+	/**
+	 * Own a detached producer on its own self-contained journal work handle. Unlike
+	 * {@link #runJournalOuterWork} this never swaps the ambient outer-work scope, so
+	 * the awaited caller's own tracking is unaffected and the consumer keeps its
+	 * bounded return; the raw promise stays held on the open handle until it settles,
+	 * with `onError` observing the accounted rejection (journal `end` happens first).
+	 */
+	#detachJournalOuterWork(promise: Promise<unknown>, onError: (error: unknown) => void): void {
+		try {
+			const scope = journalOuterWorkFromExecution(this.#modelRequestExecution);
+			void scope.run(() => promise).catch(error => onError(error));
+		} catch {
+			// Begin refused (closing/faulted family takes no new work): observe the raw
+			// promise directly so the failure still surfaces to the caller.
+			void promise.then(
+				() => {},
+				error => onError(error),
+			);
+		}
+	}
+
 
 	/**
 	 * Run `fn` under this session's request context, optionally declaring the purpose of the requests it makes.
@@ -3789,6 +3817,24 @@ export class AgentSession implements SettingsScope {
 				this.#ttsr.markInjectedFromDetails(message.details);
 			}
 			return;
+		}
+		if (message.role === "assistant") {
+			const header = this.sessionManager.getHeader();
+			if (header?.modelRequestJournal || header?.modelRequestRegistry) {
+				// Journal-managed history: assistant (source) entries are written by the
+				// journal principal that owns the file — response settle in this process,
+				// or the owner process for adopted/revived transcripts. This tail is a
+				// dedupe mirror; when the entry is not on the branch the write belongs to
+				// that graph, so the tail neither appends (the cell refuses source-entry
+				// appends) nor mints a journal failure for work it does not own.
+				const persisted = this.#persistedSessionMessageEntryId(message);
+				if (persisted !== undefined) return persisted;
+				logger.debug("Session message-end persistence skipped: journal-managed source entry", {
+					role: message.role,
+					sessionId: this.sessionManager.getSessionId(),
+				});
+				return;
+			}
 		}
 		return this.#persistSessionMessageIfMissing(message);
 	}

@@ -1648,6 +1648,8 @@ export function createAutoLearnCaptureRunner(
 		};
 		const abortCapture = () => captureAgent.abort(signal?.reason);
 		signal?.addEventListener("abort", abortCapture, { once: true });
+		let promptError: unknown;
+		let promptFailed = false;
 		try {
 			if (signal?.aborted) {
 				abortCapture();
@@ -1655,20 +1657,31 @@ export function createAutoLearnCaptureRunner(
 			}
 			await captureAgent.prompt(captureMessage);
 		} catch (error) {
-			if (!signal?.aborted) throw error;
+			if (!signal?.aborted) {
+				promptFailed = true;
+				promptError = error;
+			}
 		} finally {
 			signal?.removeEventListener("abort", abortCapture);
-			for (const [providerKey, state] of captureProviderSessionState) {
-				try {
-					state.close();
-				} catch (error) {
-					logger.warn("Failed to close auto-learn capture provider state", {
-						providerKey,
-						error: String(error),
-					});
-				}
+		}
+		// Close failures are unrecovered cleanup failures: they must reach the
+		// capture's terminal accounting (the session's outer journal work ends the
+		// handle as rejected) instead of vanishing into the log. The prompt failure,
+		// when present, still takes precedence over the close failures below.
+		const closeFailures: unknown[] = [];
+		for (const [providerKey, state] of captureProviderSessionState) {
+			try {
+				state.close();
+			} catch (error) {
+				logger.warn("Failed to close auto-learn capture provider state", { providerKey, error: String(error) });
+				closeFailures.push(error);
 			}
-			captureProviderSessionState.clear();
+		}
+		captureProviderSessionState.clear();
+		if (promptFailed) throw promptError;
+		if (closeFailures.length === 1) throw closeFailures[0];
+		if (closeFailures.length > 1) {
+			throw new AggregateError(closeFailures, "Auto-learn capture provider state close failed");
 		}
 	};
 }
