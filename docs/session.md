@@ -152,6 +152,9 @@ actual root join one private graph: an unbegun admission is cancelled with its a
 release, while a begun start span must reach its real `endJournalSendStart`. The graph then
 joins accepted File queues, acknowledges deepest-first logical closes, and closes the actual
 File writers before the authority releases retained roots and the writer-owner scope.
+Sibling logical-close batches use that same actual root queue after their accepted subtree
+drains, retaining private close context through queue execution instead of competing for
+the root registry lease. The drains themselves are not enqueued behind work they must join.
 Failures remain failures, and a failed close does not become a durable closed acknowledgement.
 The five internal lifecycle operations are not package exports or caller registration hooks.
 Their implementation is published under the package's `internal/` directory, outside the

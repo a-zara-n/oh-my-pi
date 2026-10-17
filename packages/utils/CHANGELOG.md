@@ -87,6 +87,8 @@
 
 ### Fixed
 
+- Serialize sibling logical-close batches on the actual root queue after accepted subtree
+  drains, preserving private close context, generation checks and genuine lease validation.
 - Emit package-root declarations into a generated staging tree, then retain the existing
   public `dist/types` layout during release preparation. Private body-only declarations
   are not published or emitted beside their source.
