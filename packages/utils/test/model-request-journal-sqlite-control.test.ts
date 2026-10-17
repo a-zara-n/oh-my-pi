@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { pathToFileURL } from "node:url";
 import { assertModelRequestJournalDatabase, createModelRequestJournalDatabase, openModelRequestJournalDatabase } from "../src/model-request-journal-sqlite-control";
 
 // This suite requires the approved pinned audit preload. No alternative fd/stat proof or native mock is accepted.
@@ -109,6 +110,10 @@ mac("owned SQLite fixed control", () => {
 					expect(assertModelRequestJournalDatabase(reader).liveWriterGenerations).toContain(original.connectionGeneration);
 					expect(() => reader.exec("UPDATE evidence SET value=0")).toThrow();
 				} finally { reader.close(); }
+				const escaped = path.join(directory, "escaped.sqlite3");
+				expect(() => database.query("ATTACH ? AS escaped").run(`${pathToFileURL(escaped).href}?vfs=unix`)).toThrow();
+				expect(fs.existsSync(escaped)).toBe(false);
+				expect(assertModelRequestJournalDatabase(database).connectionGeneration).toBe(original.connectionGeneration);
 				Object.defineProperty(database, "filename", {value: "file:/not-identity?vfs=unix"});
 				expect(assertModelRequestJournalDatabase(database).inode).toBe(original.inode);
 			} finally { database.close(); }
