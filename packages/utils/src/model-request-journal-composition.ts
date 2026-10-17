@@ -58,13 +58,15 @@ interface FileMutationGuard {
 	body(content: string): void;
 	append(line: string): void;
 	remove(): void;
-	committed?(): void;
+	committed?(line?: string, size?: number): void;
 	readonly backend: FileSessionStorage;
 	openWriter(options?: { flags?: "a" | "w"; onError?: (error: Error) => void }): SessionStorageWriter;
 	updateTitle(update: SessionTitleUpdate): Promise<void>;
 }
 const principalFileGuards = new Map<string, FileMutationGuard>();
-const principalWriteContext = new AsyncLocalStorage<{ principal: FileSessionPrincipalImpl; body: string; generation: number }>();
+const principalWriteContext = new AsyncLocalStorage<{
+	principal: FileSessionPrincipalImpl; body: string; generation: number; targetFile: string;
+}>();
 const principalCloseContext = new AsyncLocalStorage<FileSessionPrincipalImpl>();
 const openFileWriters = new Map<string, WeakRef<FileSessionStorageWriter>>();
 const writerFailureObservers = new WeakMap<object, (error: Error) => void>();
@@ -93,12 +95,14 @@ function guardFileBody(fpath: string, content: string): void {
 	rejectUnownedClosedBody(content);
 }
 
-function guardFileRemoval(fpath: string): void {
+function guardFileRemoval(fpath: string, replacementTarget?: string): void {
 	const guard = guardForFile(fpath);
 	if (guard) { guard.remove(); return; }
 	if (!fs.existsSync(fpath) || !fs.statSync(fpath).isFile()) return;
 	const content = fs.readFileSync(fpath, "utf8");
-	if (principalWriteContext.getStore()?.body !== content) rejectUnownedClosedBody(content);
+	const permit = principalWriteContext.getStore();
+	if (permit?.body !== content || replacementTarget === undefined ||
+		path.resolve(replacementTarget) !== permit.targetFile) rejectUnownedClosedBody(content);
 }
 
 function rejectUnownedClosedBody(content: string): void {
@@ -440,7 +444,7 @@ class FileSessionStorageWriter implements SessionStorageWriter {
 	}
 
 	/** Append `line` at the end of the held descriptor, rolling back to `originalSize` on failure. */
-	#writeNow(line: string, originalSize: number): void {
+	#writeNow(line: string, originalSize: number): number {
 		const buf = Buffer.from(line, "utf-8");
 		let offset = 0;
 		try {
@@ -480,6 +484,7 @@ class FileSessionStorageWriter implements SessionStorageWriter {
 			}
 			throw writeError;
 		}
+		return originalSize + buf.length;
 	}
 
 	appendSync(line: string): void {
@@ -495,15 +500,16 @@ class FileSessionStorageWriter implements SessionStorageWriter {
 		// The publish lock serializes the append against a concurrent rewrite's
 		// check-then-rename, which would otherwise erase the appended turn.
 		try {
+			let size: number | undefined;
 			if (this.#publishLock) {
 				this.#publishLock(
-					() => this.#writeNow(line, this.#reopenIfReplaced()),
+					() => { size = this.#writeNow(line, this.#reopenIfReplaced()); },
 					() => this.#holdsLivePath(),
 				);
 			} else {
-				this.#writeNow(line, fs.fstatSync(this.#fd).size);
+				size = this.#writeNow(line, fs.fstatSync(this.#fd).size);
 			}
-			guard?.committed?.();
+			guard?.committed?.(line, size);
 		} catch (err) {
 			throw this.#recordError(err);
 		}
@@ -1239,7 +1245,7 @@ export class FileSessionStorage implements SessionStorage {
 	 * Windows-style EPERM at the sync layer used by the atomic path.
 	 */
 	renameSync(source: string, target: string): void {
-		guardFileRemoval(source);
+		guardFileRemoval(source, target);
 		if (guardForFile(target)) guardFileBody(target, fs.readFileSync(source, "utf8"));
 		else guardFileRemoval(target);
 		fs.renameSync(source, target);
@@ -1355,6 +1361,9 @@ export class FileSessionStorage implements SessionStorage {
 		fs.mkdirSync(path.dirname(fpath), { recursive: true });
 		const filename = fs.existsSync(fpath) ? fs.realpathSync(fpath) :
 			path.join(fs.realpathSync(path.dirname(fpath)), path.basename(fpath));
+		if (options?.flags === "w" && fs.existsSync(filename)) {
+			rejectUnownedClosedBody(fs.readFileSync(filename, "utf8"));
+		}
 		const existing = openFileWriters.get(filename)?.deref();
 		if (existing?.isOpen()) {
 			if (options?.flags !== "w") return existing;
@@ -2064,6 +2073,7 @@ function strictFile(content: string): { header: SessionHeader; entries: SessionE
 interface FileProjection {
 	header: SessionHeader;
 	entries: SessionEntry[];
+	rewriteRequired?: boolean;
 	titleUpdatedAt?: string;
 }
 
@@ -2076,10 +2086,11 @@ function loadFileProjection(content: string, managedExpected = false): FileProje
 	if (parsed.invalidHeader || parsed.entries[0]?.type !== "session") {
 		throw new Error("session header is missing or malformed");
 	}
-	migrateToCurrentVersion(parsed.entries);
+	const migrated = migrateToCurrentVersion(parsed.entries);
 	const header = parsed.entries[0];
 	if (header.type !== "session") unavailable();
-	return { header, entries: parsed.entries.filter(entry => entry.type !== "session"), titleUpdatedAt: parsed.titleSlot?.updatedAt };
+	return { header, entries: parsed.entries.filter(entry => entry.type !== "session"), titleUpdatedAt: parsed.titleSlot?.updatedAt,
+		rewriteRequired: migrated || parsed.malformedRecords > 0 };
 }
 
 
@@ -2098,6 +2109,10 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 	readonly #storage = new FileSessionStorage();
 	#header: SessionHeader;
 	#entries: SessionEntry[];
+	readonly #entriesById = new Map<string, SessionEntry>();
+	readonly #committedById = new Map<string, SessionEntry>();
+	#requiresCanonicalRewrite = false;
+	#pendingAppend: { line: string; entry: SessionEntry } | undefined;
 	#sessionFile: string;
 	#sessionDir: string;
 	#generation = 0;
@@ -2116,7 +2131,7 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 	#projectionRevision = 0;
 	#titleUpdatedAt: string | undefined;
 	#committedHeader: SessionHeader | undefined;
-	#committedEntries: readonly SessionEntry[] = [];
+	#committedEntries: SessionEntry[] = [];
 	#committedTitleUpdatedAt: string | undefined;
 	readonly #removedEntryIds = new Set<string>();
 	#writeError: Error | undefined;
@@ -2141,6 +2156,7 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 			this.#header = loaded.header;
 			this.#entries = loaded.entries;
 			this.#titleUpdatedAt = loaded.titleUpdatedAt;
+			this.#requiresCanonicalRewrite = loaded.rewriteRequired ?? false;
 			this.#sessionFile = filename;
 			this.#expectedSize = Buffer.byteLength(content);
 		} else {
@@ -2172,7 +2188,8 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 			}
 		}
 		this.#committedHeader = this.#header;
-		this.#committedEntries = this.#entries;
+		this.#committedEntries = this.#entries.slice();
+		for (const entry of this.#entries) { this.#entriesById.set(entry.id, entry); this.#committedById.set(entry.id, entry); }
 		this.#committedTitleUpdatedAt = this.#titleUpdatedAt;
 		cellInstances.add(this);
 		liveCellsByPath.set(this.#sessionFile, this);
@@ -2190,16 +2207,27 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 			openWriter: options => this.openWriter(this.#sessionFile, options),
 			updateTitle: update => this.updateSessionTitle(this.#sessionFile, update),
 			body: content => this.#guardBody(content), append: line => this.#guardAppend(line),
-			remove: () => this.#guardRemove(), committed: () => this.#refreshCommitted(),
+			remove: () => this.#guardRemove(), committed: (line, size) =>
+				line === undefined ? this.#refreshCommitted() : this.#recordCommittedAppend(line, size),
 		};
 	}
 
 	#assertPath(fpath: string): string {
 		const resolved = path.resolve(fpath);
+		if (fs.existsSync(resolved) && fs.lstatSync(resolved).isSymbolicLink()) unavailable();
+		let ancestor = path.dirname(resolved);
+		const suffix = [path.basename(resolved)];
+		while (!fs.existsSync(ancestor)) {
+			suffix.unshift(path.basename(ancestor));
+			const parent = path.dirname(ancestor);
+			if (parent === ancestor) unavailable();
+			ancestor = parent;
+		}
+		const canonical = path.join(fs.realpathSync(ancestor), ...suffix);
 		for (const filename of [this.#sessionFile, this.#relocating?.source, this.#relocating?.dest]) {
 			if (filename === undefined) continue;
 			const artifacts = filename.slice(0, -6);
-			if (resolved === filename || resolved === artifacts || resolved.startsWith(`${artifacts}${path.sep}`)) return resolved;
+			if (canonical === filename || canonical === artifacts || canonical.startsWith(`${artifacts}${path.sep}`)) return canonical;
 		}
 		unavailable();
 	}
@@ -2258,6 +2286,10 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 		this.#projectionRevision++;
 		if (this.#leafId !== null && !this.#entries.some(entry => entry.id === this.#leafId &&
 			entry.type !== "model_request_metadata" && entry.type !== "model_request_registry")) this.#leafId = null;
+		this.#entriesById.clear(); this.#committedById.clear();
+		for (const entry of this.#entries) this.#entriesById.set(entry.id, entry);
+		for (const entry of this.#committedEntries) this.#committedById.set(entry.id, entry);
+		this.#requiresCanonicalRewrite = next.rewriteRequired ?? false;
 	}
 
 	ensureDirSync(dir: string): void {
@@ -2277,69 +2309,67 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 		return this.#storage.readTextSlices(fpath, prefixBytes, suffixBytes);
 	}
 	hasAssistantTurn(fpath: string): Promise<boolean> { return this.#storage.hasAssistantTurn(fpath); }
+	#withValidatedBody<T>(fpath: string, body: string, operation: (target: string) => T): T {
+		const target = this.#assertPath(fpath);
+		if (target !== this.#sessionFile) return operation(target);
+		this.#guardBody(body);
+		return principalWriteContext.run({ principal: this, body, generation: this.#generation, targetFile: target }, () => operation(target));
+	}
 	writeTextSync(fpath: string, content: string, options?: SessionStorageWriteOptions): void {
-		this.#assertPath(fpath);
-		this.#storage.writeTextSync(fpath, content, options);
-		if (path.resolve(fpath) === this.#sessionFile) this.#refreshCommitted();
+		this.#withValidatedBody(fpath, content, target => this.#storage.writeTextSync(target, content, options));
 	}
 	writeLinesSync(fpath: string, lines: readonly string[], options?: SessionStorageWriteOptions): void {
-		this.#assertPath(fpath);
-		this.#storage.writeLinesSync(fpath, lines, options);
-		if (path.resolve(fpath) === this.#sessionFile) this.#refreshCommitted();
+		this.#withValidatedBody(fpath, lines.join(""), target => this.#storage.writeLinesSync(target, lines, options));
 	}
 	writeText(fpath: string, content: string): Promise<void> {
 		this.#assertPath(fpath);
-		return this.#enqueue(async () => {
-			await this.#storage.writeText(fpath, content);
-			if (path.resolve(fpath) === this.#sessionFile) this.#refreshCommitted();
-		});
+		return this.#enqueue(() => this.#withValidatedBody(fpath, content, target => this.#storage.writeText(target, content)));
 	}
 	writeTextAtomic(fpath: string, content: string, options?: WriteTextAtomicOptions): Promise<void> {
 		this.#assertPath(fpath);
-		return this.#enqueue(async () => {
-			await this.#storage.writeTextAtomic(fpath, content, options);
-			if (path.resolve(fpath) === this.#sessionFile) this.#refreshCommitted();
-		});
+		const commitGuard = options?.commitGuard;
+		const safeOptions = commitGuard ? { ...options, commitGuard: () => principalWriteContext.exit(commitGuard) } : options;
+		return this.#enqueue(() => this.#withValidatedBody(fpath, content, target => this.#storage.writeTextAtomic(target, content, safeOptions)));
 	}
 	writeLinesAtomic(fpath: string, lines: readonly string[], options?: WriteTextAtomicOptions): Promise<void> {
 		this.#assertPath(fpath);
-		return this.#enqueue(async () => {
-			await this.#storage.writeLinesAtomic(fpath, lines, options);
-			if (path.resolve(fpath) === this.#sessionFile) this.#refreshCommitted();
-		});
+		const body = lines.join("");
+		const commitGuard = options?.commitGuard;
+		const safeOptions = commitGuard ? { ...options, commitGuard: () => principalWriteContext.exit(commitGuard) } : options;
+		return this.#enqueue(() => this.#withValidatedBody(fpath, body, target => this.#storage.writeLinesAtomic(target, lines, safeOptions)));
 	}
 	async updateSessionTitle(fpath: string, update: SessionTitleUpdate): Promise<void> {
-		this.#assertPath(fpath);
+		const target = this.#assertPath(fpath);
 		await this.#enqueue(async () => {
-			await this.#storage.updateSessionTitle(fpath, update);
-			if (path.resolve(fpath) === this.#sessionFile) this.#refreshCommitted();
+			await this.#storage.updateSessionTitle(target, update);
+			if (target === this.#sessionFile) this.#refreshCommitted();
 		});
 	}
 	rename(fpath: string, nextPath: string): Promise<void> {
-		this.#assertPath(fpath); this.#assertPath(nextPath);
-		return this.#storage.rename(fpath, nextPath);
+		return this.#storage.rename(this.#assertPath(fpath), this.#assertPath(nextPath));
 	}
-	unlink(fpath: string): Promise<void> { this.#assertPath(fpath); return this.#storage.unlink(fpath); }
+	unlink(fpath: string): Promise<void> { return this.#storage.unlink(this.#assertPath(fpath)); }
 	deleteSessionWithArtifacts(fpath: string): Promise<void> {
-		this.#assertPath(fpath); return this.#storage.deleteSessionWithArtifacts(fpath);
+		return this.#storage.deleteSessionWithArtifacts(this.#assertPath(fpath));
 	}
 	deleteSessionWithArtifactsIf(fpath: string, shouldDelete: (content: string) => boolean): Promise<boolean> {
-		this.#assertPath(fpath); return this.#storage.deleteSessionWithArtifactsIf(fpath, shouldDelete);
+		return this.#storage.deleteSessionWithArtifactsIf(this.#assertPath(fpath), shouldDelete);
 	}
 	withSessionFileLockSync<T>(fpath: string, operation: () => T): T {
-		this.#assertPath(fpath); return this.#storage.withSessionFileLockSync(fpath, operation);
+		return this.#storage.withSessionFileLockSync(this.#assertPath(fpath), operation);
 	}
 	claimSession(sessionId: string, sessionFile: string): (() => void) | null {
 		if (this.#sealed || this.#fault) unavailable();
-		if (sessionId !== this.getSessionId() || path.resolve(sessionFile) !== this.#sessionFile) unavailable();
-		return this.#storage.claimSession(sessionId, sessionFile);
+		const target = this.#assertPath(sessionFile);
+		if (sessionId !== this.getSessionId() || target !== this.#sessionFile) unavailable();
+		return this.#storage.claimSession(sessionId, target);
 	}
 	openWriter(fpath: string, options?: { flags?: "a" | "w"; onError?: (error: Error) => void }): SessionStorageWriter {
-		this.#assertPath(fpath);
-		if (path.resolve(fpath) !== this.#sessionFile) return this.#storage.openWriter(fpath, options);
+		const target = this.#assertPath(fpath);
+		if (target !== this.#sessionFile) return this.#storage.openWriter(target, options);
 		this.#assertLive();
 		if (!this.#writer?.isOpen()) {
-			this.#writer = this.#storage.openWriter(fpath, options);
+			this.#writer = this.#storage.openWriter(target, options);
 			const generation = this.#generation;
 			writerFailureObservers.set(this.#writer, error => { if (this.#generation === generation) this.#fail(error); });
 		}
@@ -2350,6 +2380,8 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 	getSessionDir(): string { return this.#sessionDir; }
 
 	resetToNewSession(options?: NewSessionOptions, forcedSessionFile?: string, cwd?: string): string {
+		if (this.#sealed || (liveCellsById.has(this.#header.id) && liveCellsById.get(this.#header.id) !== this) ||
+			(liveCellsByPath.has(this.#sessionFile) && liveCellsByPath.get(this.#sessionFile) !== this)) unavailable();
 		if (this.#session && !this.#closed) unavailable();
 		this.#revoke("required-revoked");
 		const previousId = this.#header.id, previousFile = this.#sessionFile;
@@ -2357,8 +2389,8 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 			if (this.#header.id === previousId && this.#sessionFile === previousFile) this.#fail(error);
 		});
 		this.#lease?.release();
-		liveCellsById.delete(this.#header.id);
-		liveCellsByPath.delete(this.#sessionFile);
+		if (liveCellsById.get(this.#header.id) === this) liveCellsById.delete(this.#header.id);
+		if (liveCellsByPath.get(this.#sessionFile) === this) liveCellsByPath.delete(this.#sessionFile);
 		const next = new FileSessionPrincipalImpl({
 			cwd: cwd ?? this.#header.cwd, sessionDir: options?.sessionDir ?? this.#sessionDir, sessionFile: forcedSessionFile,
 		});
@@ -2372,9 +2404,13 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 		if (this.#header.modelRequestJournal || this.#header.modelRequestRegistry) unavailable();
 		const header = this.#header;
 		const entries = this.#entries;
+		const leafId = this.#leafId;
 		this.resetToNewSession({ parentSession: header.id, providerPromptCacheKey: header.providerPromptCacheKey ?? header.id });
 		this.#header = { ...this.#header, title: header.title, titleSource: header.titleSource };
 		this.#entries = entries;
+		this.#entriesById.clear();
+		for (const entry of entries) this.#entriesById.set(entry.id, entry);
+		this.#leafId = leafId;
 		return this.#sessionFile;
 	}
 
@@ -2390,7 +2426,7 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 	getHeader(): Readonly<SessionHeader> { return structuredClone(this.#header); }
 	getEntries(): readonly SessionEntry[] { return structuredClone(this.#entries); }
 	getEntry(id: string): Readonly<SessionEntry> | undefined {
-		const entry = this.#entries.find(candidate => candidate.id === id);
+		const entry = this.#entriesById.get(id);
 		return entry === undefined ? undefined : structuredClone(entry);
 	}
 	getLeafId(): string | null { return this.#leafId; }
@@ -2398,16 +2434,21 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 	getTitleUpdatedAt(): string | undefined { return this.#titleUpdatedAt; }
 	getExpectedDiskSize(): number | null { return this.#expectedSize; }
 	appendEntry(entry: SessionEntry): void {
-		this.#assertLive();
-		if (this.#entries.some(candidate => candidate.id === entry.id) || entry.type === "model_request_metadata" ||
-			entry.type === "model_request_registry" ||
+		this.#assertProjectionCurrent();
+		if (this.#fault || this.#entriesById.has(entry.id) ||
+			["session", "title", "model_request_metadata", "model_request_registry"].includes(entry.type) ||
 			(this.#header.modelRequestJournal || this.#header.modelRequestRegistry) && sourceEntry(entry)) unavailable();
-		this.applyEntries(this.#header, [...this.#entries, entry], entry.id);
+		const copy = structuredClone(entry);
+		if (typeof copy.id !== "string" || !copy.id || copy.id === this.#header.id ||
+			copy.parentId !== null && typeof copy.parentId !== "string") unavailable();
+		this.#entries.push(copy);
+		this.#entriesById.set(copy.id, copy);
+		this.#leafId = copy.id;
+		this.#removedEntryIds.delete(copy.id);
+		this.#projectionRevision++;
 	}
 	applyEntries(header: SessionHeader, entries: readonly SessionEntry[], leafId: string | null, titleUpdatedAt?: string): void {
-		if (this.#sealed || this.#closed && (this.#header.modelRequestJournal || this.#header.modelRequestRegistry) ||
-			liveCellsByPath.get(this.#sessionFile) !== this || liveCellsById.get(this.#header.id) !== this) unavailable();
-		if (!this.#fault) this.#assertLive();
+		this.#assertProjectionCurrent();
 		if (header.id !== this.#header.id) unavailable();
 		const copy = structuredClone({ header, entries: [...entries] });
 		const body = serializeTitleSlot({ title: header.title, source: header.titleSource,
@@ -2420,16 +2461,23 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 		for (const entry of this.#entries) if (!retained.has(entry.id)) this.#removedEntryIds.add(entry.id);
 		for (const id of retained) this.#removedEntryIds.delete(id);
 		this.#header = copy.header; this.#entries = copy.entries; this.#leafId = leafId;
+		this.#entriesById.clear();
+		for (const entry of this.#entries) this.#entriesById.set(entry.id, entry);
 		if (titleUpdatedAt !== undefined) this.#titleUpdatedAt = titleUpdatedAt;
 		this.#projectionRevision++;
 	}
 	branch(leafId: string | null): void {
 		if (this.#sealed || this.#fault || this.#closed && (this.#header.modelRequestJournal || this.#header.modelRequestRegistry) ||
 			liveCellsByPath.get(this.#sessionFile) !== this || liveCellsById.get(this.#header.id) !== this) unavailable();
-		if (leafId !== null && !this.#entries.some(entry => entry.id === leafId &&
-			entry.type !== "model_request_metadata" && entry.type !== "model_request_registry")) unavailable();
+		const selected = leafId === null ? undefined : this.#entriesById.get(leafId);
+		if (leafId !== null && (!selected || selected.type === "model_request_metadata" || selected.type === "model_request_registry")) unavailable();
 		this.#leafId = leafId;
 		this.#projectionRevision++;
+	}
+
+	#assertProjectionCurrent(): void {
+		if (this.#sealed || this.#closed && (this.#header.modelRequestJournal || this.#header.modelRequestRegistry) ||
+			liveCellsByPath.get(this.#sessionFile) !== this || liveCellsById.get(this.#header.id) !== this) unavailable();
 	}
 
 	#assertLive(): void {
@@ -2493,13 +2541,31 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 
 	#guardAppend(line: string): void {
 		this.#assertLive();
-		const value: unknown = JSON.parse(line);
-		if (!value || typeof value !== "object" || !("type" in value) ||
-			value.type === "session" || value.type === "title" ||
-			value.type === "model_request_metadata" || value.type === "model_request_registry" ||
-			((this.#header.modelRequestJournal || this.#header.modelRequestRegistry) && (value.type === "model_usage" ||
-				value.type === "message" && "message" in value && value.message !== null &&
-				typeof value.message === "object" && "role" in value.message && value.message.role === "assistant"))) unavailable();
+		const parsed = parseSessionContent(line);
+		const entry = parsed.entries[0];
+		if (!line.endsWith("\n") || parsed.malformedRecords > 0 || parsed.entries.length !== 1 || !entry ||
+			entry.type === "session" || ["model_request_metadata", "model_request_registry"].includes(entry.type) ||
+			typeof entry.id !== "string" || !entry.id || entry.id === this.#header.id ||
+			(entry.parentId !== null && typeof entry.parentId !== "string") ||
+			this.#committedById.has(entry.id) ||
+			(this.#header.modelRequestJournal || this.#header.modelRequestRegistry) && sourceEntry(entry)) unavailable();
+		if (this.#requiresCanonicalRewrite) this.#publishSync(this.#committedHeader ?? this.#header, this.#committedEntries);
+		this.#pendingAppend = { line, entry };
+	}
+
+	#recordCommittedAppend(line: string, size: number | undefined): void {
+		const pending = this.#pendingAppend;
+		if (!pending || pending.line !== line || size === undefined) unavailable();
+		const entry = pending.entry;
+		this.#pendingAppend = undefined;
+		const previousCommittedLeaf = this.#committedEntries.at(-1)?.id ?? null;
+		this.#committedEntries.push(entry); this.#committedById.set(entry.id, entry);
+		if (!this.#entriesById.has(entry.id) && !this.#removedEntryIds.has(entry.id)) {
+			this.#entries.push(entry); this.#entriesById.set(entry.id, entry);
+			if (this.#leafId === previousCommittedLeaf) this.#leafId = entry.id;
+		}
+		this.#expectedSize = size; this.#writeError = undefined;
+		this.#projectionRevision++;
 	}
 
 	#enqueue<T>(operation: () => Promise<T>): Promise<T> {
@@ -2514,6 +2580,7 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 	}
 
 	#fail(error: unknown): void {
+		this.#pendingAppend = undefined;
 		this.#writeError = toError(error);
 		if (this.#header.modelRequestJournal || this.#header.modelRequestRegistry || this.#families.size > 0) {
 			this.#fault ??= this.#writeError;
@@ -2537,7 +2604,7 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 			`${JSON.stringify(header)}\n${entries.map(entry => `${JSON.stringify(entry)}\n`).join("")}`;
 		const generation = this.#generation;
 		const filename = this.#sessionFile;
-		const pending = principalWriteContext.run({ principal: this, body, generation }, () => this.#storage.writeTextAtomic(filename, body, {
+		const pending = principalWriteContext.run({ principal: this, body, generation, targetFile: filename }, () => this.#storage.writeTextAtomic(filename, body, {
 			expectedSize: this.#expectedSize, requireAtomicReplace: true,
 			commitGuard: () => !this.#closed && (!this.#sealed || principalCloseContext.getStore() === this) &&
 				!this.#fault && this.#generation === generation && this.#sessionFile === filename,
@@ -2565,15 +2632,15 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 		this.#assertLive();
 		const body = serializeTitleSlot({ title: header.title, source: header.titleSource, updatedAt: this.#titleUpdatedAt ?? header.timestamp }) +
 			`${JSON.stringify(header)}\n${entries.map(entry => `${JSON.stringify(entry)}\n`).join("")}`;
-		principalWriteContext.run({ principal: this, body, generation: this.#generation }, () =>
+		principalWriteContext.run({ principal: this, body, generation: this.#generation, targetFile: this.#sessionFile }, () =>
 			this.#storage.writeTextSync(this.#sessionFile, body, { expectedSize: this.#expectedSize, requireAtomicReplace: true }));
-		this.#refreshCommitted();
 	}
 	seal(): void { this.#sealed = true; this.#revoke("required-revoked"); }
 	releaseRetainedEntries(): void {
 		this.seal();
 		this.#entries = []; this.#committedEntries = []; this.#leafId = null;
 		this.#removedEntryIds.clear();
+		this.#entriesById.clear(); this.#committedById.clear(); this.#pendingAppend = undefined;
 		if (liveCellsById.get(this.#header.id) === this) liveCellsById.delete(this.#header.id);
 		if (liveCellsByPath.get(this.#sessionFile) === this) liveCellsByPath.delete(this.#sessionFile);
 		void this.#writer?.close().catch(() => {});
@@ -2613,30 +2680,46 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 		if (failure !== undefined) throw failure;
 	}
 	async setSessionFile(sessionFile: string): Promise<void> {
-		if (path.resolve(sessionFile) === this.#sessionFile) return;
-		if (liveCellsByPath.has(path.resolve(sessionFile))) unavailable();
+		this.#assertProjectionCurrent();
+		const resolved = path.resolve(sessionFile);
+		if (fs.existsSync(resolved) && fs.lstatSync(resolved).isSymbolicLink()) unavailable();
+		const target = fs.existsSync(resolved) ? fs.realpathSync(resolved) :
+			fs.existsSync(path.dirname(resolved)) ? path.join(fs.realpathSync(path.dirname(resolved)), path.basename(resolved)) : resolved;
+		if (target === this.#sessionFile) return;
+		if (liveCellsByPath.has(target)) unavailable();
+		const filename = this.#sessionFile, id = this.#header.id;
 		await this.close();
-		const next = requireCell(openFileJournalCell({ cwd: this.#header.cwd, sessionDir: path.dirname(sessionFile), sessionFile }));
+		if (this.#sessionFile !== filename || this.#header.id !== id || liveCellsByPath.has(target)) unavailable();
+		const next = requireCell(openFileJournalCell({ cwd: this.#header.cwd, sessionDir: path.dirname(resolved), sessionFile: resolved }));
 		this.#adopt(next);
 	}
 
 	#adopt(next: FileSessionPrincipalImpl): void {
 		if (next === this) return;
+		if (this.#sealed || liveCellsByPath.has(this.#sessionFile) && liveCellsByPath.get(this.#sessionFile) !== this ||
+			liveCellsById.has(this.#header.id) && liveCellsById.get(this.#header.id) !== this) unavailable();
 		const previous = this.#sessionFile;
-		liveCellsById.delete(this.#header.id);
-		liveCellsByPath.delete(previous);
+		if (liveCellsById.get(this.#header.id) === this) liveCellsById.delete(this.#header.id);
+		if (liveCellsByPath.get(previous) === this) liveCellsByPath.delete(previous);
 		this.#families.clear(); this.#agentFamilies.clear();
-		if (!this.#header.modelRequestJournal && !this.#header.modelRequestRegistry) principalFileGuards.delete(previous);
-		else principalFileGuards.set(previous, {
-			backend: this.#storage, openWriter: unavailable, updateTitle: unavailable,
-			body: unavailable, append: unavailable, remove: unavailable,
-		});
+		if (principalFileGuards.get(previous)?.backend === this.#storage) {
+			if (!this.#header.modelRequestJournal && !this.#header.modelRequestRegistry) principalFileGuards.delete(previous);
+			else principalFileGuards.set(previous, {
+				backend: this.#storage, openWriter: unavailable, updateTitle: unavailable,
+				body: unavailable, append: unavailable, remove: unavailable,
+			});
+		}
 		this.#header = next.#header;
 		this.#entries = next.#entries;
 		this.#leafId = next.#leafId;
 		this.#titleUpdatedAt = next.#titleUpdatedAt;
 		this.#committedHeader = next.#committedHeader;
 		this.#committedEntries = next.#committedEntries;
+		this.#entriesById.clear(); this.#committedById.clear();
+		for (const entry of this.#entries) this.#entriesById.set(entry.id, entry);
+		for (const entry of this.#committedEntries) this.#committedById.set(entry.id, entry);
+		this.#requiresCanonicalRewrite = next.#requiresCanonicalRewrite;
+		this.#pendingAppend = undefined;
 		this.#committedTitleUpdatedAt = next.#committedTitleUpdatedAt;
 		this.#removedEntryIds.clear();
 		this.#writeError = undefined;

@@ -43,6 +43,21 @@
   by main-file rename and `close(true)`. This is rename-before-close evidence, not proof of an
   xClose-only race or authority credential misissuance. Native close-status propagation and these
   factory regressions require the parent's rebuilt-artifact verification; workers did not run them.
+- Kept File principal logical reads and local projection changes independent of a contended
+  writer lease; a second facade preserves the same principal's staged entries and selected leaf.
+  Stale principal references cannot remove another principal's cache or mutation guard.
+- Made ordinary File appends incremental: validate the new record, update entry indexes and
+  committed byte counts, and retain legacy migration IDs by canonicalizing the committed prefix
+  once before the first append rather than re-migrating it after each append.
+- Reject unadopted managed File truncation before opening a truncating descriptor. Principal
+  atomic rewrites carry an exact private body/target permit through staging cleanup, while
+  user commit callbacks and raw copies do not inherit that permit.
+- Resolve directory aliases for principal mutations without granting arbitrary File, hardlink,
+  final-symlink or escaped artifact paths. Old close failures remain attached to the old File
+  rather than poisoning a facade after its principal changes.
+- These compatibility/security corrections add no authority API and have not been verified
+  in this worktree; retained-root dispatch and the separate r11 contracts remain separate work.
+
 - Fixed a credential accessor counterexample where alias checking hashed a decoy token but
   retained a retired writer's secret from a later getter read. Retention now validates a
   single-read normalized snapshot and hashes the same intrinsic-copied token it stores.

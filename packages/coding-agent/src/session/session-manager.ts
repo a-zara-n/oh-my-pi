@@ -1010,8 +1010,14 @@ export class SessionManager {
 
 	#appendLogicalEntry(entry: SessionEntry): void {
 		const cell = fileJournalCells.get(this);
-		if (cell) cell.appendEntry(entry);
-		else {
+		if (cell) {
+			this.#refreshLogicalProjection();
+			cell.appendEntry(entry);
+			this.#projectionEntries.push(entry);
+			this.#entryIndex.insert(entry);
+			this.#entryIndex.setLeaf(cell.getLeafId());
+			this.#projectionRevision = cell.getProjectionRevision();
+		} else {
 			this.#nonFileEntries.push(entry);
 			this.#entryIndex.insert(entry);
 		}
@@ -1154,7 +1160,9 @@ export class SessionManager {
 		const previous = fileJournalCells.get(this);
 		if (previous === cell && this.#filePrincipalRetained) return;
 		if (previous && this.#filePrincipalRetained) {
-			void this.#releaseFilePrincipal().catch(error => this.#noteDiskFailure(error));
+			void this.#releaseFilePrincipal().catch(error => {
+				if (fileJournalCells.get(this) === previous) this.#noteDiskFailure(error);
+			});
 		}
 		fileJournalCells.set(this, cell);
 		this.#projectionRevision = -1;
@@ -2405,8 +2413,12 @@ export class SessionManager {
 
 	#setLeaf(id: string | null, trackExternal = true): void {
 		const cell = fileJournalCells.get(this);
-		if (cell) cell.branch(id);
-		else this.#entryIndex.setLeaf(id);
+		if (cell) {
+			this.#refreshLogicalProjection();
+			cell.branch(id);
+			this.#entryIndex.setLeaf(id);
+			this.#projectionRevision = cell.getProjectionRevision();
+		} else this.#entryIndex.setLeaf(id);
 		const batch = this.#atomicEntryBatch;
 		if (trackExternal && batch && !batch.collecting) {
 			batch.externalLeafChanged = true;
@@ -2432,7 +2444,17 @@ export class SessionManager {
 			batch.externalLeafChanged = true;
 			batch.externalLeafId = entry.id;
 		}
+		const cell = fileJournalCells.get(this);
+		const stagedRevision = cell?.getProjectionRevision();
+		const stagedSessionId = cell?.getSessionId();
 		this.#appendToSessionFile(entry);
+		if (cell && fileJournalCells.get(this) === cell && cell.getSessionId() === stagedSessionId &&
+			stagedRevision !== undefined && cell.getProjectionRevision() === stagedRevision + 1) {
+			const size = cell.getExpectedDiskSize();
+			if (size !== this.#projectionExpectedDiskSize) this.#expectedDiskSize = size;
+			this.#projectionExpectedDiskSize = size;
+			this.#projectionRevision = cell.getProjectionRevision();
+		}
 		if (batch) batch.deferredNotifications.push(entry);
 		else this.#notifyEntryAppended(entry);
 	}
@@ -2759,10 +2781,14 @@ export class SessionManager {
 		this.#rememberBreadcrumb(this.#cwd, resolvedSessionFile);
 
 
-		const migrated = migrateToCurrentVersion(fileEntries);
-		await resolveBlobRefsInEntries(fileEntries, this.#blobs);
-		// loadEntriesFromFile guarantees entries[0] is a valid session header.
-		const header = fileEntries[0] as SessionHeader;
+		const cell = fileJournalCells.get(this);
+		const persistedHeader = fileEntries[0];
+		const migrated = cell
+			? persistedHeader.type === "session" && (persistedHeader.version ?? 1) < CURRENT_SESSION_VERSION
+			: migrateToCurrentVersion(fileEntries);
+		if (!cell) await resolveBlobRefsInEntries(fileEntries, this.#blobs);
+		// A File cell already owns the canonical load/migration and any live draft.
+		const header = cell ? cell.getHeader() : fileEntries[0] as SessionHeader;
 
 		// Adopt the loaded session's working directory only when it is verifiably
 		// accessible. Sessions live in a dir keyed by their cwd, so resuming a
@@ -2787,13 +2813,18 @@ export class SessionManager {
 			this.#fallbackRuntimeOnly = false;
 		}
 
-		this.#applyEntries(header, fileEntries.slice(1) as SessionEntry[]);
-		this.#expectedDiskSize = sourceSize;
+		if (cell) {
+			this.#refreshLogicalProjection();
+			const repaired = normalizeLoadedUsage(this.#projectionEntries);
+			if (repaired > 0) cell.applyEntries(cell.getHeader(), this.#projectionEntries, cell.getLeafId());
+			this.#logicalStateInitialized = true;
+		} else this.#applyEntries(header, fileEntries.slice(1) as SessionEntry[]);
+		this.#expectedDiskSize = cell ? cell.getExpectedDiskSize() : sourceSize;
 		this.#additionalDirectories = header.additionalDirectories ?? [];
-		this.#titleUpdatedAt = titleSlot?.updatedAt ?? header.timestamp;
+		if (!cell) this.#titleUpdatedAt = titleSlot?.updatedAt ?? header.timestamp;
 		this.#hasTitleSlot = titleSlot !== undefined;
 		this.#fileIsCurrent = true;
-		this.#rewriteRequired = migrated || loaded.malformedRecords > 0;
+		this.#rewriteRequired = migrated || loaded.malformedRecords > 0 || !!(cell && cell.getProjectionRevision() > 0);
 		this.#loadedMalformedRecords = loaded.malformedRecords;
 		this.#forceFileCreation = true;
 		this.#artifactManager = null;
