@@ -1,11 +1,11 @@
 import type { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { chmodSync, mkdtempSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, fstatSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { retainModelRequestWriterCredential, retireModelRequestWriterCredential, withVerifiedModelRequestJournalBinding, withVerifiedModelRequestJournalLeases, type ModelRequestJournalAuthorityResources } from "../src/model-request-journal-authority";
-import { withRawModelRequestJournalLeases } from "../src/model-request-journal-leases";
+import { retainModelRequestWriterCredential, retainVerifiedModelRequestJournalRoot, retireModelRequestWriterCredential, withVerifiedModelRequestJournalBinding, withVerifiedModelRequestJournalLeases, type ModelRequestJournalAuthorityResources, type ModelRequestJournalLeaseBinding, type ModelRequestJournalRetainedRootScope } from "../src/model-request-journal-authority";
+import { tryAcquireRawModelRequestJournalFileLease, withRawModelRequestJournalLeases } from "../src/model-request-journal-leases";
 import { assertModelRequestJournalDatabase, openModelRequestJournalDatabase } from "../src/model-request-journal-sqlite-control";
 
 const mac = process.platform === "darwin" ? describe : describe.skip;
@@ -58,6 +58,24 @@ async function fixture(): Promise<SQLiteFixture> {
 	};
 }
 
+// Fault the actual retained fd, not a mock lease or a caller-authored proof.
+function closeActualRootDescriptor(path: string): void {
+	const expected = statSync(path);
+	const descriptors: number[] = [];
+	for (const entry of readdirSync("/dev/fd")) {
+		if (!/^\d+$/.test(entry)) continue;
+		const fd = Number(entry);
+		try {
+			const actual = fstatSync(fd);
+			if (actual.dev === expected.dev && actual.ino === expected.ino) descriptors.push(fd);
+		} catch (error) {
+			if (!(error instanceof Error) || !("code" in error) || error.code !== "EBADF") throw error;
+		}
+	}
+	if (descriptors.length !== 1) throw new Error("Expected one actual retained root fd");
+	closeSync(descriptors[0]!);
+}
+
 mac("self-opened SQLite fixed authority rejections", () => {
 	test("owned RO snapshot and live writer permit real credential binding and root scope", async () => {
 		const input = await fixture();
@@ -69,6 +87,7 @@ mac("self-opened SQLite fixed authority rejections", () => {
 				entered++;
 				await withVerifiedModelRequestJournalLeases(binding, "registry-test", async scope => {
 					scope.assertActive();
+					expect(scope.ownerId).toBe(input.requesterWriterId);
 					entered++;
 				});
 			});
@@ -135,6 +154,185 @@ mac("self-opened SQLite fixed authority rejections", () => {
 			input.db.query("INSERT INTO tx_log VALUES(4,?,'endWriter',1)").run(input.requesterWriterId);
 			input.db.query("INSERT INTO writer_event(id,tx_seq,created_at_ms,writer_id,event,reason) VALUES('ended',4,4,?,'ended',NULL)").run(input.requesterWriterId);
 			await expect(withVerifiedModelRequestJournalBinding({resources: input.resources, requester: input.requester, mode: "resume", rootSessionId: "root"}, async () => {})).rejects.toThrow("requester rejected");
+		} finally { input.close(); }
+	});
+
+	test("verified retained root keeps the OS lock until synchronous release, without releasing writer", async () => {
+		const input = await fixture();
+		const owner = process.getuid?.();
+		if (owner === undefined) throw new Error("Missing test uid");
+		let retained: ModelRequestJournalRetainedRootScope | undefined;
+		try {
+			await withVerifiedModelRequestJournalBinding({resources: input.resources, requester: input.requester, mode: "resume", rootSessionId: "root"}, async binding => {
+				const namespace = withRawModelRequestJournalLeases({storeId: input.resources.storeId, control: "shared", maintenance: "shared"}, raw => raw.namespacePath);
+				retained = retainVerifiedModelRequestJournalRoot(binding, "registry-test");
+				expect(retained.ownerId).toBe(input.requesterWriterId);
+				retained.assertHeld();
+				retained.assertActive();
+				const root = join(namespace, "accounting/registry-test.lock");
+				expect(tryAcquireRawModelRequestJournalFileLease(root, "exclusive", owner)).toBeUndefined();
+				retained.release();
+				const immediately = tryAcquireRawModelRequestJournalFileLease(root, "exclusive", owner);
+				if (immediately === undefined) throw new Error("Synchronous retained release did not release root");
+				immediately.release();
+				expect(tryAcquireRawModelRequestJournalFileLease(join(namespace, "owners", `${input.requesterWriterId}.lock`), "exclusive", owner)).toBeUndefined();
+				retained.release();
+				expect(() => retained?.assertHeld()).toThrow("ended");
+				expect(() => retained?.assertActive()).toThrow("ended");
+				const next = retainVerifiedModelRequestJournalRoot(binding, "registry-test");
+				next.assertActive();
+				// Intentionally leave next held: binding finally must close it before owner exit.
+				retained = next;
+			});
+			expect(() => retained?.assertHeld()).toThrow("ended");
+			expect(() => retained?.assertActive()).toThrow("ended");
+			retained?.release();
+		} finally { input.close(); }
+	});
+
+	test("binding end releases remaining retained root before owner/control/maintenance exit", async () => {
+		const input = await fixture();
+		const owner = process.getuid?.();
+		if (owner === undefined) throw new Error("Missing test uid");
+		let namespace: string | undefined;
+		let retained: ModelRequestJournalRetainedRootScope | undefined;
+		let savedBinding: ModelRequestJournalLeaseBinding | undefined;
+		try {
+			await withVerifiedModelRequestJournalBinding({resources: input.resources, requester: input.requester, mode: "resume", rootSessionId: "root"}, async binding => {
+				savedBinding = binding;
+				namespace = withRawModelRequestJournalLeases({storeId: input.resources.storeId, control: "shared", maintenance: "shared"}, raw => raw.namespacePath);
+				retained = retainVerifiedModelRequestJournalRoot(binding, "registry-test");
+				retained.assertActive();
+				await Promise.resolve();
+				retained.assertHeld();
+			});
+			if (namespace === undefined || savedBinding === undefined) throw new Error("Missing retained binding fixture");
+			const endedBinding = savedBinding;
+			expect(() => retainVerifiedModelRequestJournalRoot(endedBinding, "registry-test")).toThrow("ended");
+			expect(() => retained?.assertHeld()).toThrow("ended");
+			for (const path of [
+				join(namespace, "accounting/registry-test.lock"),
+				join(namespace, "owners", `${input.requesterWriterId}.lock`),
+				join(namespace, "maintenance.lock"),
+				join(namespace, "control", `${input.resources.storeId}.lock`),
+			]) {
+				const available = tryAcquireRawModelRequestJournalFileLease(path, "exclusive", owner);
+				if (available === undefined) throw new Error("Binding left actual lease held");
+				available.release();
+			}
+		} finally { input.close(); }
+	});
+
+	test("retained authority rejects copied bindings, another callback and a root-held callback", async () => {
+		const input = await fixture();
+		const gate = Promise.withResolvers<void>();
+		let saved: ModelRequestJournalLeaseBinding | undefined;
+		const request = {resources: input.resources, requester: input.requester, mode: "resume" as const, rootSessionId: "root"};
+		const first = withVerifiedModelRequestJournalBinding(request, async binding => {
+			saved = binding;
+			await gate.promise;
+		});
+		try {
+			if (saved === undefined) throw new Error("Missing first binding");
+			const original = saved;
+			await withVerifiedModelRequestJournalBinding(request, async binding => {
+				expect(() => retainVerifiedModelRequestJournalRoot({...binding}, "registry-test")).toThrow("unverified");
+				expect(() => retainVerifiedModelRequestJournalRoot(original, "registry-test")).toThrow("rejected");
+				await withVerifiedModelRequestJournalLeases(binding, "registry-test", async scope => {
+					expect(scope.ownerId).toBe(input.requesterWriterId);
+					expect(() => retainVerifiedModelRequestJournalRoot(binding, "registry-test")).toThrow("order rejected");
+				});
+				const retained = retainVerifiedModelRequestJournalRoot(binding, "registry-test");
+				retained.assertActive();
+				retained.release();
+			});
+		} finally {
+			gate.resolve();
+			await first;
+			input.close();
+		}
+	});
+
+	test("fixed DB revocation and restored authority records never revive a retained binding", async () => {
+		for (const mutation of ["writer", "record"] as const) {
+			const input = await fixture();
+			let retained: ModelRequestJournalRetainedRootScope | undefined;
+			try {
+				await expect(withVerifiedModelRequestJournalBinding({resources: input.resources, requester: input.requester, mode: "resume", rootSessionId: "root"}, async binding => {
+					retained = retainVerifiedModelRequestJournalRoot(binding, "registry-test");
+					if (mutation === "writer") {
+						input.db.query("UPDATE writer SET role='cli-tool' WHERE id=?").run(input.requesterWriterId);
+						expect(() => retained?.assertActive()).toThrow("requester rejected");
+						input.db.query("UPDATE writer SET role='operator-command' WHERE id=?").run(input.requesterWriterId);
+					} else {
+						const recordPath = withRawModelRequestJournalLeases({storeId: input.resources.storeId, control: "shared", maintenance: "shared"}, raw => raw.recordPath);
+						const record = readFileSync(recordPath, "utf8");
+						writeFileSync(recordPath, record.replace('"state":"active"', '"state":"held"'));
+						expect(() => retained?.assertActive()).toThrow("authority changed");
+						writeFileSync(recordPath, record);
+					}
+					expect(() => retained?.assertActive()).toThrow("ended");
+					expect(() => retainVerifiedModelRequestJournalRoot(binding, "other-root")).toThrow("ended");
+				})).rejects.toThrow("ended");
+				expect(() => retained?.assertHeld()).toThrow("ended");
+			} finally { input.close(); }
+		}
+	});
+
+	test("real retained release failures irreversibly poison the binding and preserve cleanup errors", async () => {
+		for (const explicitRelease of [true, false]) {
+			const input = await fixture();
+			let retained: ModelRequestJournalRetainedRootScope | undefined;
+			const bodyFailure = new Error("binding-body-failure");
+			let releaseFailure: unknown;
+			try {
+				let caught: unknown;
+				try {
+					await withVerifiedModelRequestJournalBinding({resources: input.resources, requester: input.requester, mode: "resume", rootSessionId: "root"}, async binding => {
+						const namespace = withRawModelRequestJournalLeases({storeId: input.resources.storeId, control: "shared", maintenance: "shared"}, raw => raw.namespacePath);
+						retained = retainVerifiedModelRequestJournalRoot(binding, "registry-test");
+						closeActualRootDescriptor(join(namespace, "accounting/registry-test.lock"));
+						if (explicitRelease) {
+							try { retained.release(); } catch (error) { releaseFailure = error; }
+							expect(releaseFailure).toBeInstanceOf(AggregateError);
+							retained.release();
+							expect(() => retained?.assertHeld()).toThrow("ended");
+							expect(() => retainVerifiedModelRequestJournalRoot(binding, "other-root")).toThrow("ended");
+							throw releaseFailure;
+						}
+						throw bodyFailure;
+					});
+				} catch (error) { caught = error; }
+				if (explicitRelease) expect(caught).toBe(releaseFailure);
+				else {
+					expect(caught).toBeInstanceOf(AggregateError);
+					if (!(caught instanceof AggregateError)) throw new Error("Missing combined cleanup failure");
+					expect(caught.errors[0]).toBe(bodyFailure);
+					expect(caught.errors[1]).toBeInstanceOf(AggregateError);
+				}
+				expect(() => retained?.assertActive()).toThrow("ended");
+				retained?.release();
+			} finally { input.close(); }
+		}
+	});
+
+	test("single binding body error is not wrapped and retirement invalidates retained authority", async () => {
+		const input = await fixture();
+		const failure = new Error("single-binding-failure");
+		let retained: ModelRequestJournalRetainedRootScope | undefined;
+		try {
+			let caught: unknown;
+			try {
+				await withVerifiedModelRequestJournalBinding({resources: input.resources, requester: input.requester, mode: "resume", rootSessionId: "root"}, async binding => {
+					retained = retainVerifiedModelRequestJournalRoot(binding, "registry-test");
+					retireModelRequestWriterCredential(input.requester);
+					expect(() => retained?.assertHeld()).toThrow("owner binding rejected");
+					expect(() => retainVerifiedModelRequestJournalRoot(binding, "other-root")).toThrow("ended");
+					throw failure;
+				});
+			} catch (error) { caught = error; }
+			expect(caught).toBe(failure);
+			expect(() => retained?.assertActive()).toThrow("ended");
 		} finally { input.close(); }
 	});
 });

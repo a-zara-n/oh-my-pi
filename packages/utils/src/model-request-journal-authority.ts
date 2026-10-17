@@ -2,7 +2,7 @@ import type { Database } from "bun:sqlite";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync } from "node:fs";
 import { isAbsolute } from "node:path";
-import { withRawModelRequestJournalLeases, type RawModelRequestJournalLeaseScope } from "./model-request-journal-leases";
+import { retainRawModelRequestJournalRoot, withRawModelRequestJournalLeases, type RawModelRequestJournalLeaseScope, type RawModelRequestJournalRetainedRootScope } from "./model-request-journal-leases";
 import { assertModelRequestJournalDatabase, openModelRequestJournalDatabase } from "./model-request-journal-sqlite-control";
 
 export type ModelRequestWriterRole = "model-agent" | "harness-core" | "harness-runner" | "operator-command" | "cli-tool";
@@ -36,7 +36,7 @@ export interface ModelRequestJournalAuthorityResources {
 }
 const runtimeBrand: unique symbol = Symbol("model-request-journal-authority-runtime");
 export const modelRequestJournalAuthorityRuntimeIdentity = Object.freeze({ [runtimeBrand]: true });
-declare const bindingBrand: unique symbol;
+const bindingBrand: unique symbol = Symbol("model-request-journal-binding");
 export interface ModelRequestJournalLeaseBinding {
 	readonly [bindingBrand]: true;
 	readonly runtimeIdentity: typeof modelRequestJournalAuthorityRuntimeIdentity;
@@ -48,9 +48,16 @@ export interface ModelRequestJournalRootLeaseScope {
 	readonly registryId: string;
 	readonly rootSessionId: string;
 	readonly storeId: string;
+	readonly ownerId: string;
 	readonly authorityEpoch: number;
 	readonly physicalBindingId: string;
 	assertActive(): void;
+}
+const privateRetainedRootBrand: unique symbol = Symbol("model-request-journal-retained-root");
+export interface ModelRequestJournalRetainedRootScope extends ModelRequestJournalRootLeaseScope {
+	readonly [privateRetainedRootBrand]: true;
+	assertHeld(): void;
+	release(): void;
 }
 const BOOTSTRAP_ROLES: readonly ModelRequestWriterRole[] = Object.freeze(["operator-command"]);
 const RESUME_ROLES: readonly ModelRequestWriterRole[] = Object.freeze(["operator-command", "harness-core"]);
@@ -152,10 +159,33 @@ interface BindingState {
 	readonly generation: object;
 	readonly raw: RawModelRequestJournalLeaseScope;
 	readonly record: AuthorityRecord;
+	readonly retained: Set<ModelRequestJournalRetainedRootScope>;
 	open: boolean;
 	writerGenerations?: readonly bigint[];
 }
 const bindings = new WeakMap<object, BindingState>();
+interface RetainedRootState {
+	readonly binding: ModelRequestJournalLeaseBinding;
+	readonly state: BindingState;
+	readonly raw: RawModelRequestJournalRetainedRootScope;
+	readonly record: AuthorityRecord;
+	open: boolean;
+}
+const retainedRoots = new WeakMap<object, RetainedRootState>();
+function ownerIdFor(state: BindingState, raw: RawModelRequestJournalLeaseScope): string {
+	const stored = credentials.get(state.requester);
+	if (stored === undefined || stored.generation !== state.generation || retired.has(state.requester) || raw.ownerId !== stored.credential.writerId || raw.storeId !== state.resources.storeId || state.raw.ownerId !== raw.ownerId) throw new Error("Journal owner binding rejected");
+	return raw.ownerId;
+}
+function releaseRetainedRoots(state: BindingState): void {
+	state.open = false;
+	const failures: unknown[] = [];
+	for (const retained of state.retained) {
+		try { retained.release(); } catch (error) { failures.push(error); }
+	}
+	if (failures.length === 1) throw failures[0];
+	if (failures.length > 1) throw new AggregateError(failures, "Journal retained root releases failed");
+}
 function recordAt(raw: RawModelRequestJournalLeaseScope): AuthorityRecord {
 	raw.assertHeld();
 	const fd = openSync(raw.recordPath, constants.O_RDONLY | constants.O_NOFOLLOW);
@@ -245,15 +275,17 @@ function controlSnapshot(db: Database, storeId: string, requesterId: string, rec
 	return Object.freeze({writer: writers.get(requesterId)?.row, inactive: inactive.has(requesterId)});
 }
 function verify(state: BindingState): AuthorityRecord {
-	if (!state.open || credentials.get(state.requester)?.generation !== state.generation || retired.has(state.requester)) throw new Error("Journal binding ended");
-	state.raw.assertHeld();
-	const record = recordAt(state.raw);
-	if (record.state !== "active" || JSON.stringify(record) !== JSON.stringify(state.record)) throw new Error("Journal authority changed");
 	let db: Database | undefined;
 	let failure: unknown;
+	let failed = false;
 	try {
+		if (!state.open || credentials.get(state.requester)?.generation !== state.generation || retired.has(state.requester)) throw new Error("Journal binding ended");
+		state.raw.assertHeld();
+		ownerIdFor(state, state.raw);
+		const record = recordAt(state.raw);
+		if (record.state !== "active" || JSON.stringify(record) !== JSON.stringify(state.record)) throw new Error("Journal authority changed");
 		// The factory owns this real RO connection. Pathname fds and caller connections are not evidence.
-		db = openModelRequestJournalDatabase(state.resources.databasePath, {readonly: true, create: false, strict: true, safeIntegers: false});
+		db = openModelRequestJournalDatabase(state.resources.databasePath, {readonly: true, create: false, strict: true, safeIntegers: false, purpose: "authority-control"});
 		const initial = assertModelRequestJournalDatabase(db);
 		if (initial.device !== record.dbDevice || initial.inode !== record.dbInode || initial.liveWriterGenerations.length === 0) throw new Error("Journal database identity rejected");
 		db.exec("PRAGMA trusted_schema=OFF; PRAGMA query_only=ON; BEGIN");
@@ -273,13 +305,15 @@ function verify(state: BindingState): AuthorityRecord {
 		db.exec("ROLLBACK");
 		return record;
 	} catch (error) {
+		failed = true;
 		failure = error;
 		state.open = false;
 		throw error;
 	} finally {
 		try { db?.close(); }
 		catch (error) {
-			if (failure !== undefined) throw new AggregateError([failure, error], "Journal verification and connection close failed");
+			state.open = false;
+			if (failed) throw new AggregateError([failure, error], "Journal verification and connection close failed");
 			throw error;
 		}
 	}
@@ -290,15 +324,26 @@ export async function withVerifiedModelRequestJournalBinding<T>(request: Readonl
 	if (stored === undefined || retired.has(request.requester)) throw new Error("Journal requester unsupported");
 	const resources: ModelRequestJournalAuthorityResources = Object.freeze({...request.resources});
 	return withRawModelRequestJournalLeases({storeId: resources.storeId, control: "shared", maintenance: "shared", ownerId: stored.credential.writerId}, async raw => {
-		const state: BindingState = {resources, requester: request.requester, mode: request.mode, rootSessionId: request.rootSessionId, generation: stored.generation, raw, record: recordAt(raw), open: true};
+		const state: BindingState = {resources, requester: request.requester, mode: request.mode, rootSessionId: request.rootSessionId, generation: stored.generation, raw, record: recordAt(raw), retained: new Set(), open: true};
+		let failed = false;
+		let failure: unknown;
 		try {
 			verify(state);
-			const binding = Object.freeze({runtimeIdentity: modelRequestJournalAuthorityRuntimeIdentity, rootSessionId: request.rootSessionId}) as ModelRequestJournalLeaseBinding;
+			const binding: ModelRequestJournalLeaseBinding = Object.freeze({[bindingBrand]: true, runtimeIdentity: modelRequestJournalAuthorityRuntimeIdentity, rootSessionId: request.rootSessionId});
 			bindings.set(binding, state);
 			const result = await use(binding);
 			verify(state);
 			return result;
-		} finally { state.open = false; }
+		} catch (error) {
+			failed = true;
+			failure = error;
+			throw error;
+		} finally {
+			try { releaseRetainedRoots(state); } catch (error) {
+				if (failed) throw new AggregateError([failure, error], "Journal binding operation and retained release failed");
+				throw error;
+			}
+		}
 	});
 }
 export async function withVerifiedModelRequestJournalLeases<T>(binding: ModelRequestJournalLeaseBinding, registryId: string, use: (scope: ModelRequestJournalRootLeaseScope) => Promise<T>): Promise<T> {
@@ -313,10 +358,52 @@ export async function withVerifiedModelRequestJournalLeases<T>(binding: ModelReq
 		};
 		try {
 			const record = verify(state);
-			const scope: ModelRequestJournalRootLeaseScope = Object.freeze({binding, runtimeIdentity: modelRequestJournalAuthorityRuntimeIdentity, registryId, rootSessionId: state.rootSessionId, storeId: state.resources.storeId, authorityEpoch: record.authorityEpoch, physicalBindingId: record.physicalBindingId, assertActive});
+			const scope: ModelRequestJournalRootLeaseScope = Object.freeze({binding, runtimeIdentity: modelRequestJournalAuthorityRuntimeIdentity, registryId, rootSessionId: state.rootSessionId, storeId: state.resources.storeId, ownerId: ownerIdFor(state, raw), authorityEpoch: record.authorityEpoch, physicalBindingId: record.physicalBindingId, assertActive});
 			const result = await use(scope);
 			assertActive();
 			return result;
 		} catch (error) { state.open = false; throw error; } finally { open = false; }
 	});
+}
+
+/** Retain only the real owner scope already authenticated by this binding. */
+export function retainVerifiedModelRequestJournalRoot(binding: ModelRequestJournalLeaseBinding, registryId: string): ModelRequestJournalRetainedRootScope {
+	const state = bindings.get(binding);
+	if (state === undefined || binding.runtimeIdentity !== modelRequestJournalAuthorityRuntimeIdentity || !text(registryId)) throw new Error("Journal binding unverified");
+	const record = verify(state);
+	const ownerId = ownerIdFor(state, state.raw);
+	const raw = retainRawModelRequestJournalRoot(state.raw, registryId);
+	const retained: RetainedRootState = {binding, state, raw, record, open: true};
+	const assertHeld = (): void => {
+		if (!retained.open || !state.open || bindings.get(binding) !== state || retainedRoots.get(scope) !== retained || retained.binding !== binding || retained.state !== state || retained.record.authorityEpoch !== state.record.authorityEpoch || retained.record.physicalBindingId !== state.record.physicalBindingId) throw new Error("Journal retained root ended");
+		state.raw.assertHeld();
+		raw.assertHeld();
+		if (ownerIdFor(state, raw) !== ownerId || raw.registryId !== registryId || raw.storeId !== state.resources.storeId) throw new Error("Journal retained root binding rejected");
+	};
+	const scope: ModelRequestJournalRetainedRootScope = Object.freeze({
+		[privateRetainedRootBrand]: true,
+		binding,
+		runtimeIdentity: modelRequestJournalAuthorityRuntimeIdentity,
+		registryId,
+		rootSessionId: state.rootSessionId,
+		storeId: state.resources.storeId,
+		ownerId,
+		authorityEpoch: record.authorityEpoch,
+		physicalBindingId: record.physicalBindingId,
+		assertHeld,
+		assertActive() {
+			assertHeld();
+			verify(state);
+			assertHeld();
+		},
+		release() {
+			if (!retained.open) return;
+			retained.open = false;
+			state.retained.delete(scope);
+			try { raw.release(); } catch (error) { state.open = false; throw error; }
+		},
+	});
+	retainedRoots.set(scope, retained);
+	state.retained.add(scope);
+	return scope;
 }

@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { chmodSync, lstatSync, mkdtempSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { tryAcquireRawModelRequestJournalFileLease, withRawModelRequestJournalLeases, type RawModelRequestJournalLeaseScope } from "../src/model-request-journal-leases";
+import { retainRawModelRequestJournalRoot, tryAcquireRawModelRequestJournalFileLease, withRawModelRequestJournalLeases, type RawModelRequestJournalLeaseScope, type RawModelRequestJournalRetainedRootScope } from "../src/model-request-journal-leases";
 
 const mac = process.platform === "darwin" ? describe : describe.skip;
 mac("fixed model request journal OS leases", () => {
@@ -160,6 +160,219 @@ mac("fixed model request journal OS leases", () => {
 			})).rejects.toThrow("async-body-failure");
 			expect(() => escaped?.assertHeld()).toThrow();
 			withRawModelRequestJournalLeases(request, raw => raw.assertHeld());
+		} finally { if (namespace !== undefined) rmSync(namespace, {recursive: true, force: true}); }
+	});
+
+	test("retained root owns a real exclusive fd and synchronously releases only that fd", () => {
+		const storeId = `test-${randomUUID()}`;
+		const owner = process.getuid?.();
+		if (owner === undefined) throw new Error("Missing test uid");
+		let namespace: string | undefined;
+		let retained: RawModelRequestJournalRetainedRootScope | undefined;
+		try {
+			withRawModelRequestJournalLeases({storeId, control: "shared", maintenance: "shared", ownerId: "writer-test"}, raw => {
+				namespace = raw.namespacePath;
+				retained = retainRawModelRequestJournalRoot(raw, "registry-test");
+				retained.assertHeld();
+				expect(retained.ownerId).toBe("writer-test");
+				const root = join(raw.namespacePath, "accounting/registry-test.lock");
+				expect(tryAcquireRawModelRequestJournalFileLease(root, "exclusive", owner)).toBeUndefined();
+				const busy = Bun.spawnSync([process.execPath, join(import.meta.dir, "fixtures/model-request-journal-lease-holder.ts"), storeId, "registry-test"], {stdin: "ignore", stdout: "pipe", stderr: "pipe"});
+				expect(busy.exitCode).not.toBe(0);
+				retained.release();
+				// No await or Promise settlement may intervene between release and the OS probe.
+				const available = Bun.spawnSync([process.execPath, join(import.meta.dir, "fixtures/model-request-journal-lease-holder.ts"), storeId, "registry-test"], {stdin: "ignore", stdout: "pipe", stderr: "pipe"});
+				expect(available.exitCode).toBe(0);
+				expect(available.stdout.toString()).toBe("held\n");
+				retained.release();
+				expect(() => retained?.assertHeld()).toThrow("ended");
+				expect(tryAcquireRawModelRequestJournalFileLease(join(raw.namespacePath, "owners/writer-test.lock"), "exclusive", owner)).toBeUndefined();
+				expect(tryAcquireRawModelRequestJournalFileLease(join(raw.namespacePath, "control", `${storeId}.lock`), "exclusive", owner)).toBeUndefined();
+				expect(tryAcquireRawModelRequestJournalFileLease(join(raw.namespacePath, "maintenance.lock"), "exclusive", owner)).toBeUndefined();
+				raw.assertHeld();
+			});
+			expect(() => retained?.assertHeld()).toThrow("ended");
+		} finally { if (namespace !== undefined) rmSync(namespace, {recursive: true, force: true}); }
+	});
+
+	test("retained acquisition rejects busy, forged, root-held and invalid owner scopes", () => {
+		const storeId = `test-${randomUUID()}`;
+		const owner = process.getuid?.();
+		if (owner === undefined) throw new Error("Missing test uid");
+		let namespace: string | undefined;
+		try {
+			withRawModelRequestJournalLeases({storeId, control: "shared", maintenance: "shared"}, raw => {
+				namespace = raw.namespacePath;
+				expect(() => retainRawModelRequestJournalRoot(raw, "registry-test")).toThrow();
+				withRawModelRequestJournalLeases({storeId, control: "shared", maintenance: "shared", ownerId: "writer-test"}, ownerScope => {
+					expect(() => retainRawModelRequestJournalRoot({...ownerScope}, "registry-test")).toThrow("rejected");
+					expect(() => retainRawModelRequestJournalRoot(ownerScope, "../other-root")).toThrow("rejected");
+					const busy = tryAcquireRawModelRequestJournalFileLease(join(raw.namespacePath, "accounting/registry-test.lock"), "exclusive", owner);
+					if (busy === undefined) throw new Error("Test root unavailable");
+					try { expect(() => retainRawModelRequestJournalRoot(ownerScope, "registry-test")).toThrow("unavailable"); }
+					finally { busy.release(); }
+					withRawModelRequestJournalLeases({storeId, control: "shared", maintenance: "shared", registryId: "registry-test"}, () => {
+						expect(() => retainRawModelRequestJournalRoot(ownerScope, "registry-test")).toThrow("order rejected");
+					});
+					const retained = retainRawModelRequestJournalRoot(ownerScope, "registry-test");
+					try {
+						for (const registryId of ["registry-test", "other-root"]) {
+							expect(() => retainRawModelRequestJournalRoot(ownerScope, registryId)).toThrow("order rejected");
+							expect(() => withRawModelRequestJournalLeases({storeId, control: "shared", maintenance: "shared", registryId}, () => {})).toThrow("order rejected");
+						}
+						expect(() => withRawModelRequestJournalLeases({storeId, control: "exclusive", maintenance: "shared"}, () => {})).toThrow();
+						expect(() => withRawModelRequestJournalLeases({storeId, control: "shared", maintenance: "shared", ownerId: "other-owner"}, () => {})).toThrow();
+					} finally { retained.release(); }
+				});
+			});
+		} finally { if (namespace !== undefined) rmSync(namespace, {recursive: true, force: true}); }
+	});
+
+	test("matching subset children own retained lifetime and block sibling roots", async () => {
+		const storeId = `test-${randomUUID()}`;
+		let namespace: string | undefined;
+		let retained: RawModelRequestJournalRetainedRootScope | undefined;
+		try {
+			await withRawModelRequestJournalLeases({storeId, control: "shared", maintenance: "shared", ownerId: "writer-test"}, async raw => {
+				namespace = raw.namespacePath;
+				const gate = Promise.withResolvers<void>();
+				const child = withRawModelRequestJournalLeases({storeId, control: "shared", maintenance: "shared"}, async subset => {
+					retained = retainRawModelRequestJournalRoot(raw, "registry-test");
+					retained.assertHeld();
+					subset.assertHeld();
+					await gate.promise;
+				});
+				expect(() => retainRawModelRequestJournalRoot(raw, "other-root")).toThrow("order rejected");
+				withRawModelRequestJournalLeases({storeId, control: "shared", maintenance: "shared"}, () => {
+					expect(() => retainRawModelRequestJournalRoot(raw, "other-root")).toThrow("order rejected");
+					expect(() => retained?.assertHeld()).toThrow("ended");
+				});
+				gate.resolve();
+				await child;
+				expect(() => retained?.assertHeld()).toThrow("ended");
+				const next = retainRawModelRequestJournalRoot(raw, "other-root");
+				next.assertHeld();
+				next.release();
+			});
+		} finally { if (namespace !== undefined) rmSync(namespace, {recursive: true, force: true}); }
+	});
+
+	test("unrelated callbacks, other stores and ended ALS cannot retain a genuine escaped owner", async () => {
+		const storeId = `test-${randomUUID()}`;
+		const otherStoreId = `test-${randomUUID()}`;
+		const gate = Promise.withResolvers<void>();
+		let namespace: string | undefined;
+		let otherNamespace: string | undefined;
+		let escaped: RawModelRequestJournalLeaseScope | undefined;
+		const request = {storeId, control: "shared" as const, maintenance: "shared" as const, ownerId: "writer-test"};
+		const first = withRawModelRequestJournalLeases(request, async raw => {
+			namespace = raw.namespacePath;
+			escaped = raw;
+			await gate.promise;
+		});
+		try {
+			if (escaped === undefined) throw new Error("Missing owner scope");
+			const original = escaped;
+			expect(() => retainRawModelRequestJournalRoot(original, "registry-test")).toThrow("rejected");
+			withRawModelRequestJournalLeases(request, () => {
+				expect(() => retainRawModelRequestJournalRoot(original, "registry-test")).toThrow("rejected");
+			});
+			withRawModelRequestJournalLeases({...request, ownerId: "other-owner"}, () => {
+				expect(() => retainRawModelRequestJournalRoot(original, "registry-test")).toThrow("rejected");
+			});
+			withRawModelRequestJournalLeases({...request, storeId: otherStoreId}, raw => {
+				otherNamespace = raw.namespacePath;
+				expect(() => retainRawModelRequestJournalRoot(original, "registry-test")).toThrow("rejected");
+			});
+			gate.resolve();
+			await first;
+			let late: Promise<void> | undefined;
+			withRawModelRequestJournalLeases(request, raw => {
+				late = Promise.resolve().then(() => {
+					expect(() => retainRawModelRequestJournalRoot(raw, "registry-test")).toThrow("rejected");
+				});
+			});
+			await late;
+		} finally {
+			gate.resolve();
+			await first;
+			if (namespace !== undefined) rmSync(namespace, {recursive: true, force: true});
+			if (otherNamespace !== undefined) rmSync(otherNamespace, {recursive: true, force: true});
+		}
+	});
+
+	test("parent failure releases retained root immediately and preserves a single body error", () => {
+		const storeId = `test-${randomUUID()}`;
+		const owner = process.getuid?.();
+		if (owner === undefined) throw new Error("Missing test uid");
+		const failure = new Error("retained-body-failure");
+		let namespace: string | undefined;
+		let retained: RawModelRequestJournalRetainedRootScope | undefined;
+		try {
+			let caught: unknown;
+			try {
+				withRawModelRequestJournalLeases({storeId, control: "shared", maintenance: "shared", ownerId: "writer-test"}, raw => {
+					namespace = raw.namespacePath;
+					retained = retainRawModelRequestJournalRoot(raw, "registry-test");
+					throw failure;
+				});
+			} catch (error) { caught = error; }
+			expect(caught).toBe(failure);
+			expect(() => retained?.assertHeld()).toThrow("ended");
+			retained?.release();
+			if (namespace === undefined) throw new Error("Missing test namespace");
+			const available = tryAcquireRawModelRequestJournalFileLease(join(namespace, "accounting/registry-test.lock"), "exclusive", owner);
+			if (available === undefined) throw new Error("Retained root not released");
+			available.release();
+		} finally { if (namespace !== undefined) rmSync(namespace, {recursive: true, force: true}); }
+	});
+
+	test("parent settlement invalidates a pending child's retained handle synchronously", async () => {
+		const storeId = `test-${randomUUID()}`;
+		const owner = process.getuid?.();
+		if (owner === undefined) throw new Error("Missing test uid");
+		const gate = Promise.withResolvers<void>();
+		let namespace: string | undefined;
+		let retained: RawModelRequestJournalRetainedRootScope | undefined;
+		let child: Promise<void> | undefined;
+		try {
+			withRawModelRequestJournalLeases({storeId, control: "shared", maintenance: "shared", ownerId: "writer-test"}, raw => {
+				namespace = raw.namespacePath;
+				child = withRawModelRequestJournalLeases({storeId, control: "shared", maintenance: "shared"}, async () => {
+					retained = retainRawModelRequestJournalRoot(raw, "registry-test");
+					await gate.promise;
+					retained.assertHeld();
+				});
+			});
+			expect(() => retained?.assertHeld()).toThrow("ended");
+			if (namespace === undefined || child === undefined) throw new Error("Missing child lifetime fixture");
+			const root = tryAcquireRawModelRequestJournalFileLease(join(namespace, "accounting/registry-test.lock"), "exclusive", owner);
+			if (root === undefined) throw new Error("Parent settlement left child's root held");
+			root.release();
+			const rejected = expect(child).rejects.toThrow("ended");
+			gate.resolve();
+			await rejected;
+		} finally {
+			gate.resolve();
+			if (child !== undefined) {
+				try { await child; } catch (error) {
+					if (!(error instanceof Error) || !error.message.includes("ended")) throw error;
+				}
+			}
+			if (namespace !== undefined) rmSync(namespace, {recursive: true, force: true});
+		}
+	});
+
+	test("retained root acquisition rejects non-shared parent modes", () => {
+		const storeId = `test-${randomUUID()}`;
+		let namespace: string | undefined;
+		try {
+			for (const mode of ["control", "maintenance"] as const) {
+				withRawModelRequestJournalLeases({storeId, control: mode === "control" ? "exclusive" : "shared", maintenance: mode === "maintenance" ? "exclusive" : "shared", ownerId: "writer-test"}, raw => {
+					namespace = raw.namespacePath;
+					expect(() => retainRawModelRequestJournalRoot(raw, "registry-test")).toThrow("order rejected");
+				});
+			}
 		} finally { if (namespace !== undefined) rmSync(namespace, {recursive: true, force: true}); }
 	});
 });

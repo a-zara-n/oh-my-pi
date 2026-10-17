@@ -23,12 +23,32 @@ export interface RawModelRequestJournalLeaseScope {
 	readonly registryId?: string;
 	assertHeld(): void;
 }
+const privateRawRetainedRootBrand: unique symbol = Symbol("raw-journal-retained-root");
+export interface RawModelRequestJournalRetainedRootScope extends RawModelRequestJournalLeaseScope {
+	readonly [privateRawRetainedRootBrand]: true;
+	readonly ownerId: string;
+	readonly registryId: string;
+	release(): void;
+}
 interface LeaseContext {
 	readonly request: RawModelRequestJournalLeaseRequest;
 	readonly scope: RawModelRequestJournalLeaseScope;
+	readonly parent: LeaseContext | undefined;
+	readonly retained: Set<RawModelRequestJournalRetainedRootScope>;
+	poisoned: boolean;
 	open: boolean;
 }
 const leaseContext = new AsyncLocalStorage<LeaseContext>();
+const scopes = new WeakMap<object, LeaseContext>();
+function descendsFrom(context: LeaseContext, ancestor: LeaseContext): boolean {
+	for (let current: LeaseContext | undefined = context; current !== undefined; current = current.parent) {
+		if (current === ancestor) return true;
+	}
+	return false;
+}
+function poison(context: LeaseContext): void {
+	for (let current: LeaseContext | undefined = context; current !== undefined; current = current.parent) current.poisoned = true;
+}
 interface NativeLeaseRuntime {
 	flock(fd: number, operation: number): number;
 	home(uid: number): string;
@@ -145,14 +165,19 @@ export function tryAcquireRawModelRequestJournalFileLease(path: string, mode: Ra
 			if (!actual.isFile() || actual.uid !== owner || (actual.mode & 0o7777) !== 0o600 || actual.nlink !== 1 || named.isSymbolicLink() || !sameFile(actual, named) || !sameFile(actual, initial)) throw new Error("Journal lease inode rejected");
 		};
 		check();
-		if (native.flock(descriptor, (mode === "shared" ? 1 : 2) | 4) !== 0) { closeSync(descriptor); return undefined; }
+		if (native.flock(descriptor, (mode === "shared" ? 1 : 2) | 4) !== 0) { fd = undefined; closeSync(descriptor); return undefined; }
+		fd = undefined;
 		let open = true;
 		return Object.freeze({
 			assertHeld() { if (!open) throw new Error("Journal lease ended"); check(); },
 			release() {
 				if (!open) return;
 				open = false;
-				try { native.flock(descriptor, 8); } finally { closeSync(descriptor); }
+				const failures: unknown[] = [];
+				try { if (native.flock(descriptor, 8) !== 0) throw new Error("Journal lease unlock failed"); } catch (error) { failures.push(error); }
+				try { closeSync(descriptor); } catch (error) { failures.push(error); }
+				if (failures.length === 1) throw failures[0];
+				if (failures.length > 1) throw new AggregateError(failures, "Journal lease unlock and close failed");
 			},
 		});
 	} catch {
@@ -162,6 +187,47 @@ export function tryAcquireRawModelRequestJournalFileLease(path: string, mode: Ra
 }
 function identifier(value: unknown): value is string {
 	return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value);
+}
+/** A send owns a distinct root fd; owner/control/maintenance remain borrowed. */
+export function retainRawModelRequestJournalRoot(ownerScope: RawModelRequestJournalLeaseScope, registryId: string): RawModelRequestJournalRetainedRootScope {
+	const owner = scopes.get(ownerScope);
+	const current = leaseContext.getStore();
+	if (owner === undefined || current === undefined || !identifier(registryId) || !owner.open || !current.open || !descendsFrom(current, owner)) throw new Error("Journal retained owner rejected");
+	owner.scope.assertHeld();
+	current.scope.assertHeld();
+	const request = current.request;
+	const ownerId = owner.request.ownerId;
+	if (ownerId === undefined || owner.request.registryId !== undefined || request.registryId !== undefined || request.storeId !== owner.request.storeId || request.ownerId !== ownerId || request.control !== "shared" || request.maintenance !== "shared" || request.control !== owner.request.control || request.maintenance !== owner.request.maintenance) throw new Error("Journal retained lease order rejected");
+	for (let ancestor: LeaseContext | undefined = current; ancestor !== undefined; ancestor = ancestor.parent) {
+		if (ancestor.retained.size !== 0) throw new Error("Journal retained lease order rejected");
+	}
+	const handle = tryAcquireRawModelRequestJournalFileLease(join(current.scope.namespacePath, "accounting", `${registryId}.lock`), "exclusive", uid());
+	if (handle === undefined) throw new Error("Journal lease unavailable");
+	let open = true;
+	const retained: RawModelRequestJournalRetainedRootScope = Object.freeze({
+		[privateRawRetainedRootBrand]: true,
+		storeId: request.storeId,
+		namespacePath: current.scope.namespacePath,
+		recordPath: current.scope.recordPath,
+		ownerId,
+		registryId,
+		assertHeld() {
+			const active = leaseContext.getStore();
+			if (!open || !current.open || !owner.open || active === undefined || !active.open || !descendsFrom(active, current)) throw new Error("Journal retained root ended");
+			current.scope.assertHeld();
+			active.scope.assertHeld();
+			owner.scope.assertHeld();
+			handle.assertHeld();
+		},
+		release() {
+			if (!open) return;
+			open = false;
+			for (let ancestor: LeaseContext | undefined = current; ancestor !== undefined; ancestor = ancestor.parent) ancestor.retained.delete(retained);
+			try { handle.release(); } catch (error) { poison(current); throw error; }
+		},
+	});
+	for (let ancestor: LeaseContext | undefined = current; ancestor !== undefined; ancestor = ancestor.parent) ancestor.retained.add(retained);
+	return retained;
 }
 /** Fixed nonblocking order. Synchronous acquisition failures throw before a callback can return a Promise. */
 export function withRawModelRequestJournalLeases<T>(request: RawModelRequestJournalLeaseRequest, use: (raw: RawModelRequestJournalLeaseScope) => Promise<T>): Promise<T>;
@@ -175,6 +241,7 @@ export function withRawModelRequestJournalLeases<T>(request: RawModelRequestJour
 		if (!parent.open || parent.request.storeId !== storeId) throw new Error("Journal lease scope ended");
 		parent.scope.assertHeld();
 		if (parent.request.control === "shared" && control === "exclusive" || parent.request.maintenance === "shared" && maintenance === "exclusive" || ownerId !== undefined && parent.request.ownerId !== undefined && ownerId !== parent.request.ownerId || registryId !== undefined && parent.request.registryId !== undefined && registryId !== parent.request.registryId || parent.request.registryId !== undefined && ownerId !== undefined && parent.request.ownerId !== ownerId) throw new Error("Journal lease order rejected");
+		if (parent.retained.size !== 0 && (registryId !== undefined || ownerId !== undefined && ownerId !== parent.request.ownerId || control !== "shared" || maintenance !== "shared")) throw new Error("Journal retained lease order rejected");
 	}
 	const effective: RawModelRequestJournalLeaseRequest = Object.freeze({
 		storeId,
@@ -197,6 +264,11 @@ export function withRawModelRequestJournalLeases<T>(request: RawModelRequestJour
 		open = false;
 		if (context !== undefined) context.open = false;
 		const failures: unknown[] = [];
+		if (context !== undefined) {
+			for (const retained of context.retained) {
+				try { retained.release(); } catch (error) { failures.push(error); }
+			}
+		}
 		for (let index = leases.length - 1; index >= 0; index--) {
 			try { leases[index]!.release(); } catch (error) { failures.push(error); }
 		}
@@ -221,12 +293,13 @@ export function withRawModelRequestJournalLeases<T>(request: RawModelRequestJour
 			...(effective.ownerId === undefined ? {} : {ownerId: effective.ownerId}),
 			...(effective.registryId === undefined ? {} : {registryId: effective.registryId}),
 			assertHeld() {
-				if (!open || parent !== undefined && !parent.open || namespace(storeId) !== namespacePath) throw new Error("Journal lease scope ended");
+				if (!open || context?.poisoned || parent !== undefined && !parent.open || namespace(storeId) !== namespacePath) throw new Error("Journal lease scope ended");
 				parent?.scope.assertHeld();
 				for (const lease of leases) lease.assertHeld();
 			},
 		});
-		context = {request: effective, scope, open: true};
+		context = {request: effective, scope, parent, retained: new Set(), poisoned: false, open: true};
+		scopes.set(scope, context);
 		scope.assertHeld();
 		const result = leaseContext.run(context, () => use(scope));
 		if (result instanceof Promise) {
