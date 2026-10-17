@@ -67,6 +67,15 @@ export async function loadMnemopiCore(): Promise<typeof MnemopiCoreNs> {
 	return mnemopiCoreMod;
 }
 
+/** Load root and core modules together without fail-fast on a single rejection. */
+export async function loadMnemopiModules(): Promise<void> {
+	const settled = await Promise.allSettled([loadMnemopi(), loadMnemopiCore()]);
+	const failures = settled
+		.filter((result): result is PromiseRejectedResult => result.status === "rejected")
+		.map(result => result.reason);
+	if (failures.length > 0) throw new AggregateError(failures, "Mnemopi module load failed");
+}
+
 /** Sync access for code below an async boundary that already awaited {@link loadMnemopi}. */
 export function requireMnemopi(): typeof MnemopiNs {
 	if (!mnemopiMod) throw new Error("Mnemopi module not loaded; await loadMnemopi() first.");
@@ -782,6 +791,8 @@ export class MnemopiSessionState {
 	}
 
 	async dispose(options: { consolidate?: boolean; timeoutMs?: number; retain?: boolean } = {}): Promise<void> {
+		const outerWork = this.session.journalOuterWorkOwner();
+		await outerWork.run(async () => {
 		this.#recallGeneration++;
 		this.unsubscribe?.();
 		this.unsubscribe = undefined;
@@ -820,13 +831,14 @@ export class MnemopiSessionState {
 				// to `postmortem.quit(0)`; if it exits first, the OS reclaims
 				// the handles (and a still-pending embed() goes down with the
 				// embed worker the caller is about to SIGKILL).
-				void consolidatePromise.finally(closeOwned);
+				outerWork.trackDetached(consolidatePromise.finally(closeOwned));
 				return;
 			}
 		} else {
 			await consolidatePromise;
 		}
 		closeOwned();
+		});
 	}
 }
 

@@ -81,6 +81,7 @@ import { ASYNC_RESULT_MESSAGE_TYPE } from "../session/async-job-delivery";
 import type { AuthStorage } from "../session/auth-storage";
 import { SKILL_PROMPT_MESSAGE_TYPE } from "../session/messages";
 import { type ModelRequestRootAssignment, resolveModelRequestRootSource } from "../session/model-request-context";
+import { JournalOuterWorkOwner } from "../session/journal-outer-work";
 import { hasConversationalHistory, SessionManager } from "../session/session-manager";
 import { truncateTail } from "@oh-my-pi/pi-tui/tools/streaming-output";
 import {
@@ -4417,6 +4418,12 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 				: undefined;
 			let session: AgentSession;
 			let sessionPromise: Promise<CreateAgentSessionResult> | undefined;
+			const spawnOuterWork = JournalOuterWorkOwner.fromBinding(
+				resolveModelRequestRootSource(
+					sessionSpec.options.modelRequestRoot,
+					sessionSpec.options.modelRequestJournalLeaseBinding,
+				).modelRequestJournalLeaseBinding,
+			);
 			try {
 				sessionPromise = createAgentSession(
 					buildSubagentSessionOptions(sessionSpec, subagentSettings, sessionManager, null, {
@@ -4430,13 +4437,26 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 						},
 					}),
 				);
+				spawnOuterWork.trackDetached(sessionPromise);
 				({ session } = await awaitAbortable(sessionPromise));
+				await spawnOuterWork.complete();
 			} catch (err) {
 				mcpFollower?.dispose();
 				// Abort raced session startup. The session may still resolve later
 				// holding live LSP/MCP child processes — dispose it when it does so
 				// a cancelled subagent cannot leak them.
-				void sessionPromise?.then(created => created.session.dispose()).catch(() => {});
+				if (sessionPromise) {
+					spawnOuterWork.trackDetached(
+						sessionPromise.then(async created => {
+							await created.session.dispose();
+						}),
+					);
+				}
+				try {
+					await spawnOuterWork.complete(err);
+				} catch {
+					// Outer work end is accounted.
+				}
 				throw err;
 			}
 			mcpFollower?.bind(session);

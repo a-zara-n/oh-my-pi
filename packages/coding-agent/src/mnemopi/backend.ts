@@ -42,8 +42,8 @@ import {
 	getMnemopiScopedBanks,
 	getMnemopiScopedDbPaths,
 	getMnemopiSessionState,
-	loadMnemopi,
 	loadMnemopiCore,
+	loadMnemopiModules,
 	MnemopiSessionState,
 	requireMnemopi,
 	requireMnemopiCore,
@@ -109,7 +109,7 @@ export const mnemopiBackend: MemoryBackend = {
 		const { session, settings, agentDir, modelRegistry } = options;
 		const sessionId = session.sessionId;
 		if (!sessionId) return;
-
+		await session.journalOuterWorkOwner().run(async () => {
 		if (options.taskDepth > 0) {
 			const parent = getMnemopiSessionStateFromParent(options);
 			if (!parent) return;
@@ -135,11 +135,12 @@ export const mnemopiBackend: MemoryBackend = {
 				sessionId,
 				session.sessionManager,
 			);
-			await Promise.all([loadMnemopi(), loadMnemopiCore()]);
+			await loadMnemopiModules();
 			await installMnemopiState(session, config);
 		} catch (error) {
 			logger.warn("Mnemopi: backend startup failed; memory backend inert.", { error: String(error) });
 		}
+		});
 	},
 
 	async buildDeveloperInstructions(_agentDir, settings, session): Promise<string | undefined> {
@@ -191,7 +192,7 @@ export const mnemopiBackend: MemoryBackend = {
 		await removeDbFiles(getMnemopiScopedDbPaths(config));
 		if (!session?.sessionId || previous?.aliasOf || cfgMemoryBackend.get(session.settings) !== "mnemopi") return;
 		try {
-			await Promise.all([loadMnemopi(), loadMnemopiCore()]);
+			await loadMnemopiModules();
 			await installMnemopiState(session, config);
 		} catch (error) {
 			logger.warn("Mnemopi: clear rehydrate failed; memory backend inert.", { error: String(error) });
@@ -209,7 +210,7 @@ export const mnemopiBackend: MemoryBackend = {
 					session.sessionId,
 					session.sessionManager,
 				);
-				await Promise.all([loadMnemopi(), loadMnemopiCore()]);
+				await loadMnemopiModules();
 				state = await installMnemopiState(session, config);
 			}
 			await state?.consolidate({ full: true, retain: true });
@@ -219,7 +220,7 @@ export const mnemopiBackend: MemoryBackend = {
 	},
 
 	async stats(agentDir, _cwd, session): Promise<string | undefined> {
-		await Promise.all([loadMnemopi(), loadMnemopiCore()]);
+		await loadMnemopiModules();
 		const { targets, owned } = createStatsTargets(agentDir, session);
 		try {
 			if (targets.length === 0) return undefined;

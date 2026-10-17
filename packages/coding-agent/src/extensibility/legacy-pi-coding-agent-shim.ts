@@ -60,7 +60,8 @@ import {
 	truncateHead,
 	truncateTail,
 } from "@oh-my-pi/pi-tui/tools/streaming-output";
-import { childModelRequestRootOf } from "../session/model-request-context";
+import { childModelRequestRootOf, resolveModelRequestRootSource } from "../session/model-request-context";
+import { JournalOuterWorkOwner } from "../session/journal-outer-work";
 import type { SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
 import type { Tool, ToolSession } from "../tools";
 import { BashTool } from "../tools/bash";
@@ -1385,9 +1386,15 @@ function withHostModelRequestRoot<T extends CreateAgentSessionOptions>(options: 
 export async function createAgentSession(
 	options: LegacyPiCreateAgentSessionOptions = {},
 ): Promise<CreateAgentSessionResult> {
+	const hostResolved = withHostModelRequestRoot(options);
+	const shimOuterWork = JournalOuterWorkOwner.fromBinding(
+		resolveModelRequestRootSource(hostResolved.modelRequestRoot, hostResolved.modelRequestJournalLeaseBinding)
+			.modelRequestJournalLeaseBinding,
+	);
+	return shimOuterWork.run(async () => {
 	const loader = options.resourceLoader;
 	if (!loader) {
-		return ompCreateAgentSession(withHostModelRequestRoot(options));
+		return ompCreateAgentSession(hostResolved);
 	}
 
 	if (loader instanceof DefaultResourceLoader && !loader.loaded) {
@@ -1455,6 +1462,7 @@ export async function createAgentSession(
 	}
 
 	return ompCreateAgentSession(withHostModelRequestRoot(forwarded));
+	});
 }
 
 /**

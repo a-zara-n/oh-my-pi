@@ -315,8 +315,15 @@ async function installPrimaryState(
 	// `mentalModelsLoadPromise`. Subsequent turns see the populated cache
 	// because `runMentalModelLoad` calls `refreshBaseSystemPrompt`.
 	if (config.mentalModelsEnabled) {
-		state.mentalModelsLoadPromise = state.runMentalModelLoad(scope).catch(err => {
+		const bootstrapWork = session.journalOuterWorkOwner();
+		const loadPromise = state.runMentalModelLoad(scope);
+		bootstrapWork.trackDetached(loadPromise);
+		state.mentalModelsLoadPromise = loadPromise.catch(err => {
+			bootstrapWork.noteFailure(err);
 			logger.debug("Hindsight: mental-model bootstrap failed", { bankId: state.bankId, error: String(err) });
+		});
+		void loadPromise.finally(() => {
+			void bootstrapWork.complete().catch(() => {});
 		});
 	}
 

@@ -15,6 +15,13 @@ Package-specific references:
 
 ## Internal managed journal handoff
 
+Outer producer lifetime (ADR-012 / DES-004 §6.7.2i) is wired through the canonical SDK and session
+sources listed in the design responsibility table: each fixed entry synchronously `begin`s on the
+composition subpath before its first `await`, then `end`s only after the actual futures it started
+(including detached extension emits, handler registration flush, executor late dispose, and Mnemopi
+post-timeout consolidate) settle. Runtime AC-OL acceptance is exercised separately from this package
+README; see `test/journal-outer-work-callers.test.ts`.
+
 `createAgentSession` accepts the optional internal `modelRequestJournalLeaseBinding` only as an
 opaque handle from `@oh-my-pi/pi-utils/model-request-journal-authority`. A raw OS lease, copied
 object, session ID, manager, or alternate runtime instance is not authority. The SDK carries the

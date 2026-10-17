@@ -1,5 +1,6 @@
-import { bindModelRequestExecution } from "@oh-my-pi/pi-ai/model-request-execution";
+import { bindModelRequestExecution, getModelRequestExecution } from "@oh-my-pi/pi-ai/model-request-execution";
 import { logger } from "@oh-my-pi/pi-utils";
+import { JournalOuterWorkOwner } from "../session/journal-outer-work";
 
 import type { ModelRegistry } from "../config/model-registry";
 import type { Settings } from "../config/settings";
@@ -35,20 +36,24 @@ const schedulers = new Map<string, SchedulerEntry>();
 function createHolder(options: SchedulerOptions): SchedulerHolder {
 	// Bound where the session registers: a timer fires in its own context, not the registering session's.
 	const tick = bindModelRequestExecution(async (): Promise<void> => {
-		try {
-			const [depth, state] = await Promise.all([
-				sharpshooterQueueDepth(options.agentDir, options.cwd),
-				readSharpshooterState(options.agentDir, options.cwd),
-			]);
-			const intervalMinutes = cfgSharpshooterIntervalMinutes.get(options.settings);
-			const due = Date.now() - state.lastConsolidatedAt >= intervalMinutes * 60_000;
-			if (depth === 0 && !due) return;
-			await runSharpshooterConsolidation(options);
-		} catch (error) {
-			logger.debug("sharpshooter scheduler tick failed", {
-				error: error instanceof Error ? error.message : String(error),
-			});
-		}
+		const outerWork = JournalOuterWorkOwner.fromExecution(getModelRequestExecution());
+		await outerWork.run(async () => {
+			try {
+				const [depth, state] = await Promise.all([
+					sharpshooterQueueDepth(options.agentDir, options.cwd),
+					readSharpshooterState(options.agentDir, options.cwd),
+				]);
+				const intervalMinutes = cfgSharpshooterIntervalMinutes.get(options.settings);
+				const due = Date.now() - state.lastConsolidatedAt >= intervalMinutes * 60_000;
+				if (depth === 0 && !due) return;
+				await runSharpshooterConsolidation(options);
+			} catch (error) {
+				logger.debug("sharpshooter scheduler tick failed", {
+					error: error instanceof Error ? error.message : String(error),
+				});
+				throw error;
+			}
+		});
 	});
 	return { tick };
 }

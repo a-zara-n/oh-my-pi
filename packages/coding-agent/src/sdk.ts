@@ -181,6 +181,7 @@ import {
 	type SecretObfuscator,
 } from "./secrets";
 import { AgentSession, type InitialRetryFallbackState, type PlanYolo, type Prewalk } from "./session/agent-session";
+import { JournalOuterWorkOwner } from "./session/journal-outer-work";
 import {
 	createAuthStorageSettingsSync,
 	discoverAuthStorage as discoverAuthStorageFromConfig,
@@ -1712,8 +1713,11 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	const extensionRoots = options.extensionRoots?.();
 	const explicit = extensionRoots?.explicit ?? options.additionalExtensionPaths ?? [];
 	const mode = extensionRoots?.mode ?? (options.disableExtensionDiscovery ? "explicit-only" : "merge");
-	return await withOmpExtensionRootScope(explicit, mode, () =>
-		createAgentSessionScoped(options, modelRequestRootSource),
+	const startupOuterWork = JournalOuterWorkOwner.fromBinding(
+		modelRequestRootSource.modelRequestJournalLeaseBinding,
+	);
+	return await startupOuterWork.run(() =>
+		withOmpExtensionRootScope(explicit, mode, () => createAgentSessionScoped(options, modelRequestRootSource)),
 	);
 }
 
@@ -5237,10 +5241,10 @@ async function createAgentSessionScoped(
 		}
 
 		const startMemoryBackend = async () => {
-			const memoryBackend = await resolveMemoryBackend(settings);
-			await session.runInModelRequestContext(
-				() =>
-					memoryBackend.start({
+			await session.journalOuterWorkOwner().run(async () => {
+				const memoryBackend = await resolveMemoryBackend(settings);
+				await session.runInModelRequestContext(async () => {
+					const started = memoryBackend.start({
 						session,
 						settings,
 						modelRegistry,
@@ -5248,9 +5252,10 @@ async function createAgentSessionScoped(
 						taskDepth,
 						parentHindsightSessionState: options.parentHindsightSessionState,
 						parentMnemopiSessionState: options.parentMnemopiSessionState,
-					}),
-				"memory",
-			);
+					});
+					if (started !== undefined) await started;
+				}, "memory");
+			});
 		};
 
 		const runAutoLearnCapture = createAutoLearnCaptureRunner({
