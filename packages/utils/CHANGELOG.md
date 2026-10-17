@@ -92,6 +92,18 @@
   preserved ordinary table contents and did not mint the required-library latch.
   These are parent observations, not worker reruns; Store A0, principal C, trusted dispatch and
   readonly backup remain unproved.
+- Further parent evidence on the freshly rebuilt native artifact: cold/same-connection RO WAL
+  recovery fixtures now reject with `SQLITE_READONLY_RECOVERY` (264) while preserving complete
+  shm/header bytes and allowing legitimate RW recovery. Reader-first RO/RW update succeeds,
+  and rename-before-close now throws. The raw retained-root OS smoke observed contention before
+  release, cross-process acquisition immediately after same-stack synchronous release, continued
+  writer ownership and rejected released assertions. These are parent observations only;
+  combined utility/verified-root/principal acceptance was still pending at this record.
+- Retained the later parent three-suite timeout (180 seconds) and sole emitted authority-control
+  close/disk-I/O failure after successful purpose-flow assertions. A limited staged raw probe
+  completed in 0.10 seconds, which does not explain or clear that timeout. Test cleanup now uses
+  one-shot real synchronous OS probes and always resolves/joins a subset child on assertion
+  failure; assertions remain intact and the original timeout's cause is not claimed established.
 
 - Relocated the existing session JSONL content/stream readers and migrations to
   `@oh-my-pi/pi-utils/session-file-reader` and `@oh-my-pi/pi-utils/session-migrations`,

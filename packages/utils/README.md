@@ -176,12 +176,23 @@ These are the integrating parent's observations, not worker-executed checks:
 | Credential-authority and raw-lease suites without preload | 14 passed, 0 failed, 71 expectations |
 | Real preload/factory smoke | STORE_ID content matched; actual WAL sidecars; RO snapshot retained old data through another writer's commit, next snapshot saw new data; transaction generations increased; close/reopen changed connection generation; rename caused sticky SQL/control rejection |
 | SQLite initialized before bootstrap import | Late bootstrap rejected, ordinary table content preserved, required-library latch not minted |
+| Native RO WAL recovery before correction | Parent bg331: cold and same-connection cached-map fixtures returned committed data while modifying shm/header; main/WAL remained unchanged |
+| Fresh native recovery correction | Parent bg332 build succeeded; bg333 `require-fixed` passed: both RO reads rejected with `SQLITE_READONLY_RECOVERY` (264), full shm/header unchanged, reader control live, legitimate RW recovery/read live |
+| Fresh reader-first and terminal-close regressions | Parent bg342: RO SELECT followed by RW UPDATE (`changes:1`), both close successfully; bg343: rename-before-close correctly throws a disk I/O error |
+| Retained raw-root actual OS smoke | Parent bg335: external process busy while retained; another process acquires immediately after synchronous release in the same stack; writer lease remains held; released assertion rejects |
+| Combined authority/control/raw-lease suites (bg337) | Timed out after 180 seconds; sole emitted failure was authority-control close throwing disk I/O; the finally-close error could mask an earlier try-body failure |
+| Limited staged raw-lifetime probe (bg345) | Exit 0 in 0.10 seconds; synchronous busy/release/available and subset gate/child/owner settlement stages completed; not attribution of the combined-suite timeout |
+| Separated native denial diagnostic (bg347) | Exit 0 in 0.11 seconds: query-only OFF rejects with AUTH while control stays live; VACUUM INTO rejects with AUTH and leaves no output, but incorrectly changes control to faulted (7178/state2), then close throws; general/backup/writer closes succeed |
 
 The earlier wrong-order launch's six failures remain recorded above. The full three-suite command is
-an acceptance invocation, not a claim that all three suites passed. At the time of those observed
-runs, readonly-backup purpose separation was unresolved; the r11 purpose/retained-root changes still
-require parent execution. Store A0, File-principal C, trusted dispatch and readonly backup remain
-unproved. These limited native/utility results do not authorize model sending, billing or deployment.
+an acceptance invocation, not a claim that all three suites passed: bg337 timed out as recorded.
+Concrete test cleanup fixes remove a needless stdin-EOF-dependent synchronous fixture and always
+resolve/join a subset child on assertion failure; neither establishes the timeout's root cause.
+Purpose/backup, full verified-retained-root integration, Store A0, File-principal C and trusted dispatch remain
+unproved here. The recovery fixture's cached mapping is inferred from a prior successful actual
+same-connection read, not internal instrumentation. Rename-before-close does not establish an
+xClose-only race or actual authority credential misissuance. These limited observations do not
+authorize model sending, billing or deployment.
 
 ## Install
 
