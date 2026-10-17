@@ -1,6 +1,7 @@
 import "../../../../scripts/audit-library-bootstrap";
 import * as path from "node:path";
-import { describe, expect, test, vi } from "bun:test";
+import { afterEach, describe, expect, test, vi } from "bun:test";
+import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import * as ai from "@oh-my-pi/pi-ai";
 import type { Model } from "@oh-my-pi/pi-ai";
@@ -14,9 +15,11 @@ import { Settings } from "../../src/config/settings";
 import { ModelRegistry } from "../../src/config/model-registry";
 import { startMemoryStartupTask } from "../../src/memories";
 import { hindsightBackend } from "../../src/hindsight/backend";
+import { HindsightSessionState } from "../../src/hindsight/state";
 import * as mnemopiState from "../../src/mnemopi/state";
-import { loadMnemopiModules, MnemopiSessionState, setMnemopiSessionState } from "../../src/mnemopi/state";
+import { MnemopiSessionState, setMnemopiSessionState } from "../../src/mnemopi/state";
 import { loadMnemopiConfig } from "../../src/mnemopi/config";
+import { mnemopiBackend } from "../../src/mnemopi/backend";
 import { startSharpshooterScheduler } from "../../src/sharpshooter/scheduler";
 import { maybeStartSharpshooterExtraction } from "../../src/sharpshooter/extract";
 import { ChainJudge } from "../../src/judgment";
@@ -24,6 +27,8 @@ import {
 	createAgentSession as legacyShimCreateAgentSession,
 	DefaultResourceLoader,
 } from "../../src/extensibility/legacy-pi-coding-agent-shim";
+import type { AgentSession } from "../../src/session/agent-session";
+import { trackAgentSessionOuterWork } from "../../src/session/internal/agent-session-outer-work";
 import { journalOuterWorkFromBinding } from "../../src/session/internal/outer-work";
 import { childModelRequestRootOf } from "../../src/session/model-request-context";
 import { resolveModelRequestRootSource } from "../../src/session/model-request-context";
@@ -42,6 +47,8 @@ import { R11JournalFixture } from "../../../utils/test/fixtures/model-request-jo
 import { createInMemoryAuthStorage } from "../helpers/agent-session-setup";
 import {
 	expectBindingAcceptsOuterWork,
+	expectBindingRejectsOuterWork,
+	closedSessionIds,
 	openManagedAgentHarness,
 	withManagedExecution,
 } from "./journal-outer-work-managed-harness";
@@ -62,7 +69,43 @@ function makeJudgeRegistry(
 	return { registry, authStorage };
 }
 
+function mnemopiOuterWorkSettings(directory: string): Settings {
+	return Settings.isolated({
+		"compaction.enabled": false,
+		"memory.backend": "mnemopi",
+		"mnemopi.llmMode": "none",
+		"mnemopi.scoping": "global",
+		"mnemopi.bank": "default",
+		"mnemopi.dbPath": path.join(directory, "mnemopi-outer-work.db"),
+		"mnemopi.noEmbeddings": true,
+	});
+}
+
+/** Avoid real SQLite / dynamic import side effects after module-load spies resolve. */
+function stubMnemopiSessionStateConstructor(): void {
+	// @ts-expect-error vi.spyOn constructor mock is untyped for class exports
+	vi.spyOn(mnemopiState, "MnemopiSessionState").mockImplementation((options: {
+		sessionId: string;
+		config: ReturnType<typeof loadMnemopiConfig>;
+		session: AgentSession;
+	}) => {
+		return {
+			sessionId: options.sessionId,
+			config: options.config,
+			session: options.session,
+			attachSessionListeners: vi.fn(),
+			promoteEligibleWorkingMemory: vi.fn(),
+			dispose: vi.fn(async () => {}),
+		} as unknown as MnemopiSessionState;
+	});
+}
+
 mac("journal outer work canonical source callers", () => {
+	afterEach(() => {
+		vi.restoreAllMocks();
+		testSetExtensionHandlerTimeoutMs(EXTENSION_HANDLER_TIMEOUT_MS);
+	});
+
 	test("S-01/AC-OL-01: createAgentSession holds binding startup work until settingsManager first await settles", async () => {
 		const fixture = new R11JournalFixture();
 		const settingsReady = Promise.withResolvers<Settings>();
@@ -314,7 +357,7 @@ mac("journal outer work canonical source callers", () => {
 		}
 	});
 
-	test("S-07/AC-OL-13: void memory backend start still joins detached startup via session trackJournalOuterWork", async () => {
+	test("S-07/AC-OL-13: void memory backend start still joins detached startup via trackAgentSessionOuterWork", async () => {
 		const fixture = new R11JournalFixture();
 		try {
 			const root = fixture.open();
@@ -325,7 +368,7 @@ mac("journal outer work canonical source callers", () => {
 				const probeBackend: MemoryBackend = {
 					id: "local",
 					start: () => {
-						harness.session.trackJournalOuterWork(inner.promise);
+						trackAgentSessionOuterWork(harness.session, inner.promise);
 					},
 					buildDeveloperInstructions: async () => undefined,
 					clear: async () => {},
@@ -368,6 +411,7 @@ mac("journal outer work canonical source callers", () => {
 
 	test("S-07b/AC-OL-13: hindsightBackend.start tracks mental-model bootstrap on session handle", async () => {
 		const fixture = new R11JournalFixture();
+		const mentalModelGate = Promise.withResolvers<void>();
 		try {
 			const root = fixture.open();
 			await fixture.withBinding(root, async binding => {
@@ -376,24 +420,30 @@ mac("journal outer work canonical source callers", () => {
 				const settings = Settings.isolated({
 					"compaction.enabled": false,
 					"memory.backend": "hindsight",
-					"hindsight.baseUrl": "http://127.0.0.1:1",
+					"hindsight.apiUrl": "http://127.0.0.1:1",
 					"hindsight.mentalModelsEnabled": true,
 				});
+				vi.spyOn(HindsightSessionState.prototype, "runMentalModelLoad").mockImplementation(async () => {
+					await mentalModelGate.promise;
+				});
 				await withManagedExecution(principal.execution, async () => {
-					const started = hindsightBackend.start({
+					await hindsightBackend.start({
 						session: harness.session,
 						settings,
 						modelRegistry: harness.session.modelRegistry,
 						agentDir: fixture.directory,
 						taskDepth: 0,
 					});
-					if (started !== undefined) await started;
+					await Promise.resolve();
+					expectBindingAcceptsOuterWork(binding);
+					mentalModelGate.resolve();
 					const state = harness.session.getHindsightSessionState();
 					if (state?.mentalModelsLoadPromise) await state.mentalModelsLoadPromise;
 				});
 				await harness.dispose();
 			});
 		} finally {
+			mentalModelGate.resolve();
 			await fixture.close();
 		}
 	});
@@ -408,15 +458,16 @@ mac("journal outer work canonical source callers", () => {
 				const hold = Promise.withResolvers<void>();
 				const settings = Settings.isolated({ "memory.backend": "mnemopi", "compaction.enabled": false });
 				const config = loadMnemopiConfig(settings, fixture.directory);
-				const state = new MnemopiSessionState({
+				const state = {
 					sessionId: harness.session.sessionId,
 					config,
 					session: harness.session,
-				});
+					consolidate: vi.fn(async () => {
+						await hold.promise;
+					}),
+					dispose: vi.fn(async () => {}),
+				} as unknown as MnemopiSessionState;
 				setMnemopiSessionState(harness.session, state);
-				const consolidate = vi.spyOn(state, "consolidate").mockImplementation(async () => {
-					await hold.promise;
-				});
 				await withManagedExecution(principal.execution, async () => {
 					const pending = harness.session.dispose({ mnemopiConsolidateTimeoutMs: 1 });
 					await Bun.sleep(5);
@@ -424,23 +475,93 @@ mac("journal outer work canonical source callers", () => {
 					hold.resolve();
 					await pending;
 				});
-				consolidate.mockRestore();
+				await harness.dispose();
 			});
 		} finally {
 			await fixture.close();
 		}
 	});
 
-	test("S-07c/AC-OL-14: loadMnemopiModules rejects when one parallel loader fails", async () => {
-		const loadRoot = vi.spyOn(mnemopiState, "loadMnemopi").mockResolvedValue({} as Awaited<ReturnType<typeof mnemopiState.loadMnemopi>>);
-		const loadCore = vi.spyOn(mnemopiState, "loadMnemopiCore").mockRejectedValueOnce(new Error("core load failed"));
-		await expect(loadMnemopiModules()).rejects.toThrow("Mnemopi module load failed");
-		loadRoot.mockRestore();
-		loadCore.mockRestore();
+	test("S-07c/AC-OL-13: mnemopiBackend.start holds binding until parallel module loaders settle", async () => {
+		const fixture = new R11JournalFixture();
+		const rootHeld = Promise.withResolvers<void>();
+		try {
+			const root = fixture.open();
+			await fixture.withBinding(root, async binding => {
+				const principal = await fixture.ready(binding, root);
+				const harness = await openManagedAgentHarness(principal, binding);
+				const settings = mnemopiOuterWorkSettings(fixture.directory);
+				vi.spyOn(mnemopiState, "loadMnemopiModules").mockImplementation(async () => {
+					const settled = await Promise.allSettled([rootHeld.promise, Promise.resolve()]);
+					const failures = settled
+						.filter((result): result is PromiseRejectedResult => result.status === "rejected")
+						.map(result => result.reason);
+					if (failures.length > 0) throw new AggregateError(failures, "Mnemopi module load failed");
+				});
+				stubMnemopiSessionStateConstructor();
+				await withManagedExecution(principal.execution, async () => {
+					const pending = mnemopiBackend.start({
+						session: harness.session,
+						settings,
+						modelRegistry: harness.session.modelRegistry,
+						agentDir: fixture.directory,
+						taskDepth: 0,
+					});
+					await Promise.resolve();
+					expect(mnemopiState.loadMnemopiModules).toHaveBeenCalled();
+					expectBindingAcceptsOuterWork(binding);
+					expect(closedSessionIds(principal.cell)).toEqual([]);
+					rootHeld.resolve();
+					await pending;
+				});
+				await harness.dispose();
+			});
+		} finally {
+			rootHeld.resolve();
+			await fixture.close();
+		}
 	});
 
-	test("S-07c/AC-OL-14: mnemopi backend start uses allSettled parallel module load", async () => {
-		await expect(loadMnemopiModules()).resolves.toBeUndefined();
+	test("S-07c/AC-OL-14: mnemopiBackend.start keeps binding until allSettled finishes when one loader rejects", async () => {
+		const fixture = new R11JournalFixture();
+		const rootHeld = Promise.withResolvers<void>();
+		try {
+			const root = fixture.open();
+			await fixture.withBinding(root, async binding => {
+				const principal = await fixture.ready(binding, root);
+				const harness = await openManagedAgentHarness(principal, binding);
+				const settings = mnemopiOuterWorkSettings(fixture.directory);
+				vi.spyOn(mnemopiState, "loadMnemopiModules").mockImplementation(async () => {
+					const settled = await Promise.allSettled([
+						rootHeld.promise,
+						Promise.reject(new Error("core load failed")),
+					]);
+					const failures = settled
+						.filter((result): result is PromiseRejectedResult => result.status === "rejected")
+						.map(result => result.reason);
+					if (failures.length > 0) throw new AggregateError(failures, "Mnemopi module load failed");
+				});
+				await withManagedExecution(principal.execution, async () => {
+					const pending = mnemopiBackend.start({
+						session: harness.session,
+						settings,
+						modelRegistry: harness.session.modelRegistry,
+						agentDir: fixture.directory,
+						taskDepth: 0,
+					});
+					await Promise.resolve();
+					expect(mnemopiState.loadMnemopiModules).toHaveBeenCalled();
+					expectBindingAcceptsOuterWork(binding);
+					expect(closedSessionIds(principal.cell)).toEqual([]);
+					rootHeld.resolve();
+					await pending;
+				});
+				await harness.dispose();
+			});
+		} finally {
+			rootHeld.resolve();
+			await fixture.close();
+		}
 	});
 
 	test("S-08/AC-OL-13: sharpshooter scheduler tick and extraction entries", async () => {

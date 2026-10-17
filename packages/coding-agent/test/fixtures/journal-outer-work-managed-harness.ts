@@ -1,3 +1,4 @@
+import { expect } from "bun:test";
 import { Agent, type AgentEvent } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import { runWithModelRequestExecution } from "@oh-my-pi/pi-ai/model-request-execution";

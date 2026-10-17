@@ -14,6 +14,7 @@ import { memoryToolRefs } from "../memory-backend/tool-names";
 import type { MemoryBackend, MemoryBackendStartOptions, MemoryPromptPreparation } from "../memory-backend/types";
 import hindsightInstructions from "../prompts/system/hindsight-instructions.md" with { type: "text" };
 import type { AgentSession } from "../session/agent-session";
+import { trackAgentSessionOuterWork } from "../session/internal/agent-session-outer-work";
 import { type BankScope, computeBankScope } from "./bank";
 import { createHindsightClient } from "./client";
 import { type HindsightConfig, isHindsightConfigured, loadHindsightConfig } from "./config";
@@ -316,7 +317,7 @@ async function installPrimaryState(
 	// because `runMentalModelLoad` calls `refreshBaseSystemPrompt`.
 	if (config.mentalModelsEnabled) {
 		const loadPromise = state.runMentalModelLoad(scope);
-		session.trackJournalOuterWork(loadPromise);
+		trackAgentSessionOuterWork(session, loadPromise);
 		state.mentalModelsLoadPromise = loadPromise.catch(err => {
 			logger.debug("Hindsight: mental-model bootstrap failed", { bankId: state.bankId, error: String(err) });
 		});

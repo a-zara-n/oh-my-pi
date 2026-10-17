@@ -30,6 +30,7 @@ import memoryConsolidationPrompt from "../prompts/system/memory-consolidation-sy
 import memoryExtractionPrompt from "../prompts/system/memory-extraction-system.md" with { type: "text" };
 import mnemopiInstructions from "../prompts/system/mnemopi-instructions.md" with { type: "text" };
 import type { AgentSession } from "../session/agent-session";
+import { runAgentSessionOuterWork } from "../session/internal/agent-session-outer-work";
 import { tinyModelClient } from "../tiny/title-client";
 import { shortenPath } from "@oh-my-pi/pi-tui/render/render-utils";
 import {
@@ -109,7 +110,7 @@ export const mnemopiBackend: MemoryBackend = {
 		const { session, settings, agentDir, modelRegistry } = options;
 		const sessionId = session.sessionId;
 		if (!sessionId) return;
-		await session.runJournalOuterWork(async () => {
+		await runAgentSessionOuterWork(session, async () => {
 		if (options.taskDepth > 0) {
 			const parent = getMnemopiSessionStateFromParent(options);
 			if (!parent) return;

@@ -364,6 +364,7 @@ import {
 	type ModelRequestRootAssignment,
 	withModelRequestExecution,
 } from "./model-request-context";
+import { bindAgentSessionOuterWorkBridge } from "./internal/agent-session-outer-work";
 import { journalOuterWorkFromExecution, type JournalOuterWorkScope } from "./internal/outer-work";
 import {
 	buildReplanTitleContext,
@@ -1893,7 +1894,7 @@ export class AgentSession implements SettingsScope {
 			refreshBaseSystemPrompt: () => this.#tools.refreshBaseSystemPrompt(),
 			replaceMemoryTools: tools => this.#tools.replaceMemoryTools(tools),
 			runInMemoryContext: fn => this.runInModelRequestContext(fn, "memory"),
-			runJournalOuterWork: work => this.runJournalOuterWork(work),
+			runJournalOuterWork: work => this.#runJournalOuterWork(work),
 		};
 		this.#memory = new SessionMemory(memoryHost, {
 			memoryEnabled: this.memoryEnabled,
@@ -1909,6 +1910,10 @@ export class AgentSession implements SettingsScope {
 		this.#autoTitle = config.autoTitle === true;
 		this.#transformContext = config.transformContext ?? (messages => messages);
 		this.#modelRequestExecution = config.modelRequestExecution;
+		bindAgentSessionOuterWorkBridge(this, {
+			run: work => this.#runJournalOuterWork(work),
+			trackDetached: promise => this.#trackJournalOuterWork(promise),
+		});
 		this.#sideStreamBase = config.sideStreamFn ?? streamSimple;
 		this.#onPayload = config.onPayload;
 		this.rawSseDebugBuffer = config.rawSseDebugBuffer ?? new RawSseDebugBuffer();
@@ -3014,8 +3019,7 @@ export class AgentSession implements SettingsScope {
 			: childModelRequestRootOf(execution);
 	}
 
-	/** @internal */
-	runJournalOuterWork<T>(work: () => Promise<T>): Promise<T> {
+	#runJournalOuterWork<T>(work: () => Promise<T>): Promise<T> {
 		const scope = journalOuterWorkFromExecution(this.#modelRequestExecution);
 		const previous = this.#journalOuterWorkScope;
 		this.#journalOuterWorkScope = scope;
@@ -3024,8 +3028,8 @@ export class AgentSession implements SettingsScope {
 		});
 	}
 
-	/** @internal Detach work onto the session's active outer-work scope (same open handle as the parent `run`). */
-	trackJournalOuterWork(promise: Promise<unknown>): void {
+	/** Detach work onto the session's active outer-work scope (same open handle as the parent `run`). */
+	#trackJournalOuterWork(promise: Promise<unknown>): void {
 		this.#journalOuterWorkScope?.trackDetached(promise);
 	}
 
@@ -3070,7 +3074,7 @@ export class AgentSession implements SettingsScope {
 	async #admitSubmission<T>(work: () => Promise<T>): Promise<T> {
 		this.#admittedSubmissionCount++;
 		try {
-			return await this.runJournalOuterWork(() => this.runInModelRequestContext(work));
+			return await this.#runJournalOuterWork(() => this.runInModelRequestContext(work));
 		} finally {
 			if (--this.#admittedSubmissionCount === 0 && this.#admittedSubmissionsSettled) {
 				const settled = this.#admittedSubmissionsSettled;
@@ -3341,7 +3345,7 @@ export class AgentSession implements SettingsScope {
 
 	async #drainExtensionEvents(): Promise<void> {
 		try {
-			await this.runJournalOuterWork(async () => {
+			await this.#runJournalOuterWork(async () => {
 				try {
 					while (this.#queuedExtensionEvents.length > 0) {
 						const batch = this.#queuedExtensionEvents;
@@ -3405,7 +3409,7 @@ export class AgentSession implements SettingsScope {
 					void outerWork.complete().catch(() => {});
 				});
 		} else {
-			await this.runJournalOuterWork(() => extensionEmit);
+			await this.#runJournalOuterWork(() => extensionEmit);
 		}
 	}
 
@@ -3510,7 +3514,7 @@ export class AgentSession implements SettingsScope {
 			}
 		}
 		if (event.type !== "agent_end") {
-			const processing = this.runJournalOuterWork(() => this.#processAgentEvent(event));
+			const processing = this.#runJournalOuterWork(() => this.#processAgentEvent(event));
 			if ((event.type === "message_start" || event.type === "message_end") && isAdvisorCard(event.message)) {
 				this.#advisors.trackCardEvent(processing);
 			}
@@ -3557,7 +3561,7 @@ export class AgentSession implements SettingsScope {
 	#queueMessageEndPersistence(message: AgentMessage, promptGeneration: number): Promise<string | undefined> {
 		const key = sessionMessagePersistenceKey(message);
 		const pending = this.#messageEndPersistenceTail
-			.then(() => this.runJournalOuterWork(async () => this.#persistMessageEnd(message, promptGeneration)))
+			.then(() => this.#runJournalOuterWork(async () => this.#persistMessageEnd(message, promptGeneration)))
 			.finally(() => {
 				if (key !== undefined && this.#pendingMessageEndPersistence.get(key) === pending) {
 					this.#pendingMessageEndPersistence.delete(key);
@@ -5513,7 +5517,7 @@ export class AgentSession implements SettingsScope {
 		this.#autolearnCaptureAbortController = controller;
 		const task = (async () => {
 			try {
-				await this.runJournalOuterWork(() =>
+				await this.#runJournalOuterWork(() =>
 					this.runInModelRequestContext(() => capture(controller.signal), "memory"),
 				);
 			} catch (error) {
