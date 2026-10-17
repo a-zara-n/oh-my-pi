@@ -10,7 +10,17 @@ import {
 } from "../src/model-request-journal-authority";
 import {
 	appendJournalMetadata,
+	beginJournalSend,
+	composeJournalSession,
+	createJournalExecution,
+	endJournalSendStart,
+	prepareJournalSend,
+	tryAcquireSessionLease,
+	type ClosedCoreAttemptIdentity,
 	type FileJournalCell,
+	type JournalSession,
+	type ModelRequestExecution,
+	type OpaqueSendAdmission,
 } from "../src/model-request-journal-composition";
 import { tryAcquireRawModelRequestJournalFileLease } from "../src/model-request-journal-leases";
 import type { ModelRequestRegistryEntry } from "../src/session-entries";
@@ -150,5 +160,104 @@ mac("authority private binding lifetime with actual File principals", () => {
 			expect(() => retained?.assertHeld()).toThrow();
 			assertExclusiveLease(path.join(fixture.namespace, "accounting/lifetime-retired.lock"), false);
 		} finally { await fixture.close(); }
+	});
+
+	test("an unawaited actual compose must fulfill and durably close before binding and cell leases end", async () => {
+		const fixture = new R11JournalFixture();
+		let composing: Promise<JournalSession> | undefined;
+		let fulfilled = false;
+		try {
+			const root = fixture.open();
+			const result = await fixture.withBinding(root, async binding => {
+				const execution = createJournalExecution({ binding, purpose: "main",
+					agent: { id: randomUUID(), kind: "main", name: "unawaited-compose", depth: 0 } });
+				composing = composeJournalSession({ binding, cell: root, root, execution });
+				// Observe the real promise, not a ready getter or caller-authored proof.
+				void composing.then(() => { fulfilled = true; }, () => {});
+				return "callback returned without awaiting composition";
+			});
+			expect(result).toBe("callback returned without awaiting composition");
+			expect(fulfilled).toBe(true);
+			if (!composing) throw new Error("Actual composition did not start");
+			await composing;
+			expect(closedSessions(root)).toEqual([root.getSessionId()]);
+			const durable = fs.readFileSync(root.getSessionFile(), "utf8");
+			expect(durable).toContain('"event":"member-closed"');
+			expect(durable).toContain('"event":"owner-closed"');
+			const cellLease = tryAcquireSessionLease(root.getSessionId());
+			try { expect(cellLease).not.toBeNull(); }
+			finally { cellLease?.release(); }
+			assertExclusiveLease(path.join(fixture.namespace, "owners", `${fixture.writerId}.lock`), false);
+		} finally {
+			try { await composing; } finally { await fixture.close(); }
+		}
+	});
+
+	test("binding termination cancels an actual prepared admission and rejects a later begin", async () => {
+		const fixture = new R11JournalFixture();
+		try {
+			const root = fixture.open();
+			const prepared = await fixture.withBinding(root, async binding => {
+				const principal = await fixture.ready(binding, root);
+				const attempt: ClosedCoreAttemptIdentity = Object.freeze({ attemptId: randomUUID() });
+				const admission = await prepareJournalSend(principal.execution, attempt);
+				return { admission, execution: principal.execution, attempt };
+			});
+			expect(closedSessions(root)).toEqual([root.getSessionId()]);
+			expect(fs.readFileSync(root.getSessionFile(), "utf8")).toContain('"event":"owner-closed"');
+			const registryId = root.getHeader().modelRequestRegistry?.registryId;
+			if (!registryId) throw new Error("Missing genuine registry identity");
+			assertExclusiveLease(path.join(fixture.namespace, "accounting", `${registryId}.lock`), false);
+			assertExclusiveLease(path.join(fixture.namespace, "owners", `${fixture.writerId}.lock`), false);
+			expect(() => beginJournalSend(prepared.admission, prepared.execution, prepared.attempt)).toThrow();
+			endJournalSendStart(prepared.admission);
+		} finally { await fixture.close(); }
+	});
+
+	test("an actual begun span holds binding and native leases until its external real end", async () => {
+		const fixture = new R11JournalFixture();
+		const begun = Promise.withResolvers<{ admission: OpaqueSendAdmission; execution: ModelRequestExecution }>();
+		const externalEnd = Promise.withResolvers<void>();
+		let operation: Promise<void> | undefined;
+		let ending: Promise<void> | undefined;
+		let settled = false;
+		try {
+			const root = fixture.open();
+			operation = fixture.withBinding(root, async binding => {
+				const principal = await fixture.ready(binding, root);
+				const attempt: ClosedCoreAttemptIdentity = Object.freeze({ attemptId: randomUUID() });
+				const admission = await prepareJournalSend(principal.execution, attempt);
+				beginJournalSend(admission, principal.execution, attempt);
+				begun.resolve({ admission, execution: principal.execution });
+			});
+			void operation.then(() => { settled = true; }, error => { settled = true; begun.reject(error); });
+			const { admission, execution } = await begun.promise;
+			ending = externalEnd.promise.then(() => endJournalSendStart(admission));
+			// The callback has returned; yield to its already-queued authority
+			// continuation, then observe closing through a real rejected work entry.
+			await Promise.resolve();
+			await expect(Promise.resolve().then(() => prepareJournalSend(execution,
+				Object.freeze({ attemptId: randomUUID() })))).rejects.toThrow();
+			expect(settled).toBe(false);
+			expect(closedSessions(root)).toEqual([]);
+			expect(fs.readFileSync(root.getSessionFile(), "utf8")).not.toContain('"event":"owner-closed"');
+			const registryId = root.getHeader().modelRequestRegistry?.registryId;
+			if (!registryId) throw new Error("Missing genuine registry identity");
+			const rootLock = path.join(fixture.namespace, "accounting", `${registryId}.lock`);
+			const ownerLock = path.join(fixture.namespace, "owners", `${fixture.writerId}.lock`);
+			assertExclusiveLease(rootLock, true);
+			assertExclusiveLease(ownerLock, true);
+			externalEnd.resolve();
+			await ending;
+			await operation;
+			expect(settled).toBe(true);
+			expect(closedSessions(root)).toEqual([root.getSessionId()]);
+			expect(fs.readFileSync(root.getSessionFile(), "utf8")).toContain('"event":"owner-closed"');
+			assertExclusiveLease(rootLock, false);
+			assertExclusiveLease(ownerLock, false);
+		} finally {
+			externalEnd.resolve();
+			try { await ending; await operation; } finally { await fixture.close(); }
+		}
 	});
 });
