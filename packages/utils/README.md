@@ -101,6 +101,23 @@ Registered connections always use immediate checked `close(true)`, even if a cal
 unchecked close. This finalizes outstanding prepared statements and surfaces actual native close
 failure before acknowledgment. Ordinary unregistered connections retain Bun's close behavior.
 
+On the bootstrapped audit runtime, file-backed factory opens select the fixed nondefault
+`omp-owned-v1` VFS through an internally encoded file URI before SQLite opens or reads the
+main file. The ordinary default VFS remains upstream-compatible; raw `new Database(...)`
+connections cannot be enrolled afterward by the private control command. Selecting the
+named VFS is not authority or a secret capability: actual native guards and the private
+factory registry remain necessary. The owned route retains its private-parent check and
+connection attachment before the initial main-header read, including RO/recovery guards.
+An owned connection cannot escape to an ordinary/foreign disk VFS through ATTACH URI options.
+
+The factory continues accepting normal paths, not caller file URIs. It uses `pathToFileURL`
+only internally after Bun's existing trim, keeps object `strict`/`safeIntegers` options and
+the original path-based writer key, and projects `database.filename` back to Bun's usual
+trimmed normal path. This writable JS data projection is never native identity evidence.
+Memory probes and non-audit factory opens retain their original Bun constructor path.
+No catch-and-reopen fallback, caller-selectable VFS option, new opcode or public API is added;
+existing Bun `create:false` behavior is not changed by this correction.
+
 The authority verifier self-opens an owned RO connection with literal `purpose:"authority-control"`,
 installs the fixed native authorizer, and reads its closed control codec in one actual
 SELECT-established read transaction. It accepts no caller connection/options/purpose.
@@ -153,7 +170,7 @@ global install, normal OMP registration or Keychain operation. See `native/audit
 the explicit source acquisition/offline build and public-domain provenance. For native utility tests:
 
 ```sh
-bun test --preload ./scripts/audit-library-bootstrap.ts packages/utils/test/model-request-journal-authority-sqlite.test.ts packages/utils/test/model-request-journal-sqlite-control.test.ts packages/utils/test/model-request-journal-leases.test.ts
+bun test --preload ./scripts/audit-library-bootstrap.ts ./packages/utils/test/model-request-journal-authority-sqlite.test.ts ./packages/utils/test/model-request-journal-sqlite-control.test.ts ./packages/utils/test/model-request-journal-leases.test.ts
 ```
 
 Put the built-in `test` command before `--preload`. The integrating parent observed that
@@ -183,6 +200,8 @@ These are the integrating parent's observations, not worker-executed checks:
 | Combined authority/control/raw-lease suites (bg337) | Timed out after 180 seconds; sole emitted failure was authority-control close throwing disk I/O; the finally-close error could mask an earlier try-body failure |
 | Limited staged raw-lifetime probe (bg345) | Exit 0 in 0.10 seconds; synchronous busy/release/available and subset gate/child/owner settlement stages completed; not attribution of the combined-suite timeout |
 | Separated native denial diagnostic (bg347) | Exit 0 in 0.11 seconds: query-only OFF rejects with AUTH while control stays live; VACUUM INTO rejects with AUTH and leaves no output, but incorrectly changes control to faulted (7178/state2), then close throws; general/backup/writer closes succeed |
+| Ordinary/custom-library DDL comparison (bg443–445) | The system/default connection created table/index and read sqlite_master; the selected custom library's ordinary connection failed first CREATE with IOERR_AUTH; the existing owned factory passed. These before observations are retained and are not a post-correction acceptance result |
+| Bun URI/options feasibility (bg447, Bun 1.4.2/system SQLite 3.51) | Object strict/safeIntegers options, URI-selected unix VFS, special path characters, BigInt readback and readonly rejection passed; db.filename exposed the URI while PRAGMA database_list reported the real path. This did not exercise the new owned VFS |
 
 The earlier wrong-order launch's six failures remain recorded above. The full three-suite command is
 an acceptance invocation, not a claim that all three suites passed: bg337 timed out as recorded.

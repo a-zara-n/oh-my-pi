@@ -87,6 +87,17 @@
 
 ### Fixed
 
+- Select the source-owned nondefault SQLite VFS only for bootstrapped audit factory
+  files, before their first native open/read, while restoring ordinary selected-library
+  connections to the upstream default VFS. Ordinary connections cannot gain owned
+  state through late file control. Internal escaped URIs retain Bun object options,
+  trimmed normal filename projection and the original writer key; public factory
+  APIs and native opcodes are unchanged. Regression coverage includes ordinary
+  DDL/late-enrollment refusal, special paths/BigInt/strict/RO, and the owned parent
+  guard. The selected-library ordinary CREATE failure and lazy-enrollment candidate's
+  missing initial-I/O guard remain historical failures, not accepted workarounds.
+  Parent fresh-build/runtime verification is still required for this correction.
+
 - Keep every accepted canonical principal publication in one synchronous atomic CAS/rename
   commit body, so a legitimate same-principal synchronous append cannot interleave with
   staged snapshots. Public async signatures, root queues and conflict rejection remain;

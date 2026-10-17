@@ -63,11 +63,75 @@ mac("owned SQLite fixed control", () => {
 		} finally { fs.rmSync(directory, {recursive: true, force: true}); }
 	});
 
+	test("ordinary custom-library connections keep upstream DDL and cannot enroll through file control", () => {
+		const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ordinary-sqlite-")));
+		const filename = path.join(directory, "ordinary.sqlite3");
+		try {
+			const database = new Database(filename, {strict: true, safeIntegers: true});
+			try {
+				fs.chmodSync(filename, 0o644);
+				for (const command of [1, 2, 3]) {
+					const buffer = new Uint32Array(64);
+					buffer[0] = 0x4f4d5053;
+					buffer[1] = 1;
+					buffer[2] = 256;
+					buffer[3] = command;
+					expect(database.fileControl("main", 0x4f4d5001, buffer)).toBe(12);
+				}
+				database.exec("CREATE TABLE ordinary(value INTEGER) STRICT; CREATE INDEX ordinary_value ON ordinary(value); INSERT INTO ordinary VALUES(7)");
+				expect(database.query<{value: bigint}, []>("SELECT value FROM ordinary").get()?.value).toBe(7n);
+				expect(database.query<{name: string}, []>("SELECT name FROM sqlite_master WHERE type='index'").get()?.name).toBe("ordinary_value");
+				expect(() => assertModelRequestJournalDatabase(database)).toThrow("unregistered");
+				database.exec("INSERT INTO ordinary VALUES(8)");
+				expect(database.query<{count: bigint}, []>("SELECT count(*) AS count FROM ordinary").get()?.count).toBe(2n);
+			} finally { database.close(true); }
+		} finally { fs.rmSync(directory, {recursive: true, force: true}); }
+	});
+
+	test("internal owned URI preserves escaped paths, Bun trim, object options and ordinary filename projection", () => {
+		const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "owned-uri-")));
+		const filename = path.join(directory, "space ?#%日本.sqlite3");
+		const requested = ` \t${filename}\n`;
+		try {
+			fs.writeFileSync(filename, "", {mode: 0o600});
+			const database = openModelRequestJournalDatabase(requested, {create: false, strict: true, safeIntegers: true});
+			try {
+				expect(database.filename).toBe(filename);
+				expect(database.query<{file: string}, []>("PRAGMA database_list").get()?.file).toBe(filename);
+				database.exec("CREATE TABLE evidence(id INTEGER PRIMARY KEY,value INTEGER) STRICT");
+				database.query("INSERT INTO evidence VALUES($id,$value)").run({id: 1n, value: 9007199254740993n});
+				expect(database.query<{value: bigint}, []>("SELECT value FROM evidence").get()?.value).toBe(9007199254740993n);
+				const original = assertModelRequestJournalDatabase(database);
+				const reader = openModelRequestJournalDatabase(requested, {readonly: true, create: false, strict: true, safeIntegers: true});
+				try {
+					expect(reader.filename).toBe(filename);
+					expect(reader.query<{value: bigint}, []>("SELECT value FROM evidence").get()?.value).toBe(9007199254740993n);
+					expect(assertModelRequestJournalDatabase(reader).liveWriterGenerations).toContain(original.connectionGeneration);
+					expect(() => reader.exec("UPDATE evidence SET value=0")).toThrow();
+				} finally { reader.close(); }
+				Object.defineProperty(database, "filename", {value: "file:/not-identity?vfs=unix"});
+				expect(assertModelRequestJournalDatabase(database).inode).toBe(original.inode);
+			} finally { database.close(); }
+		} finally { fs.rmSync(directory, {recursive: true, force: true}); }
+	});
+
+	test("owned open keeps its private-parent guard before SQL and never retries through the ordinary VFS", () => {
+		const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "owned-open-guard-")));
+		const filename = path.join(directory, "state.sqlite3");
+		try {
+			fs.writeFileSync(filename, "", {mode: 0o600});
+			fs.chmodSync(directory, 0o755);
+			expect(() => openModelRequestJournalDatabase(filename, {create: false})).toThrow();
+			expect(fs.statSync(filename).size).toBe(0);
+		} finally { fs.rmSync(directory, {recursive: true, force: true}); }
+	});
+
 	test("foreign objects, memory probes, unknown options and prior connection generations are not proof", () => {
 		const memory = new Database(":memory:");
 		try { expect(() => assertModelRequestJournalDatabase(memory)).toThrow(); }
 		finally { memory.close(); }
 		expect(() => openModelRequestJournalDatabase("file:/tmp/forbidden?immutable=1")).toThrow();
+		expect(() => openModelRequestJournalDatabase(" \tfile:/tmp/forbidden?vfs=unix\n")).toThrow();
 		expect(() => openModelRequestJournalDatabase(":memory:", {readonly: true, create: true})).toThrow();
 		for (const options of [
 			{purpose: "unknown"},

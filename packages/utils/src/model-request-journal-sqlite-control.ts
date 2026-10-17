@@ -3,12 +3,14 @@ import { Database } from "bun:sqlite";
 import { randomBytes } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { pathToFileURL } from "node:url";
 
 /** The only application codec for the source-owned unix VFS control. No caller buffers or expected identities. */
 const OPCODE = 0x4f4d5001;
 const MAGIC = 0x4f4d5053;
 const WORDS = 64;
 const VERSION = 1;
+const OWNED_VFS = "omp-owned-v1";
 const fileControl = Database.prototype.fileControl;
 const closeDatabase = Database.prototype.close;
 const states = new WeakMap<Database, ConnectionState>();
@@ -152,11 +154,17 @@ function optionsOf(options: ModelRequestJournalDatabaseOptions): ModelRequestJou
 }
 /** Ordinary runtimes retain Bun behavior. Managed diagnostics always require the fixed native control. */
 export function openModelRequestJournalDatabase(filename: string, options: ModelRequestJournalDatabaseOptions = {}): Database {
-	if (typeof filename !== "string" || filename.length === 0 || filename.includes("\0") || filename.startsWith("file:")) throw new Error("Journal SQLite filename rejected");
+	if (typeof filename !== "string" || filename.length === 0 || filename.includes("\0") || filename.trim().startsWith("file:")) throw new Error("Journal SQLite filename rejected");
 	const {purpose, ...normalized} = optionsOf(options);
 	if (purpose === "authority-control" && filename === ":memory:") throw new Error("Journal authority SQLite requires an owned file");
-	const database = new Database(filename, normalized);
+	const openedFilename = filename.trim();
+	const ownedFile = Reflect.get(globalThis, Symbol.for("omp.audit.sqlite.required.v1")) === true && openedFilename.length > 0 && openedFilename !== ":memory:";
+	// Select the source-owned VFS before SQLite opens/reads the main file, without changing Bun's object options.
+	const nativeFilename = ownedFile ? `${pathToFileURL(path.resolve(openedFilename)).href}?vfs=${OWNED_VFS}` : filename;
+	const database = new Database(nativeFilename, normalized);
 	try {
+		// Bun exposes its constructor input as a data property; keep the ordinary path projection, never as identity proof.
+		if (ownedFile) Object.defineProperty(database, "filename", {value: openedFilename});
 		// A memory-only version probe has no unix file and can never be authority evidence.
 		if (filename === ":memory:") return database;
 		const initial = control(database, 1);
