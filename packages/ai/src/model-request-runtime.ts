@@ -488,8 +488,10 @@ export class ModelRequestRuntime {
 
 		const gateWork = openJournalOuterWork(execution);
 		const attempt = this.#buildAttempt(attemptId, input, execution);
+		let raced: RaceResult;
+		let afterGate: Promise<void> = Promise.resolve();
 		try {
-			const raced = await this.#raceGate(registration, attempt, gateWork);
+			({ raced, afterGate } = await this.#raceGate(registration, attempt, gateWork));
 
 			if (raced.kind === "aborted") {
 				throw signal?.reason ?? new AbortError("model request aborted while awaiting authorization");
@@ -519,6 +521,9 @@ export class ModelRequestRuntime {
 				throw error;
 			}
 			if (decision.type === "pass") {
+				// The real gate call (and any late release) must fully settle before
+				// the gate work ends (E-02): a stall holds the accounting open.
+				await joinJournalOuterWork(gateWork, afterGate);
 				await gateWork?.end();
 				return { attemptId, lease: undefined };
 			}
@@ -533,6 +538,10 @@ export class ModelRequestRuntime {
 		} catch (error) {
 			gateWork?.abortTransfer();
 			gateWork?.noteFailure(error);
+			// Timeout/abort must not end the gate work on the race result alone:
+			// the real gate call and a late allow's unused-lease settle/cleanup
+			// settle first, so their failures are accounted (E-02, AC-OL-03).
+			await joinJournalOuterWork(gateWork, afterGate);
 			await gateWork?.end();
 			throw error;
 		}
@@ -577,7 +586,7 @@ export class ModelRequestRuntime {
 		registration: GateRegistration,
 		attempt: ModelRequestAttempt,
 		gateWork?: JournalOuterWork,
-	): Promise<RaceResult> {
+	): Promise<{ readonly raced: RaceResult; readonly afterGate: Promise<void> }> {
 		const gateCall = (async () => registration.gate.authorize(attempt))();
 		if (gateWork) gateWork.join(gateCall);
 		const { promise: interrupt, resolve: interruptWith } = Promise.withResolvers<RaceResult>();
@@ -593,6 +602,11 @@ export class ModelRequestRuntime {
 				? undefined
 				: setTimeout(() => interruptBy({ kind: "timeout" }), registration.authorizeTimeoutMs);
 		attempt.signal?.addEventListener("abort", onAbort, { once: true });
+		// The gate work may not end while the real gate call — and any release of
+		// an answer that lost the race — is still settling (E-02): a late allow's
+		// unused-lease settle/cleanup failure is accounted, never dropped by an
+		// end that already happened.
+		const lateSettled = Promise.withResolvers<void>();
 		// An answer that arrives after the race was lost still holds a reservation: release it.
 		gateCall.then(
 			value => {
@@ -604,13 +618,23 @@ export class ModelRequestRuntime {
 							void release.catch(error => gateWork.noteFailure(error));
 							gateWork.join(release);
 						} else void release.catch(() => {});
+						void release.then(
+							() => lateSettled.resolve(),
+							() => lateSettled.resolve(),
+						);
+						return;
 					}
 				}
+				lateSettled.resolve();
 			},
-			error => gateWork?.noteFailure(error),
+			error => {
+				gateWork?.noteFailure(error);
+				lateSettled.resolve();
+			},
 		);
+		const afterGate = Promise.allSettled([gateCall, lateSettled.promise]).then(() => undefined);
 		try {
-			return await Promise.race([
+			const raced = await Promise.race([
 				gateCall.then((value): RaceResult => ({ kind: "decision", value })),
 				interrupt,
 			]).catch(error => {
@@ -618,6 +642,7 @@ export class ModelRequestRuntime {
 					cause: error,
 				});
 			});
+			return { raced, afterGate };
 		} finally {
 			raceOver = true;
 			clearTimeout(timer);
