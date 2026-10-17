@@ -165,14 +165,27 @@ async function raceAuthorityClose(
 	return { authorityRace, bindingState: snap.bindingState, osLeaseCount: snap.osLeaseCount };
 }
 
+function errorIncludesCause(error: unknown, root: unknown): boolean {
+	const seen = new Set<unknown>();
+	const visit = (current: unknown): boolean => {
+		if (current === undefined || seen.has(current)) return false;
+		seen.add(current);
+		if (current === root) return true;
+		if (current instanceof AggregateError) return current.errors.some(visit);
+		if (current instanceof Error) return visit(current.cause);
+		return false;
+	};
+	return visit(error);
+}
+
 async function finishAuthorityClose(
 	harness: ManagedHarness,
-): Promise<{ readonly ok: true } | { readonly ok: false; readonly message: string }> {
+): Promise<{ readonly ok: true } | { readonly ok: false; readonly message: string; readonly error: unknown }> {
 	try {
 		await harness.startAuthorityClose();
 		return { ok: true };
 	} catch (error) {
-		return { ok: false, message: error instanceof Error ? error.message : String(error) };
+		return { ok: false, message: error instanceof Error ? error.message : String(error), error };
 	}
 }
 
@@ -941,7 +954,11 @@ async function runScenario(): Promise<Record<string, unknown>> {
 				}
 				const authority = await finishAuthorityClose(harness);
 				loopback.stop();
-				return { failure: failure === reject, authorityOk: authority.ok };
+				return {
+					rootCauseSeen: failure === reject,
+					authorityOk: authority.ok,
+					authorityPreservesRootCause: !authority.ok && errorIncludesCause(authority.error, reject),
+				};
 			});
 		}
 		case "a04-auth-retry-recovered-fulfilled": {
@@ -965,18 +982,25 @@ async function runScenario(): Promise<Record<string, unknown>> {
 			const loopback = await startLoopbackProvider(scripted(errorReply(401, "bad key")));
 			const model = loopbackModel("openai-completions", loopback.origin);
 			return withManagedHarness(async harness => {
-				let failed = false;
+				let streamError: unknown;
 				try {
 					await streamSimple(model, streamContext(), {
 						apiKey: async ({ lastChance }) => (lastChance ? undefined : "key-first"),
 						fetch: transportFetch(model, modelRequestBuiltinFetch),
 					}).result();
-				} catch {
-					failed = true;
+				} catch (error) {
+					streamError = error;
 				}
 				const authority = await finishAuthorityClose(harness);
 				loopback.stop();
-				return { failed, authorityOk: authority.ok };
+				return {
+					failed: streamError !== undefined,
+					authorityOk: authority.ok,
+					authorityPreservesStreamFailure:
+						!authority.ok &&
+						streamError !== undefined &&
+						(errorIncludesCause(authority.error, streamError) || errorIncludesCause(streamError, authority.error)),
+				};
 			});
 		}
 		case "a05-uninstrumented-wrapper-pending": {
