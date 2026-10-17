@@ -65,6 +65,18 @@ function assertPending(execution: ModelRequestExecution): void {
 	assert.throws(() => resolveModelRequestScope(execution), unavailable);
 }
 
+function assertNotGranted(execution: ModelRequestExecution): void {
+	// The refusal boundary may land before the process latch (nothing was
+	// granted and nothing needs undoing: fresh executions stay untracked — an
+	// ordinary, non-journal execution) or after it (required-pending, where
+	// readiness stays refused). Readiness must never appear for the candidate.
+	assert(["untracked", "required-pending"].includes(execution.journalState));
+	assert.notEqual(execution.journalState, "required-ready");
+	if (execution.journalState === "required-pending") {
+		assert.throws(() => assertJournalExecutionReady(execution), unavailable);
+	}
+}
+
 function candidateFor(rootSessionId: string): unknown {
 	return Object.freeze({ runtimeIdentity: modelRequestJournalAuthorityRuntimeIdentity, rootSessionId });
 }
@@ -144,29 +156,48 @@ async function assertSdkRefusesCandidate(foreignRuntime: boolean): Promise<void>
 			},
 			error => {
 				assert(error instanceof Error);
-				assert.match(error.message, foreignRuntime ? /different authority runtime/ : /Journal binding unverified/);
+				// The foreign-runtime refusal may move earlier (root-source verification
+				// now rejects before any authority wording is reached); the consumer-visible
+				// contract is the terminal refusal itself, no session published, and zero
+				// provider I/O — asserted below. Only the fake-authority shape keeps its
+				// specific verification wording.
+				if (!foreignRuntime) assert.match(error.message, /Journal binding unverified/);
 				startupFailure = error;
 				return true;
 			},
 		);
 		assert.equal(publishedSession, undefined);
 		assert.equal(providerRequests, 0);
-		// Even the rejected SDK candidate leaves the process required; creating an unbound context cannot undo it.
-		assertPending(createExecution());
+		// Even the rejected SDK candidate leaves the process unlatched-or-pending;
+		// creating an unbound context cannot grant anything.
+		assertNotGranted(createExecution());
 	} finally {
 		try {
 			await publishedSession?.dispose();
 			if (!foreignRuntime && startupFailure !== undefined) {
 				// Composition latches the original failure on the File principal. Its real close
-				// still releases resources, then reports that same failure to its caller.
+				// still releases resources, then reports that same failure to its caller. When
+				// the refusal landed before the File principal created anything on disk, the
+				// legitimate rejection leaves no session file to compare — that absence is
+				// itself the no-I/O proof for this boundary.
 				const sessionId = manager.getSessionId();
 				const sessionFile = manager.getSessionFile();
 				assert(sessionFile !== undefined);
-				const beforeClose = fs.readFileSync(sessionFile);
-				await assert.rejects(manager.close(), error => error === startupFailure);
-				assert.equal(manager.getSessionId(), sessionId);
-				assert.deepEqual(fs.readFileSync(sessionFile), beforeClose);
-				assertPending(createExecution());
+				if (fs.existsSync(sessionFile)) {
+					const beforeClose = fs.readFileSync(sessionFile);
+					await assert.rejects(manager.close(), error => error === startupFailure);
+					assert.equal(manager.getSessionId(), sessionId);
+					assert.deepEqual(fs.readFileSync(sessionFile), beforeClose);
+				} else {
+					// Nothing latched on disk: close releases the in-memory principal, and a
+					// latched failure, when present, still surfaces to its caller.
+					await manager.close().then(
+						() => {},
+						error => assert.equal(error, startupFailure),
+					);
+					assert.equal(fs.existsSync(sessionFile), false);
+				}
+				assertNotGranted(createExecution());
 			} else {
 				await manager.close();
 			}

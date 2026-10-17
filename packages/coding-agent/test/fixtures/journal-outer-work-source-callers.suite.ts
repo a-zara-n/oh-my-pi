@@ -43,6 +43,9 @@ import { tinyModelClient } from "../../src/tiny/title-client";
 import { ExtensionToolWrapper } from "../../src/extensibility/extensions/wrapper";
 import { Type } from "../../src/extensibility/legacy-typebox";
 import type { AgentTool } from "@oh-my-pi/pi-agent-core";
+import { SessionManager } from "../../src/session/session-manager";
+import { AgentRegistry } from "../../src/registry/agent-registry";
+import { tryAcquireSessionLease } from "@oh-my-pi/pi-utils/model-request-journal-composition";
 import { R11JournalFixture } from "../../../utils/test/fixtures/model-request-journal-r11";
 import { createInMemoryAuthStorage } from "../helpers/agent-session-setup";
 import {
@@ -82,6 +85,20 @@ function mnemopiOuterWorkSettings(directory: string): Settings {
 }
 
 /** Avoid real SQLite / dynamic import side effects after module-load spies resolve. */
+/** Flatten an AggregateError chain into its leaf causes. */
+function leafCauses(error: unknown): unknown[] {
+	const flattened: unknown[] = [];
+	const collect = (cause: unknown): void => {
+		if (cause instanceof AggregateError) {
+			for (const inner of cause.errors) collect(inner);
+			return;
+		}
+		flattened.push(cause);
+	};
+	collect(error);
+	return flattened;
+}
+
 function stubMnemopiSessionStateConstructor(): void {
 	// @ts-expect-error vi.spyOn constructor mock is untyped for class exports
 	vi.spyOn(mnemopiState, "MnemopiSessionState").mockImplementation((options: {
@@ -110,13 +127,19 @@ mac("journal outer work canonical source callers", () => {
 		const fixture = new R11JournalFixture();
 		const settingsReady = Promise.withResolvers<Settings>();
 		try {
-			const root = fixture.open();
+			// The manager owns the root session file before the cell attaches, so the
+			// SDK's root scan resolves this manager as the journal root (self-match).
+			const sessionManager = SessionManager.create(fixture.directory, fixture.directory);
+			const rootFile = sessionManager.getSessionFile();
+			if (!rootFile) throw new Error("expected the journal root session file");
+			const root = fixture.open(rootFile);
 			await fixture.withBinding(root, async binding => {
 				const authStorage = createInMemoryAuthStorage();
 				const settings = Settings.isolated({ "compaction.enabled": false, "memory.backend": "off" });
 				const startup = createAgentSession({
 					modelRequestJournalLeaseBinding: binding,
 					authStorage,
+					sessionManager,
 					settingsManager: settingsReady.promise,
 					modelRegistry: new ModelRegistry(authStorage, undefined, { ignoreLocalModelConfig: true }),
 					disableExtensionDiscovery: true,
@@ -129,6 +152,7 @@ mac("journal outer work canonical source callers", () => {
 				settingsReady.resolve(settings);
 				const { session } = await startup;
 				await session.dispose();
+				await sessionManager.close();
 				authStorage.close();
 			});
 		} finally {
@@ -136,7 +160,6 @@ mac("journal outer work canonical source callers", () => {
 			await fixture.close();
 		}
 	});
-
 	test("S-02/AC-OL-02: message_update queue drain via AgentSession agent event entry", async () => {
 		const fixture = new R11JournalFixture();
 		try {
@@ -168,6 +191,43 @@ mac("journal outer work canonical source callers", () => {
 			await fixture.close();
 		}
 	});
+
+	test("S-02/AC-OL-02: pending event and flush retain the session owner lease until completion", async () => {
+		const fixture = new R11JournalFixture();
+		try {
+			const root = fixture.open();
+			await fixture.withBinding(root, async binding => {
+				const principal = await fixture.ready(binding, root);
+				const harness = await openManagedAgentHarness(principal, binding);
+				const gate = Promise.withResolvers<void>();
+				harness.api.on("message_update", async event => {
+					if (event.assistantMessageEvent.type === "text_delta" && event.assistantMessageEvent.delta === "lease") {
+						await gate.promise;
+					}
+				});
+				await withManagedExecution(principal.execution, async () => {
+					harness.emitMessageUpdate("lease");
+					await Bun.sleep(5);
+					// While the event dispatch outer work is held, another owner cannot take
+					// the session file exclusive lease: the retention point is the real lock,
+					// not a pending binding promise.
+					const duringPending = tryAcquireSessionLease(root.getSessionId());
+					expect(duringPending).toBeNull();
+					gate.resolve();
+					await Bun.sleep(10);
+				});
+				await harness.dispose();
+			});
+			// After completion — every outer work settled and the binding closed — the
+			// exclusive lease is acquirable again by a new owner.
+			const afterCompletion = tryAcquireSessionLease(root.getSessionId());
+			expect(afterCompletion).not.toBeNull();
+			afterCompletion?.release();
+		} finally {
+			await fixture.close();
+		}
+	});
+
 
 	test("S-03/AC-OL-02: sendCustomMessage detached extension emit holds binding until dispatch settles", async () => {
 		const fixture = new R11JournalFixture();
@@ -491,7 +551,9 @@ mac("journal outer work canonical source callers", () => {
 				const principal = await fixture.ready(binding, root);
 				const harness = await openManagedAgentHarness(principal, binding);
 				const settings = mnemopiOuterWorkSettings(fixture.directory);
+				let modulesEntered = false;
 				vi.spyOn(mnemopiState, "loadMnemopiModules").mockImplementation(async () => {
+					modulesEntered = true;
 					const settled = await Promise.allSettled([rootHeld.promise, Promise.resolve()]);
 					const failures = settled
 						.filter((result): result is PromiseRejectedResult => result.status === "rejected")
@@ -507,8 +569,9 @@ mac("journal outer work canonical source callers", () => {
 						agentDir: fixture.directory,
 						taskDepth: 0,
 					});
-					await Promise.resolve();
-					expect(mnemopiState.loadMnemopiModules).toHaveBeenCalled();
+					const enteredBy = Date.now() + 2_000;
+					while (!modulesEntered && Date.now() < enteredBy) await Bun.sleep(1);
+					expect(modulesEntered).toBe(true);
 					expectBindingAcceptsOuterWork(binding);
 					expect(closedSessionIds(principal.cell)).toEqual([]);
 					rootHeld.resolve();
@@ -531,7 +594,9 @@ mac("journal outer work canonical source callers", () => {
 				const principal = await fixture.ready(binding, root);
 				const harness = await openManagedAgentHarness(principal, binding);
 				const settings = mnemopiOuterWorkSettings(fixture.directory);
+				let modulesEntered = false;
 				vi.spyOn(mnemopiState, "loadMnemopiModules").mockImplementation(async () => {
+					modulesEntered = true;
 					const settled = await Promise.allSettled([
 						rootHeld.promise,
 						Promise.reject(new Error("core load failed")),
@@ -549,8 +614,9 @@ mac("journal outer work canonical source callers", () => {
 						agentDir: fixture.directory,
 						taskDepth: 0,
 					});
-					await Promise.resolve();
-					expect(mnemopiState.loadMnemopiModules).toHaveBeenCalled();
+					const enteredBy = Date.now() + 2_000;
+					while (!modulesEntered && Date.now() < enteredBy) await Bun.sleep(1);
+					expect(modulesEntered).toBe(true);
 					expectBindingAcceptsOuterWork(binding);
 					expect(closedSessionIds(principal.cell)).toEqual([]);
 					rootHeld.resolve();
@@ -605,7 +671,20 @@ mac("journal outer work canonical source callers", () => {
 		const fixture = new R11JournalFixture();
 		const reloadGate = Promise.withResolvers<void>();
 		try {
-			const root = fixture.open();
+			// The shim's child session resolves the journal root through the agent
+			// registry; register a live root manager holder for the scan to find.
+			const rootManager = SessionManager.create(fixture.directory, fixture.directory);
+			const rootFile = rootManager.getSessionFile();
+			if (!rootFile) throw new Error("expected the journal root session file");
+			const root = fixture.open(rootFile);
+			const registry = AgentRegistry.global();
+			const holder = registry.register({
+				id: "s09-root-holder",
+				displayName: "S-09 root holder",
+				kind: "main",
+				session: { sessionManager: rootManager } as unknown as AgentSession,
+			});
+			try {
 			await fixture.withBinding(root, async binding => {
 				const principal = await fixture.ready(binding, root);
 				const loader = new DefaultResourceLoader({ cwd: fixture.directory, agentDir: fixture.directory });
@@ -633,8 +712,12 @@ mac("journal outer work canonical source callers", () => {
 					const { session } = await pending;
 					await session.dispose();
 				});
-				authStorage.close();
+					authStorage.close();
 			});
+			} finally {
+				registry.unregister(holder.id, holder);
+				await rootManager.close();
+			}
 		} finally {
 			reloadGate.resolve();
 			await fixture.close();
@@ -643,9 +726,10 @@ mac("journal outer work canonical source callers", () => {
 
 	test("S-10/AC-OL-13: ExtensionRunner onToolRegistered flush reject fails tool_call handler outer work", async () => {
 		const fixture = new R11JournalFixture();
+		let operation: Promise<void> | undefined;
 		try {
 			const root = fixture.open();
-			await fixture.withBinding(root, async binding => {
+			operation = fixture.withBinding(root, async binding => {
 				const principal = await fixture.ready(binding, root);
 				const harness = await openManagedAgentHarness(principal, binding);
 				harness.runner.onToolRegistered(async () => {
@@ -673,6 +757,17 @@ mac("journal outer work canonical source callers", () => {
 					await expect(wrapped.execute("id", {})).rejects.toThrow("flush reject");
 				});
 				await harness.dispose();
+				void operation?.catch(() => {});
+				const received = await operation?.then(
+					() => undefined,
+					error => error,
+				);
+				// The flush failure is accounted: the binding drain surfaces it.
+				expect(
+					leafCauses(received).some(
+						cause => cause instanceof Error && cause.message === "flush reject",
+					),
+				).toBe(true);
 			});
 		} finally {
 			await fixture.close();
@@ -699,11 +794,13 @@ mac("journal outer work canonical source callers", () => {
 					execute: async () => ({ content: [{ type: "text", text: "ok" }] }),
 				};
 				harness.api.on("tool_call", async () => {
-					await Promise.withResolvers<void>().promise;
+					// Outlives the 25ms handler budget so late tool registration stays on the raw handler future.
+					await Bun.sleep(50);
 				});
 				const wrapped = new ExtensionToolWrapper(tool, harness.runner);
 				await withManagedExecution(principal.execution, async () => {
 					const pending = wrapped.execute("id", {});
+					const settled = expect(pending).rejects.toThrow(/timed out after 25ms/);
 					await Bun.sleep(30);
 					harness.api.registerTool({
 						name: "late_registered",
@@ -712,7 +809,8 @@ mac("journal outer work canonical source callers", () => {
 						parameters: Type.Object({}),
 						execute: async () => ({ content: [{ type: "text", text: "ok" }] }),
 					});
-					await expect(pending).rejects.toThrow();
+					await settled;
+					await Bun.sleep(0);
 				});
 				await harness.dispose();
 			});
@@ -724,14 +822,15 @@ mac("journal outer work canonical source callers", () => {
 
 	test("S-12/AC-OL-14: agent_end allSettled waits for processAgentEvent when computerControlRevocation rejects", async () => {
 		const fixture = new R11JournalFixture();
+		let operation: Promise<void> | undefined;
 		try {
 			const root = fixture.open();
-			await fixture.withBinding(root, async binding => {
+			operation = fixture.withBinding(root, async binding => {
 				const principal = await fixture.ready(binding, root);
 				const harness = await openManagedAgentHarness(principal, binding);
 				const gate = Promise.withResolvers<void>();
 				let maintenanceDone = false;
-				harness.api.on("session_stop", async () => {
+				harness.api.on("agent_end", async () => {
 					await gate.promise;
 					maintenanceDone = true;
 				});
@@ -739,14 +838,40 @@ mac("journal outer work canonical source callers", () => {
 					new Error("revoke failed"),
 				);
 				await withManagedExecution(principal.execution, async () => {
-					const pending = harness.agent.emitExternalEvent({ type: "agent_end", messages: [] });
-					await Promise.resolve();
-					expect(maintenanceDone).toBe(false);
-					gate.resolve();
-					await expect(pending).rejects.toThrow("revoke failed");
-					expect(maintenanceDone).toBe(true);
+					// emitExternalEvent is fire-and-forget in agent-core; the maintenance failure
+					// surfaces consumer-visibly as a session notice after the allSettled drain.
+					const notices: string[] = [];
+					const noticeSpy = vi.spyOn(harness.session, "emitNotice").mockImplementation((_level, message) => {
+						notices.push(message);
+					});
+					try {
+						harness.agent.emitExternalEvent({ type: "agent_end", messages: [] });
+						await Promise.resolve();
+						expect(maintenanceDone).toBe(false);
+						expectBindingAcceptsOuterWork(binding);
+						gate.resolve();
+						const deadline = Date.now() + 2_000;
+						while (notices.length === 0 && Date.now() < deadline) await Bun.sleep(1);
+						expect(notices.some(message => message.includes("Post-turn maintenance failed: revoke failed"))).toBe(
+							true,
+						);
+						expect(maintenanceDone).toBe(true);
+					} finally {
+						noticeSpy.mockRestore();
+					}
 				});
 				await harness.dispose();
+				void operation?.catch(() => {});
+				const received = await operation?.then(
+					() => undefined,
+					error => error,
+				);
+				// The maintenance failure is accounted: the binding drain surfaces it.
+				expect(
+					leafCauses(received).some(
+						cause => cause instanceof Error && cause.message === "revoke failed",
+					),
+				).toBe(true);
 			});
 		} finally {
 			vi.restoreAllMocks();
@@ -758,13 +883,18 @@ mac("journal outer work canonical source callers", () => {
 		const fixture = new R11JournalFixture();
 		const settingsReady = Promise.withResolvers<Settings>();
 		try {
-			const root = fixture.open();
+			// Manager owns the root file before the cell attaches (root scan self-match).
+			const sessionManager = SessionManager.create(fixture.directory, fixture.directory);
+			const rootFile = sessionManager.getSessionFile();
+			if (!rootFile) throw new Error("expected the journal root session file");
+			const root = fixture.open(rootFile);
 			await fixture.withBinding(root, async binding => {
 				const authStorage = createInMemoryAuthStorage();
 				const settings = Settings.isolated({ "compaction.enabled": false, "memory.backend": "off" });
 				const startup = createAgentSession({
 					modelRequestJournalLeaseBinding: binding,
 					authStorage,
+					sessionManager,
 					settingsManager: settingsReady.promise,
 					modelRegistry: new ModelRegistry(authStorage, undefined, { ignoreLocalModelConfig: true }),
 					disableExtensionDiscovery: true,
