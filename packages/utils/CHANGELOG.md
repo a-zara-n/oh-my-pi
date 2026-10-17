@@ -100,10 +100,13 @@
   writer ownership and rejected released assertions. These are parent observations only;
   combined utility/verified-root/principal acceptance was still pending at this record.
 - Retained the later parent three-suite timeout (180 seconds) and sole emitted authority-control
-  close/disk-I/O failure after successful purpose-flow assertions. A limited staged raw probe
+  close/disk-I/O failure; its finally-close could mask an earlier try-body failure. A limited staged raw probe
   completed in 0.10 seconds, which does not explain or clear that timeout. Test cleanup now uses
   one-shot real synchronous OS probes and always resolves/joins a subset child on assertion
   failure; assertions remain intact and the original timeout's cause is not claimed established.
+  The parent's separated native diagnostic then showed query-only denial leaving control live,
+  but VACUUM's ordinary AUTH denial incorrectly faulting control before close; no output existed.
+  This establishes denial-to-sticky-fault mixing, not success of the timed-out suites.
 
 - Relocated the existing session JSONL content/stream readers and migrations to
   `@oh-my-pi/pi-utils/session-file-reader` and `@oh-my-pi/pi-utils/session-migrations`,
