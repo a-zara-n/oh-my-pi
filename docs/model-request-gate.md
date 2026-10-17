@@ -65,6 +65,16 @@ separately. The explicit parent is captured once and passed unchanged to the
 leaf, never replaced by the ALS context. Ordinary untracked handovers do not gain
 required/File checks or a new family registry.
 
+Parent verification for this handover uses
+`bun --preload ./scripts/audit-library-bootstrap.ts test packages/ai/test/model-request-runtime-family.test.ts`.
+Its native child reuses the real SQLite/File fixture to compose root, child and
+deep principals, permits derived parent objects and handover without ALS, and
+rejects a different ready family despite the same root/binding/agent DTO. It
+also checks one-argument pending identity compatibility and that pure revoked
+identity does not confer readiness. A separate ordinary subprocess covers
+untracked child/deep/derive/revive and parent-optional callers without a File
+principal.
+
 The execution module (`@oh-my-pi/pi-ai/model-request-execution`) is internal and deliberately absent from the
 `@oh-my-pi/pi-ai` barrel, and no public option or request argument accepts an origin, scope or root. That is the whole
 extent of the guarantee: pi-ai's package `./*` export map still makes `model-request-execution` and
