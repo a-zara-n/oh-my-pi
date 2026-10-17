@@ -1557,15 +1557,7 @@ export class ExtensionRunner {
 			const registrationScope: ToolRegistrationScope = { pending: new Set(), closed: false };
 			let handlerResult: R | typeof EXTENSION_HANDLER_TIMEOUT | typeof EXTENSION_HANDLER_ABORTED | undefined;
 			let handlerFailure: { error: unknown } | undefined;
-			let flushFailure: unknown;
-			const aggregateFailure = (): unknown | undefined => {
-				const failures: unknown[] = [];
-				if (handlerFailure) failures.push(handlerFailure.error);
-				if (flushFailure !== undefined && flushFailure !== handlerFailure?.error) failures.push(flushFailure);
-				if (failures.length === 0) return undefined;
-				if (failures.length === 1) return failures[0];
-				return new AggregateError(failures, "Extension handler outer work failed");
-			};
+			let consumerFailure: unknown;
 			try {
 				handlerResult = await this.runScoped(() =>
 					raceHandlerWithTimeout(
@@ -1573,6 +1565,8 @@ export class ExtensionRunner {
 							registrationScope.signal = handlerSignal;
 							const raw = (async () => {
 								let result: R | undefined;
+								let rawHandlerFailure: { error: unknown } | undefined;
+								let flushFailure: unknown;
 								try {
 									const handlerContext = createHandlerContext(
 										ctx,
@@ -1584,6 +1578,7 @@ export class ExtensionRunner {
 									);
 								} catch (error) {
 									handlerFailure = { error };
+									rawHandlerFailure = { error };
 								} finally {
 									registrationScope.closed = true;
 								}
@@ -1592,6 +1587,20 @@ export class ExtensionRunner {
 								} catch (error) {
 									flushFailure = error;
 									handlerFailure ??= { error };
+									rawHandlerFailure ??= { error };
+								}
+								// Settlement-time accounting: the raw future itself resolves, so
+								// a consumer that already returned on timeout still needs the
+								// handler/flush causes noted here at real settlement — the journal
+								// work end reads them after draining this future.
+								const failures: unknown[] = [];
+								if (rawHandlerFailure) failures.push(rawHandlerFailure.error);
+								if (flushFailure !== undefined && flushFailure !== rawHandlerFailure?.error) {
+									failures.push(flushFailure);
+								}
+								if (failures.length === 1) outerWork.noteFailure(failures[0]);
+								else if (failures.length > 1) {
+									outerWork.noteFailure(new AggregateError(failures, "Extension handler outer work failed"));
 								}
 								return result;
 							})();
@@ -1605,7 +1614,10 @@ export class ExtensionRunner {
 					),
 				);
 			} catch (error) {
-				handlerFailure = { error };
+				// Consumer-side failure (dispatch or race machinery): the raw future
+				// notes its own causes at settlement, so this one travels alone.
+				consumerFailure = error;
+				handlerFailure ??= { error };
 			} finally {
 				registrationScope.closed = true;
 			}
@@ -1640,13 +1652,14 @@ export class ExtensionRunner {
 				return handlerResult as R | undefined;
 			} finally {
 				try {
-					const failure = aggregateFailure();
-					// Bounded consumer timeout returns before the raw handler/flush future settles;
-					// journal work still drains on the open handle in the background.
+					// The raw handler/flush future is drained by this end (timeout) or
+					// already settled (normal path) and its causes were noted at
+					// settlement time; complete carries only causes the raw future
+					// cannot hold.
 					if (handlerResult === EXTENSION_HANDLER_TIMEOUT) {
-						void outerWork.complete(failure).catch(() => {});
+						void outerWork.complete(consumerFailure).catch(() => {});
 					} else {
-						await outerWork.complete(failure);
+						await outerWork.complete(consumerFailure);
 					}
 				} catch {
 					// Outer work end is accounted; handler errors were already surfaced.

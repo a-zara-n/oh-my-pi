@@ -1666,8 +1666,8 @@ export function createAutoLearnCaptureRunner(
 		}
 		// Close failures are unrecovered cleanup failures: they must reach the
 		// capture's terminal accounting (the session's outer journal work ends the
-		// handle as rejected) instead of vanishing into the log. The prompt failure,
-		// when present, still takes precedence over the close failures below.
+		// handle as rejected) instead of vanishing into the log. A prompt failure is
+		// aggregated with them below rather than discarding them.
 		const closeFailures: unknown[] = [];
 		for (const [providerKey, state] of captureProviderSessionState) {
 			try {
@@ -1678,6 +1678,12 @@ export function createAutoLearnCaptureRunner(
 			}
 		}
 		captureProviderSessionState.clear();
+		// The prompt failure and every provider close failure are unrecovered: keep
+		// all of them in the terminal error so the capture's outer work ends rejected
+		// with every cause.
+		if (promptFailed && closeFailures.length > 0) {
+			throw new AggregateError([promptError, ...closeFailures], "Auto-learn capture failed");
+		}
 		if (promptFailed) throw promptError;
 		if (closeFailures.length === 1) throw closeFailures[0];
 		if (closeFailures.length > 1) {
