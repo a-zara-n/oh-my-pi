@@ -190,7 +190,7 @@ export function openModelRequestJournalDatabase(filename: string, options: Model
 /** Registered owned-descriptor identity only; never role, bootstrap, epoch or journal readiness authorization. */
 export function assertModelRequestJournalDatabase(database: Database): ModelRequestJournalDatabaseInspection {
 	const state = states.get(database);
-	if (state === undefined) throw new Error("Journal SQLite connection unregistered");
+	if (state === undefined) throw Object.assign(new Error("Journal SQLite connection unregistered"), {code: "ERR_JOURNAL_SQLITE_UNREGISTERED"});
 	const actual = live(state);
 	const generations: bigint[] = [];
 	const references = writers.get(state.filename);
