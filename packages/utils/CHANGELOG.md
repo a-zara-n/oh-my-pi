@@ -49,8 +49,15 @@
   source/lifecycle acknowledgement check the same verified writer mapping; historical v1
   registries remain readable but cannot compose a managed owner.
 - Journal logical close rejects new work, joins accepted source queues and descendant closes,
-  and shares its actual completion promise with concurrent close callers. This is not the
-  separate startup binding-lifetime join or the pending cross-ALS family-comparison contract.
+  and shares its actual completion promise with concurrent close callers. This alone is not
+  ownership of the outer SDK producer graph.
+- Connected the genuine authority binding's private lifetime to canonical File principal
+  registration, accepted composition/source/preparation work, real admission ending, queue
+  drain, logical close and writer close before native owner release. Same-root work uses the
+  actual root queue; no caller callback, promise or boolean is authentication. The internal
+  lifecycle subpath is explicitly unavailable through all public wildcard spellings.
+  This does not own pre-composition SDK startup, outer AgentSession event producers or the
+  successful-response transport's detached lease settlement; full outer acceptance is not claimed.
   Worker-side verification was not run; managed sending is not accepted by these notes.
 - Drain all already accepted File queues before starting descendant logical closes: both
   source appends and close batches use the same real registry-root lease. This prevents a

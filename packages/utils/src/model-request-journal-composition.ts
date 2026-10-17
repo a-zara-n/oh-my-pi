@@ -55,6 +55,7 @@ import { getSessionsDir } from "./dirs";
 import { parseSessionContent } from "./session-file-reader";
 import { migrateToCurrentVersion } from "./session-migrations";
 import { validateModelRequestRegistry } from "./model-request-registry";
+import { registerBindingPrincipal } from "./internal/model-request-journal-binding-lifetime";
 
 interface FileMutationGuard {
 	body(content: string): void;
@@ -1951,6 +1952,7 @@ interface JournalSendAdmissionState {
 	readonly session: JournalSession;
 	readonly sessionState: JournalSessionState;
 	readonly scope: ModelRequestJournalRetainedRootScope;
+	readonly complete: (failure?: { error: unknown }) => void;
 	phase: "prepared" | "begun" | "ended";
 }
 
@@ -2084,7 +2086,12 @@ export function endJournalSendStart(admission: OpaqueSendAdmission): void {
 	if (state.phase === "ended") return;
 	state.phase = "ended";
 	try { state.scope.release(); }
-	catch (error) { state.sessionState.family.state = "required-faulted"; throw error; }
+	catch (error) {
+		state.sessionState.family.state = "required-faulted";
+		state.complete({ error });
+		throw error;
+	}
+	state.complete();
 }
 
 function requireCell(cell: FileJournalCell): FileSessionPrincipalImpl {
@@ -2222,6 +2229,15 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 	readonly #removedEntryIds = new Set<string>();
 	#writeError: Error | undefined;
 	readonly #persistenceOwnerRef = randomUUID();
+	#binding: ModelRequestJournalLeaseBinding | undefined;
+	#bindingRoot: FileSessionPrincipalImpl | undefined;
+	#bindingMembers: Set<FileSessionPrincipalImpl> | undefined;
+	#bindingWork: Set<Promise<void>> | undefined;
+	#bindingFailures: unknown[] | undefined;
+	#bindingDrain: Promise<void> | undefined;
+	#bindingChanged: PromiseWithResolvers<void> | undefined;
+	#bindingAdmissions: Set<OpaqueSendAdmission> | undefined;
+	#drainBindingLifetime: (() => Promise<void>) | undefined;
 
 	constructor(input: ExistingFileSessionOpenInput) {
 		const dir = path.resolve(input.sessionDir ?? (input.sessionFile === undefined ? getSessionsDir() : path.dirname(input.sessionFile)));
@@ -2398,13 +2414,15 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 	#withValidatedBody<T>(fpath: string, body: string, operation: (target: string) => T): T {
 		const target = this.#assertPath(fpath);
 		if (target !== this.#sessionFile) return operation(target);
-		this.#guardBody(body);
+		this.#validateBody(body);
 		return principalWriteContext.run({ principal: this, body, generation: this.#generation, targetFile: target }, () => operation(target));
 	}
 	writeTextSync(fpath: string, content: string, options?: SessionStorageWriteOptions): void {
+		this.#assertBindingAcceptsWork();
 		this.#withValidatedBody(fpath, content, target => this.#storage.writeTextSync(target, content, options));
 	}
 	writeLinesSync(fpath: string, lines: readonly string[], options?: SessionStorageWriteOptions): void {
+		this.#assertBindingAcceptsWork();
 		this.#withValidatedBody(fpath, lines.join(""), target => this.#storage.writeLinesSync(target, lines, options));
 	}
 	writeText(fpath: string, content: string): Promise<void> {
@@ -2432,25 +2450,34 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 		});
 	}
 	rename(fpath: string, nextPath: string): Promise<void> {
-		return this.#storage.rename(this.#assertPath(fpath), this.#assertPath(nextPath));
+		const source = this.#assertPath(fpath), target = this.#assertPath(nextPath);
+		return this.#enqueue(() => this.#storage.rename(source, target));
 	}
-	unlink(fpath: string): Promise<void> { return this.#storage.unlink(this.#assertPath(fpath)); }
+	unlink(fpath: string): Promise<void> {
+		const target = this.#assertPath(fpath);
+		return this.#enqueue(() => this.#storage.unlink(target));
+	}
 	deleteSessionWithArtifacts(fpath: string): Promise<void> {
-		return this.#storage.deleteSessionWithArtifacts(this.#assertPath(fpath));
+		const target = this.#assertPath(fpath);
+		return this.#enqueue(() => this.#storage.deleteSessionWithArtifacts(target));
 	}
 	deleteSessionWithArtifactsIf(fpath: string, shouldDelete: (content: string) => boolean): Promise<boolean> {
-		return this.#storage.deleteSessionWithArtifactsIf(this.#assertPath(fpath), shouldDelete);
+		const target = this.#assertPath(fpath);
+		return this.#enqueue(() => this.#storage.deleteSessionWithArtifactsIf(target, shouldDelete));
 	}
 	withSessionFileLockSync<T>(fpath: string, operation: () => T): T {
+		this.#assertBindingAcceptsWork();
 		return this.#storage.withSessionFileLockSync(this.#assertPath(fpath), operation);
 	}
 	claimSession(sessionId: string, sessionFile: string): (() => void) | null {
+		this.#assertBindingAcceptsWork();
 		if (this.#sealed || this.#fault) unavailable();
 		const target = this.#assertPath(sessionFile);
 		if (sessionId !== this.getSessionId() || target !== this.#sessionFile) unavailable();
 		return this.#storage.claimSession(sessionId, target);
 	}
 	openWriter(fpath: string, options?: { flags?: "a" | "w"; onError?: (error: Error) => void }): SessionStorageWriter {
+		this.#assertBindingAcceptsWork();
 		const target = this.#assertPath(fpath);
 		if (target !== this.#sessionFile) return this.#storage.openWriter(target, options);
 		this.#assertLive();
@@ -2466,6 +2493,7 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 	getSessionDir(): string { return this.#sessionDir; }
 
 	resetToNewSession(options?: NewSessionOptions, forcedSessionFile?: string, cwd?: string): string {
+		this.#assertBindingAcceptsWork();
 		if (this.#sealed || (liveCellsById.has(this.#header.id) && liveCellsById.get(this.#header.id) !== this) ||
 			(liveCellsByPath.has(this.#sessionFile) && liveCellsByPath.get(this.#sessionFile) !== this)) unavailable();
 		if (this.#session && !this.#closed) unavailable();
@@ -2553,6 +2581,7 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 		this.#projectionRevision++;
 	}
 	branch(leafId: string | null): void {
+		this.#assertBindingAcceptsWork();
 		if (this.#session && sessionStates.get(this.#session)?.closing) unavailable();
 		if (this.#sealed || this.#fault || this.#closed && (this.#header.modelRequestJournal || this.#header.modelRequestRegistry) ||
 			liveCellsByPath.get(this.#sessionFile) !== this || liveCellsById.get(this.#header.id) !== this) unavailable();
@@ -2563,6 +2592,7 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 	}
 
 	#assertProjectionCurrent(): void {
+		this.#assertBindingAcceptsWork();
 		if (this.#session && sessionStates.get(this.#session)?.closing) unavailable();
 		if (this.#sealed || this.#closed && (this.#header.modelRequestJournal || this.#header.modelRequestRegistry) ||
 			liveCellsByPath.get(this.#sessionFile) !== this || liveCellsById.get(this.#header.id) !== this) unavailable();
@@ -2583,6 +2613,7 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 	}
 
 	#guardRemove(): void {
+		this.#assertBindingAcceptsWork();
 		if (this.#header.modelRequestJournal || this.#header.modelRequestRegistry) unavailable();
 		this.#revoke("required-revoked");
 	}
@@ -2601,10 +2632,18 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 	}
 
 	#guardBody(content: string, projectionOnly = false): void {
-		if (!projectionOnly) this.#assertLive();
 		const permit = principalWriteContext.getStore();
-		if (permit?.principal === this && permit.generation === this.#generation && content === permit.body) return;
+		if (permit?.principal === this && permit.generation === this.#generation && content === permit.body) {
+			if (!projectionOnly) this.#assertLive();
+			return;
+		}
+		this.#assertBindingAcceptsWork();
 		if (this.#session && sessionStates.get(this.#session)?.closing) unavailable();
+		this.#validateBody(content, projectionOnly);
+	}
+
+	#validateBody(content: string, projectionOnly = false): void {
+		if (!projectionOnly) this.#assertLive();
 		const next = strictFile(content);
 		if (next.header.id !== this.#header.id) unavailable();
 		if (this.#header.modelRequestJournal || this.#header.modelRequestRegistry) {
@@ -2629,6 +2668,7 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 	}
 
 	#guardAppend(line: string): void {
+		this.#assertBindingAcceptsWork();
 		if (this.#session && sessionStates.get(this.#session)?.closing) unavailable();
 		this.#assertLive();
 		// Parse exactly one physical JSONL record, before any title-slot folding.
@@ -2670,8 +2710,87 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 		this.#projectionRevision++;
 	}
 
+	#registerBinding(binding: ModelRequestJournalLeaseBinding, root: FileSessionPrincipalImpl): void {
+		if (this.#binding && (this.#binding !== binding || this.#bindingRoot !== root) ||
+			root.#binding && (root.#binding !== binding || root.#bindingRoot !== root)) unavailable();
+		root.#drainBindingLifetime ??= () => root.#drainBoundPrincipals();
+		this.#drainBindingLifetime ??= () => {
+			if (!this.#bindingRoot) unavailable();
+			return this.#bindingRoot.#drainBoundPrincipals();
+		};
+		registerBindingPrincipal(binding, root, root.#drainBindingLifetime);
+		registerBindingPrincipal(binding, this, this.#drainBindingLifetime);
+		root.#binding = binding; root.#bindingRoot = root;
+		this.#binding = binding; this.#bindingRoot = root;
+		const members = root.#bindingMembers ??= new Set();
+		members.add(root); members.add(this);
+	}
+
+	#assertBindingAcceptsWork(): void {
+		if (this.#binding) {
+			if (!this.#drainBindingLifetime) unavailable();
+			registerBindingPrincipal(this.#binding, this, this.#drainBindingLifetime);
+		}
+	}
+
+	#trackBindingWork<T>(work: Promise<T>): Promise<T> {
+		const pending = this.#bindingWork ??= new Set();
+		const settled = work.then(
+			() => { pending.delete(settled); this.#bindingRoot?.#bindingChanged?.resolve(); },
+			error => {
+				pending.delete(settled);
+				(this.#bindingFailures ??= []).push(error);
+				this.#bindingRoot?.#bindingChanged?.resolve();
+			},
+		);
+		pending.add(settled);
+		return work;
+	}
+
+	#drainBoundPrincipals(): Promise<void> {
+		this.#bindingDrain ??= this.#finishBoundPrincipals();
+		return this.#bindingDrain;
+	}
+
+	async #finishBoundPrincipals(): Promise<void> {
+		const members = [...(this.#bindingMembers ?? [])];
+		const failures = new Set<unknown>();
+		// Registration is already closed by the authority. Accepted composition and
+		// queued source work may still create their own genuine File continuations.
+		for (;;) {
+			const changed = Promise.withResolvers<void>();
+			this.#bindingChanged = changed;
+			for (const cell of members) for (const admission of cell.#bindingAdmissions ?? []) {
+				const state = sendAdmissionStates.get(admission);
+				if (!state) unavailable();
+				// No new begin is permitted after registration closes. An unbegun
+				// admission is real cancellable root ownership, not an active send.
+				if (state.phase === "prepared") {
+					try { endJournalSendStart(admission); } catch (error) { failures.add(error); }
+				}
+			}
+			if (!members.some(cell => (cell.#bindingWork?.size ?? 0) > 0 || (cell.#bindingAdmissions?.size ?? 0) > 0)) break;
+			// Wake only on a genuine owned completion/new admission. Nothing is
+			// declared drained until every real operation and begun span has ended.
+			await changed.promise;
+		}
+		this.#bindingChanged = undefined;
+		for (const cell of members) for (const failure of cell.#bindingFailures ?? []) failures.add(failure);
+		if (this.#session) {
+			try { await this.closeSession(this.#session); } catch (error) { failures.add(error); }
+		}
+		const closed = await Promise.allSettled(members.map(cell => cell.close()));
+		for (const result of closed) if (result.status === "rejected") failures.add(result.reason);
+		if (failures.size > 0) throw new AggregateError([...failures], "Journal bound principal graph failed");
+	}
+
 	#enqueue<T>(operation: () => Promise<T>): Promise<T> {
+		this.#assertBindingAcceptsWork();
 		if (this.#session && sessionStates.get(this.#session)?.closing) unavailable();
+		return this.#enqueueAccepted(operation);
+	}
+
+	#enqueueAccepted<T>(operation: () => Promise<T>): Promise<T> {
 		const generation = this.#generation;
 		const result = this.#queue.then(async () => {
 			this.#assertLive();
@@ -2732,6 +2851,7 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 	}
 	flushSync(): void { this.#publishSync(this.#header, this.#entries); }
 	#publishSync(header: SessionHeader, entries: readonly SessionEntry[]): void {
+		this.#assertBindingAcceptsWork();
 		this.#assertLive();
 		const body = serializeTitleSlot({ title: header.title, source: header.titleSource, updatedAt: this.#titleUpdatedAt ?? header.timestamp }) +
 			`${JSON.stringify(header)}\n${entries.map(entry => `${JSON.stringify(entry)}\n`).join("")}`;
@@ -2974,12 +3094,15 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 			const session = this.#session;
 			const state = sessionStates.get(session);
 			if (!state || state.closed || state.family !== family || state.binding !== binding || state.root !== root) unavailable();
-			this.assertSession(session, execution);
-			await withVerifiedModelRequestJournalLeases(binding, state.registryId, async scope => {
-				this.#assertOwnerScope(state, scope); this.assertSession(session, execution);
-			});
-			this.assertSession(session, execution);
-			return session;
+			this.#registerBinding(binding, root);
+			return this.#trackBindingWork((async () => {
+				this.#assertSessionState(session, execution);
+				await root.#enqueueAccepted(() => withVerifiedModelRequestJournalLeases(binding, state.registryId, async scope => {
+					this.#assertOwnerScope(state, scope); this.#assertSessionState(session, execution);
+				}));
+				this.#assertSessionState(session, execution);
+				return session;
+			})());
 		}
 		this.#assertLineage(family, root);
 		const parentFamily = family.ancestors[0];
@@ -2990,8 +3113,10 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 		const claim = { cell: this, root };
 		family.composition = claim;
 		this.#composingFamily = family;
+		return this.#trackBindingWork((async () => {
 		try {
-			const composed = await withVerifiedModelRequestJournalLeases(binding, id, async scope => {
+			this.#registerBinding(binding, root);
+			const composed = await root.#enqueueAccepted(() => withVerifiedModelRequestJournalLeases(binding, id, async scope => {
 				if (family.composition !== claim || this.#composingFamily !== family ||
 					family.cell || family.root || family.session || this.#session) unavailable();
 				this.#assertLive(); root.#assertLive(); scope.assertActive(); this.#assertLineage(family, root);
@@ -3043,8 +3168,8 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 				for (const ancestor of family.ancestors) if (ancestor.cell) ancestor.cell.#families.add(family);
 				family.state = "required-ready";
 				return session;
-			});
-			this.assertSession(composed, execution);
+			}));
+			this.#assertSessionState(composed, execution);
 			return composed;
 		} catch (error) {
 			this.#fail(error);
@@ -3054,6 +3179,7 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 			if (family.composition === claim) delete family.composition;
 			if (this.#composingFamily === family) this.#composingFamily = undefined;
 		}
+		})());
 	}
 
 	#assertReceipt(receipt: RegistrationReceipt): void {
@@ -3136,6 +3262,11 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 	}
 
 	assertSession(session: JournalSession, execution: ModelRequestExecution): JournalSessionState {
+		this.#assertBindingAcceptsWork();
+		return this.#assertSessionState(session, execution);
+	}
+
+	#assertSessionState(session: JournalSession, execution: ModelRequestExecution): JournalSessionState {
 		const state = sessionStates.get(session);
 		this.#assertLive();
 		if (!state || state.closed || state.cell !== this || this.#session !== session ||
@@ -3152,6 +3283,7 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 	}
 
 	async prepareSend(execution: ModelRequestExecution, attempt: ClosedCoreAttemptIdentity): Promise<OpaqueSendAdmission> {
+		this.#assertBindingAcceptsWork();
 		if (!attempt || typeof attempt !== "object" || attemptedSends.has(attempt)) unavailable();
 		const attemptId = attempt.attemptId;
 		if (typeof attemptId !== "string" || !attemptId) unavailable();
@@ -3160,17 +3292,26 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 		if (!family.session) unavailable();
 		const session = family.session;
 		const state = this.assertSession(session, execution);
+		return this.#trackBindingWork((async () => {
 		await this.#queue;
 		if (state.root !== this) await state.root.#queue;
-		if (this.assertSession(session, execution) !== state) unavailable();
+		if (this.#assertSessionState(session, execution) !== state) unavailable();
 		const scope = retainVerifiedModelRequestJournalRoot(state.binding, state.registryId);
 		try {
 			this.#assertOwnerScope(state, scope);
 			this.#assertManagedPhysical(); state.root.#assertManagedPhysical();
-			if (this.assertSession(session, execution) !== state) unavailable();
+			if (this.#assertSessionState(session, execution) !== state) unavailable();
 			const admission: OpaqueSendAdmission = Object.freeze({ [JOURNAL_SEND_ADMISSION]: true });
+			const admissions = this.#bindingAdmissions ??= new Set();
+			admissions.add(admission);
+			this.#bindingRoot?.#bindingChanged?.resolve();
 			sendAdmissionStates.set(admission, {
 				execution, attempt, attemptId, session, sessionState: state, scope, phase: "prepared",
+				complete: failure => {
+					admissions.delete(admission);
+					if (failure) (this.#bindingFailures ??= []).push(failure.error);
+					this.#bindingRoot?.#bindingChanged?.resolve();
+				},
 			});
 			return admission;
 		} catch (error) {
@@ -3181,6 +3322,7 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 			}
 			throw error;
 		}
+		})());
 	}
 
 	assertSendAdmission(state: JournalSendAdmissionState): void {
@@ -3207,7 +3349,7 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 	async #append(session: JournalSession, record?: ModelRequestLifecycleRecord, source?: ModelRequestSourceInput, link?: ModelRequestSourceLinkInput): Promise<ModelRequestJournalAck> {
 		const state = sessionStates.get(session);
 		if (!state || state.cell !== this || state.closed || state.closing) unavailable();
-		return this.#enqueue(async () => {
+		const append = async (): Promise<ModelRequestJournalAck> => {
 			try {
 				return await withVerifiedModelRequestJournalLeases(state.binding, state.registryId, async scope => {
 					this.#assertLive(); state.root.#assertLive(); scope.assertActive();
@@ -3261,7 +3403,9 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 						metadataEntryId: metadata.id, sourceEntryId });
 				});
 			} catch (error) { this.#fail(error); throw error; }
-		});
+		};
+		return this.#trackBindingWork(this.#enqueue(() =>
+			state.root === this ? append() : state.root.#enqueueAccepted(append)));
 	}
 
 	closeSession(session: JournalSession): Promise<void> {

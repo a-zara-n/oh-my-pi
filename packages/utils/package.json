@@ -36,6 +36,9 @@
 			"types": "./src/ar/index.ts",
 			"import": "./src/ar/index.ts"
 		},
+		"./internal/model-request-journal-binding-lifetime": null,
+		"./internal/model-request-journal-binding-lifetime.js": null,
+		"./internal/model-request-journal-binding-lifetime.ts": null,
 		"./*": {
 			"types": "./src/*.ts",
 			"import": "./src/*.ts"

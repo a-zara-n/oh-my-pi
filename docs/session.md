@@ -139,6 +139,29 @@ stoppage: current producers must explicitly require a schema 2 root and must not
 in place. Source journal descriptors, metadata and acknowledgements stay schema 1 and do not duplicate
 `writerOwnerId`. Transcript/HTML/share exclusions remain unchanged.
 
+Current managed resume checks every historical owner/epoch in the selected session descriptor
+against the actual selected schema 2 root registry before registering a new epoch. A new epoch
+does not repair missing, legacy or foreign-root ownership history. A genuine execution family
+also has exactly one canonical File cell/root/session association: concurrent composition
+claims and rebinding to a second cell are rejected before registration.
+
+The authority's private binding lifetime registers only actual File principals, before their
+composition performs protected File I/O. It closes registration before awaiting their owned
+composition, source/lifecycle append and preparation operations. All principals for the same
+actual root join one private graph: an unbegun admission is cancelled with its actual root
+release, while a begun start span must reach its real `endJournalSendStart`. The graph then
+joins accepted File queues, acknowledges deepest-first logical closes, and closes the actual
+File writers before the authority releases retained roots and the writer-owner scope.
+Failures remain failures, and a failed close does not become a durable closed acknowledgement.
+The five internal lifecycle operations are not package exports or caller registration hooks;
+ordinary sessions without a binding retain their existing behavior.
+
+This File-principal join does **not** establish ownership of SDK startup work before composition,
+AgentSession's external event/persistence producers, or the successful-response transport's
+detached asynchronous lease settlement. Their promises must not be replaced by an empty File
+queue, callback invocation, response-body completion or disposal timeout as evidence of stopped
+producers. Full outer SDK lifecycle acceptance remains blocked on those producer contracts.
+
 
 The managed acknowledgement contract is limited to persistent File storage after flush, storage drain and required artifact copies. File atomic rewrites use `requireAtomicReplace: true`; ordinary writes retain their existing fallback behavior when that option is omitted. The guarantee is **process-crash-reader-visible**, not power-loss durability: **No fsync** or fdatasync is added, and OS crashes, power failures, controller-cache loss and remote-replica loss are not covered. Memory, nonpersistent, Indexed, SQL, Redis and unadvertised third-party backends retain their ordinary behavior but do not provide this managed acknowledgement. These backend capabilities alone are not evidence that owner issuance or a managed append succeeded.
 
