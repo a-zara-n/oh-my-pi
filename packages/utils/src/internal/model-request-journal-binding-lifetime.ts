@@ -66,7 +66,7 @@ export function joinBindingPrincipalDrains(binding: ModelRequestJournalLeaseBind
 		for (const { drain } of lifetime.principals.values()) {
 			try { drains.add(drain()); } catch (error) { failures.push(error); }
 		}
-		const settled = await Promise.allSettled([...drains]);
+		const settled = await Promise.allSettled(drains);
 		lifetime.phase = "drained";
 		for (const result of settled) if (result.status === "rejected") failures.push(result.reason);
 		if (failures.length > 0) throw new AggregateError(failures, "Journal principal drains failed");
