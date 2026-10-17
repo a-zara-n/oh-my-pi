@@ -362,6 +362,15 @@ export async function visitEntriesFromFileStream(
 		// A trailing record without a final newline: terminate it so the parser
 		// can complete it (readline yielded it; parseChunk needs the delimiter).
 		if (!stopped && !sink.isEmpty) {
+			// parseChunk can report an incomplete EOF object without a syntax error,
+			// even after adding LF. Validate reserved remainder bytes before they can
+			// be treated as an ordinary unfinished record.
+			const remainder = decoder.decode(sink.flush()!);
+			const hint = managedHint ?? managedRawHint(remainder);
+			if (hint && remainder.trim()) {
+				try { JSON.parse(remainder); }
+				catch { malformedManagedSnapshot(hint); }
+			}
 			sink.append(LF);
 			await drain();
 		}
