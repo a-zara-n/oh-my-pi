@@ -2074,7 +2074,7 @@ function loadFileProjection(content: string, managedExpected = false): FileProje
 		(entry.modelRequestJournal !== undefined || entry.modelRequestRegistry !== undefined));
 	if (managed) return { ...strictFile(content), titleUpdatedAt: parsed.titleSlot?.updatedAt };
 	if (parsed.invalidHeader || parsed.entries[0]?.type !== "session") {
-		throw new Error("Session header is missing or malformed");
+		throw new Error("session header is missing or malformed");
 	}
 	migrateToCurrentVersion(parsed.entries);
 	const header = parsed.entries[0];
