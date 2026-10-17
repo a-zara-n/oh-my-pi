@@ -1893,6 +1893,7 @@ export class AgentSession implements SettingsScope {
 			refreshBaseSystemPrompt: () => this.#tools.refreshBaseSystemPrompt(),
 			replaceMemoryTools: tools => this.#tools.replaceMemoryTools(tools),
 			runInMemoryContext: fn => this.runInModelRequestContext(fn, "memory"),
+			runJournalOuterWork: work => this.runJournalOuterWork(work),
 		};
 		this.#memory = new SessionMemory(memoryHost, {
 			memoryEnabled: this.memoryEnabled,
@@ -3524,9 +3525,19 @@ export class AgentSession implements SettingsScope {
 			// Maintenance starts now, not behind the revocation ack: it classifies this run's end
 			// against live abort state, and a deferred start lets `abort()` settle first, so a
 			// deliberate empty abort reads as a reasonless one and is auto-retried.
-			await outerWork.run(() =>
-				Promise.all([this.#processAgentEvent(event), computerControlRevocation ?? Promise.resolve()]),
-			);
+			await outerWork.run(async () => {
+				const settled = await Promise.allSettled([
+					this.#processAgentEvent(event),
+					computerControlRevocation ?? Promise.resolve(),
+				]);
+				const failures = settled
+					.filter((result): result is PromiseRejectedResult => result.status === "rejected")
+					.map(result => result.reason);
+				if (failures.length === 0) return;
+				throw failures.length === 1
+					? failures[0]
+					: new AggregateError(failures, "agent_end maintenance failed");
+			});
 		} catch (error) {
 			// Post-turn maintenance (compaction, pruning rewrites, hooks) threw before
 			// publishing the settle. Without it the run never reports idle and every
@@ -3546,7 +3557,7 @@ export class AgentSession implements SettingsScope {
 	#queueMessageEndPersistence(message: AgentMessage, promptGeneration: number): Promise<string | undefined> {
 		const key = sessionMessagePersistenceKey(message);
 		const pending = this.#messageEndPersistenceTail
-			.then(() => this.runJournalOuterWork(() => this.#persistMessageEnd(message, promptGeneration)))
+			.then(() => this.runJournalOuterWork(async () => this.#persistMessageEnd(message, promptGeneration)))
 			.finally(() => {
 				if (key !== undefined && this.#pendingMessageEndPersistence.get(key) === pending) {
 					this.#pendingMessageEndPersistence.delete(key);

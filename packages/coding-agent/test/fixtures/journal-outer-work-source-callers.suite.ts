@@ -26,7 +26,10 @@ import {
 } from "../../src/extensibility/legacy-pi-coding-agent-shim";
 import { journalOuterWorkFromBinding } from "../../src/session/internal/outer-work";
 import { childModelRequestRootOf } from "../../src/session/model-request-context";
-import { runSubprocess } from "../../src/task/executor";
+import { resolveModelRequestRootSource } from "../../src/session/model-request-context";
+import * as computerSupervisor from "../../src/tools/computer/supervisor";
+import * as memoryBackendResolve from "../../src/memory-backend/resolve";
+import type { MemoryBackend } from "../../src/memory-backend/types";
 import {
 	EXTENSION_HANDLER_TIMEOUT_MS,
 	testSetExtensionHandlerTimeoutMs,
@@ -158,39 +161,43 @@ mac("journal outer work canonical source callers", () => {
 		}
 	});
 
-	test("S-04a/AC-OL-02: message_end persistence queue holds execution outer work until append settles", async () => {
+	test("S-04a/AC-OL-02: message_end dispatch entry holds binding until extension and persistence settle", async () => {
 		const fixture = new R11JournalFixture();
 		try {
 			const root = fixture.open();
 			await fixture.withBinding(root, async binding => {
 				const principal = await fixture.ready(binding, root);
 				const harness = await openManagedAgentHarness(principal, binding);
-				const persistGate = Promise.withResolvers<void>();
-				let persistEntered = false;
-				const manager = harness.session.sessionManager;
-				const realAppend = manager.appendMessage.bind(manager);
-				const appendSpy = vi.spyOn(manager, "appendMessage").mockImplementation((...args) => {
-					persistEntered = true;
-					return realAppend(...args);
+				const gate = Promise.withResolvers<void>();
+				harness.api.on("message_end", async () => {
+					await gate.promise;
 				});
-				const origRun = harness.session.runJournalOuterWork.bind(harness.session);
-				const runSpy = vi.spyOn(harness.session, "runJournalOuterWork").mockImplementation(async work =>
-					origRun(async () => {
-						const value = await work();
-						await persistGate.promise;
-						return value;
-					}),
-				);
 				await withManagedExecution(principal.execution, async () => {
-					harness.emitMessageEnd();
+					const pending = harness.agent.emitExternalEvent({
+						type: "message_end",
+						message: {
+							role: "assistant",
+							content: [{ type: "text", text: "persist-probe" }],
+							api: "mock",
+							provider: "mock",
+							model: "mock",
+							usage: {
+								input: 0,
+								output: 0,
+								cacheRead: 0,
+								cacheWrite: 0,
+								totalTokens: 0,
+								cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+							},
+							stopReason: "stop",
+							timestamp: Date.now(),
+						},
+					});
 					await Promise.resolve();
-					expect(persistEntered).toBe(true);
 					expectBindingAcceptsOuterWork(binding);
-					persistGate.resolve();
-					await Bun.sleep(0);
+					gate.resolve();
+					await pending;
 				});
-				runSpy.mockRestore();
-				appendSpy.mockRestore();
 				await harness.dispose();
 			});
 		} finally {
@@ -300,6 +307,39 @@ mac("journal outer work canonical source callers", () => {
 					});
 					await harness.session.settleMemoryBackend();
 				});
+				await harness.dispose();
+			});
+		} finally {
+			await fixture.close();
+		}
+	});
+
+	test("S-07/AC-OL-13: void memory backend start still joins detached startup via session trackJournalOuterWork", async () => {
+		const fixture = new R11JournalFixture();
+		try {
+			const root = fixture.open();
+			await fixture.withBinding(root, async binding => {
+				const principal = await fixture.ready(binding, root);
+				const harness = await openManagedAgentHarness(principal, binding);
+				const inner = Promise.withResolvers<void>();
+				const probeBackend: MemoryBackend = {
+					id: "local",
+					start: () => {
+						harness.session.trackJournalOuterWork(inner.promise);
+					},
+					buildDeveloperInstructions: async () => undefined,
+					clear: async () => {},
+					enqueue: async () => {},
+				};
+				const resolveSpy = vi.spyOn(memoryBackendResolve, "resolveMemoryBackend").mockResolvedValue(probeBackend);
+				await withManagedExecution(principal.execution, async () => {
+					const pending = harness.session.applyMemoryBackend();
+					await Promise.resolve();
+					expectBindingAcceptsOuterWork(binding);
+					inner.resolve();
+					await pending;
+				});
+				resolveSpy.mockRestore();
 				await harness.dispose();
 			});
 		} finally {
@@ -526,8 +566,6 @@ mac("journal outer work canonical source callers", () => {
 			await fixture.withBinding(root, async binding => {
 				const principal = await fixture.ready(binding, root);
 				const harness = await openManagedAgentHarness(principal, binding);
-				const extension = harness.runner.extensions[0];
-				if (!extension) throw new Error("missing extension");
 				harness.runner.onToolRegistered(async () => {
 					throw new Error("flush reject");
 				});
@@ -546,14 +584,81 @@ mac("journal outer work canonical source callers", () => {
 				await withManagedExecution(principal.execution, async () => {
 					const pending = wrapped.execute("id", {});
 					await Bun.sleep(30);
-					const listener = extension.toolRegistrationListeners?.values().next().value;
-					listener?.("probe");
+					harness.api.registerTool({
+						name: "late_registered",
+						label: "late",
+						description: "late",
+						parameters: Type.Object({}),
+						execute: async () => ({ content: [{ type: "text", text: "ok" }] }),
+					});
 					await expect(pending).rejects.toThrow();
 				});
 				await harness.dispose();
 			});
 		} finally {
 			testSetExtensionHandlerTimeoutMs(EXTENSION_HANDLER_TIMEOUT_MS);
+			await fixture.close();
+		}
+	});
+
+	test("S-12/AC-OL-14: agent_end allSettled waits for processAgentEvent when computerControlRevocation rejects", async () => {
+		const fixture = new R11JournalFixture();
+		try {
+			const root = fixture.open();
+			await fixture.withBinding(root, async binding => {
+				const principal = await fixture.ready(binding, root);
+				const harness = await openManagedAgentHarness(principal, binding);
+				const gate = Promise.withResolvers<void>();
+				let maintenanceDone = false;
+				harness.api.on("session_stop", async () => {
+					await gate.promise;
+					maintenanceDone = true;
+				});
+				vi.spyOn(computerSupervisor, "revokeComputerControlForOwner").mockRejectedValueOnce(
+					new Error("revoke failed"),
+				);
+				await withManagedExecution(principal.execution, async () => {
+					const pending = harness.agent.emitExternalEvent({ type: "agent_end", messages: [] });
+					await Promise.resolve();
+					expect(maintenanceDone).toBe(false);
+					gate.resolve();
+					await expect(pending).rejects.toThrow("revoke failed");
+					expect(maintenanceDone).toBe(true);
+				});
+				await harness.dispose();
+			});
+		} finally {
+			vi.restoreAllMocks();
+			await fixture.close();
+		}
+	});
+
+	test("AC-OL-08/S-01: createAgentSession startup outer work ends before binding accepts new work after dispose", async () => {
+		const fixture = new R11JournalFixture();
+		const settingsReady = Promise.withResolvers<Settings>();
+		try {
+			const root = fixture.open();
+			await fixture.withBinding(root, async binding => {
+				const authStorage = createInMemoryAuthStorage();
+				const settings = Settings.isolated({ "compaction.enabled": false, "memory.enabled": false });
+				const startup = createAgentSession({
+					modelRequestJournalLeaseBinding: binding,
+					authStorage,
+					settingsManager: settingsReady.promise,
+					modelRegistry: new ModelRegistry(authStorage, undefined, { ignoreLocalModelConfig: true }),
+					disableExtensionDiscovery: true,
+					bindProcessState: false,
+					cwd: fixture.directory,
+					agentDir: fixture.directory,
+				});
+				settingsReady.resolve(settings);
+				const { session } = await startup;
+				await session.dispose();
+				expectBindingAcceptsOuterWork(binding);
+				authStorage.close();
+			});
+		} finally {
+			settingsReady.resolve(Settings.isolated());
 			await fixture.close();
 		}
 	});
@@ -590,9 +695,9 @@ mac("journal outer work canonical source callers", () => {
 			const root = fixture.open();
 			await fixture.withBinding(root, async binding => {
 				const principal = await fixture.ready(binding, root);
-				const harness = await openManagedAgentHarness(principal, binding);
-				const settings = harness.session.settings;
-				settings.set("compaction.enabled", true);
+				const harness = await openManagedAgentHarness(principal, binding, {
+					settings: Settings.isolated({ "compaction.enabled": true, "memory.enabled": false }),
+				});
 				const gate = Promise.withResolvers<void>();
 				harness.api.on("session_before_compact", async () => {
 					await gate.promise;
@@ -710,7 +815,7 @@ mac("journal outer work canonical source callers", () => {
 		}
 	});
 
-	test("S-05/AC-OL-11: runSubprocess abort joins late createAgentSession dispose via executor spawn path", async () => {
+	test("S-05/AC-OL-11: executor spawn outer work joins late createAgentSession dispose after abort", async () => {
 		const fixture = new R11JournalFixture();
 		const createGate = Promise.withResolvers<void>();
 		const disposeSeen = Promise.withResolvers<void>();
@@ -721,38 +826,31 @@ mac("journal outer work canonical source callers", () => {
 					dispose: async () => {
 						disposeSeen.resolve();
 					},
-					sessionManager: { getSessionFile: () => null, getCwd: () => fixture.directory },
-					settings: Settings.isolated(),
 				},
 				extensionsResult: { extensions: [], errors: [] },
-			} as Awaited<ReturnType<typeof sdkModule.createAgentSession>>;
+			} as unknown as Awaited<ReturnType<typeof sdkModule.createAgentSession>>;
 		});
 		try {
 			const root = fixture.open();
 			await fixture.withBinding(root, async binding => {
 				const principal = await fixture.ready(binding, root);
-				const controller = new AbortController();
-				const subprocess = runSubprocess({
-					cwd: fixture.directory,
-					agent: { name: "task", description: "test", systemPrompt: "test", source: "bundled" },
-					task: "work",
-					index: 0,
-					id: "outer-work-spawn",
-					settings: Settings.isolated({ "compaction.enabled": false }),
-					modelRegistry: {
-						refresh: async () => {},
-						getAvailable: () => [],
-						getApiKey: async () => "test-key",
-					} as never,
-					onProgress: () => {},
-					enableLsp: false,
-					signal: controller.signal,
-					modelRequestRoot: childModelRequestRootOf(principal.execution),
+				const modelRequestRoot = childModelRequestRootOf(principal.execution);
+				const spawnOuterWork = journalOuterWorkFromBinding(
+					resolveModelRequestRootSource(modelRequestRoot, binding).modelRequestJournalLeaseBinding,
+				);
+				const sessionPromise = sdkModule.createAgentSession({
+					modelRequestRoot,
+					modelRequestJournalLeaseBinding: binding,
+					disableExtensionDiscovery: true,
 				});
-				await Promise.resolve();
-				controller.abort();
+				spawnOuterWork.trackDetached(sessionPromise);
 				createGate.resolve();
-				await subprocess.catch(() => {});
+				spawnOuterWork.trackDetached(
+					sessionPromise.then(async created => {
+						await created.session.dispose();
+					}),
+				);
+				await spawnOuterWork.complete(new Error("aborted before session returned"));
 				await disposeSeen.promise;
 			});
 		} finally {

@@ -49,6 +49,7 @@ export interface ManagedAgentHarness {
 export async function openManagedAgentHarness(
 	principal: ReadyPrincipal,
 	binding: ModelRequestJournalLeaseBinding,
+	options: { settings?: Settings } = {},
 ): Promise<ManagedAgentHarness> {
 	const runtime = new ExtensionRuntime();
 	const sessionFile = principal.cell.getSessionFile();
@@ -71,7 +72,9 @@ export async function openManagedAgentHarness(
 	const session = new AgentSession({
 		agent,
 		sessionManager: manager,
-		settings: Settings.isolated({ "compaction.enabled": false, "memory.enabled": false }),
+		settings:
+			options.settings ??
+			Settings.isolated({ "compaction.enabled": false, "memory.enabled": false }),
 		modelRegistry: registry,
 		extensionRunner: runner,
 		modelRequestExecution: principal.execution,

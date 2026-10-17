@@ -59,6 +59,8 @@ export interface SessionMemoryHost {
 	 * whatever context fired them. Absent for a host without a request context.
 	 */
 	runInMemoryContext?<T>(fn: () => T): T;
+	/** @internal Outer journal work for memory backend transitions. */
+	runJournalOuterWork<T>(work: () => Promise<T>): Promise<T>;
 }
 
 /** Owns memory backend transitions and transcript-scoped memory state. */
