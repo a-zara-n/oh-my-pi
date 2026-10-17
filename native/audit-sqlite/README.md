@@ -234,3 +234,10 @@ ad-hoc signature, and canonical manifest root/file count. No artifact hash or
 signature is claimed until the parent successfully runs the build. The loader
 must pin the resulting manifest/dylib as a pair and independently validate live
 SQLite identity/options/control, not equate compiler macros to live options.
+
+Patch maintenance: the shared-memory pre-lock guard is anchored to the complete
+`unixLockSharedMemory` function opening and local declarations. The shorter
+`SEEK_SET`/`UNIX_SHM_DMS` pair also occurs in the upstream diagnostic lock probe
+(`os_unix.c:4689–4690`) and is deliberately not an admissible single-occurrence
+preimage. This preserves that diagnostic while guarding the real DMS lifecycle
+function (`:4850–4852`) before its first lock operation.

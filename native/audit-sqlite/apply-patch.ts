@@ -38,7 +38,7 @@ export function patchAmalgamation(canonical: string): string {
 	replace("      robustFchown(pShmNode->hShm, sStat.st_uid, sStat.st_gid);", "      rc=ompSqliteShmCheck(pDbFd,pShmNode);\n      if( rc!=SQLITE_OK ) goto shm_open_err;\n      robustFchown(pShmNode->hShm, sStat.st_uid, sStat.st_gid);");
 	replace("  /* Make the new connection a child of the unixShmNode */", "  rc=ompSqliteShmCheck(pDbFd,pShmNode);\n  if( rc!=SQLITE_OK ) goto shm_open_err;\n\n  /* Make the new connection a child of the unixShmNode */");
 	replace("  sqlite3_mutex_enter(pShmNode->pShmMutex);\n  if( pShmNode->isUnlocked ){", "  sqlite3_mutex_enter(pShmNode->pShmMutex);\n  rc=ompSqliteShmCheck(pDbFd,pShmNode);\n  if( rc!=SQLITE_OK ) goto shmpage_out;\n  if( pDbFd->ompState->readonly && bExtend && pShmNode->nRegion<=iRegion ){\n    rc=SQLITE_READONLY_CANTINIT; goto shmpage_out;\n  }\n  if( pShmNode->isUnlocked ){");
-	replace("  lock.l_whence = SEEK_SET;\n  lock.l_start = UNIX_SHM_DMS;", "  rc=ompSqliteShmCheck(pDbFd,pShmNode);\n  if( rc!=SQLITE_OK ) return rc;\n  lock.l_whence = SEEK_SET;\n  lock.l_start = UNIX_SHM_DMS;");
+	replace("static int unixLockSharedMemory(unixFile *pDbFd, unixShmNode *pShmNode){\n  struct flock lock;\n  int rc = SQLITE_OK;", "static int unixLockSharedMemory(unixFile *pDbFd, unixShmNode *pShmNode){\n  struct flock lock;\n  int rc = SQLITE_OK;\n  rc=ompSqliteShmCheck(pDbFd,pShmNode);\n  if( rc!=SQLITE_OK ) return rc;");
 	replace("    if( pShmNode->isReadonly ){\n      pShmNode->isUnlocked = 1;", "    if( pShmNode->isReadonly || pDbFd->ompState->readonly ){\n      pShmNode->isUnlocked = 1;");
 	// Path-only VFS deletion cannot establish actual owned-file identity. All
 	// supported journal/WAL deletes below are routed through a live unixFile.
