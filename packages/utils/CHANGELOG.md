@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- Isolated native journal lifetime/composition suites in dedicated Bun processes so their
+  irreversible required-process state cannot leak into ordinary transport tests. Original
+  assertions and child failures remain visible; production readiness checks are unchanged.
+
 - Fixed the retained-child regression's matcher dependency deadlock: resolve its work gate
   before invoking Bun's rejection matcher. The real staged reproduction stopped inside the
   matcher after parent-settlement/root-release assertions; the corrected native authority,
