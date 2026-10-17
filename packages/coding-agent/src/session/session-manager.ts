@@ -1173,7 +1173,6 @@ export class SessionManager {
 	 * once the owner closed the session or exited.
 	 */
 	#claimSession(): void {
-		if (fileJournalCells.has(this)) return;
 		const sessionId = this.#sessionId;
 		const sessionFile = this.#sessionFile;
 		if (!this.#persist || !sessionFile || !this.#storage.claimSession) return;
@@ -1343,9 +1342,13 @@ export class SessionManager {
 		let to: string;
 		let timestamp: string;
 		if (cell) {
-			cell = openFileJournalCell({ cwd: this.#cwd, sessionDir: path.dirname(from) });
-			this.#adoptFilePrincipal(cell);
-			to = cell.getSessionFile();
+			if ((filePrincipalReferences.get(cell) ?? 1) <= 1) {
+				to = cell.moveOffSessionFile(reason);
+			} else {
+				cell = openFileJournalCell({ cwd: this.#cwd, sessionDir: path.dirname(from) });
+				this.#adoptFilePrincipal(cell);
+				to = cell.getSessionFile();
+			}
 			timestamp = cell.getHeader().timestamp;
 		} else {
 			timestamp = nowIso();
@@ -2319,8 +2322,14 @@ export class SessionManager {
 	#synchronizePrincipalLeaf(): void {
 		const cell = fileJournalCells.get(this);
 		const leaf = this.#index.leafId();
+		if (!cell || cell.getLeafId() === leaf) return;
+		const header = cell.getHeader();
+		if (!header.modelRequestJournal && !header.modelRequestRegistry) {
+			this.#claimSession();
+			if (!this.#sessionClaim?.release) return;
+		}
 		// Lazy ordinary entries remain staged until the actual principal commits them.
-		if (cell && (leaf === null || cell.getEntry(leaf) !== undefined)) cell.branch(leaf);
+		if (leaf === null || cell.getEntry(leaf) !== undefined) cell.branch(leaf);
 	}
 
 	#setLeaf(id: string | null): void {
