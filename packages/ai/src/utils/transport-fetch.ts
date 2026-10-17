@@ -10,7 +10,7 @@ import { getProxyForProvider, withProxyInit } from "./proxy";
 import { gatedSend, markFetchGated } from "./model-request-fetch";
 import { createFetchRequestDebugSession, isRequestDebugEnabled } from "./request-debug";
 import { assertModelRequestBuiltinFetch, modelRequestBuiltinFetch } from "./model-request-builtin-fetch";
-import { beginManagedExecutionOuterWork } from "../model-request/journal-outer-work";
+import { joinJournalOuterWork, openJournalOuterWork } from "../../internal/journal-outer-work";
 
 /** Only functions created by this module qualify for an identity-preserving rewrap. */
 const transportFetches = new WeakSet<FetchImpl>();
@@ -87,14 +87,14 @@ export function transportFetch(model: Model<Api>, fetchImpl: FetchImpl | undefin
 			requireBuiltinTransport(base);
 			// All debug/body snapshot awaits finish before entering the journal admission path.
 			// The required sender never hides an async preparation step inside its I/O callback.
-			const debugWork = beginManagedExecutionOuterWork(execution);
+			const debugWork = openJournalOuterWork(execution);
 			let session: Awaited<ReturnType<typeof createFetchRequestDebugSession>> | undefined;
 			try {
 				session = isRequestDebugEnabled()
-					? await debugWork.track(createFetchRequestDebugSession(input, sentInit))
+					? await joinJournalOuterWork(debugWork, createFetchRequestDebugSession(input, sentInit))
 					: undefined;
 			} finally {
-				await debugWork.end();
+				await debugWork?.end();
 			}
 			const response = await gatedSend({
 				model,

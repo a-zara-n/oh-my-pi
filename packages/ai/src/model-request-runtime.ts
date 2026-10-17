@@ -40,9 +40,10 @@ import type {
 } from "./model-request-gate";
 import { buildModelRequestCoverage } from "./model-request-coverage";
 import {
-	beginManagedExecutionOuterWork,
-	type ManagedOuterWorkScope,
-} from "./model-request/journal-outer-work";
+	joinJournalOuterWork,
+	type JournalOuterWork,
+	openJournalOuterWork,
+} from "../internal/journal-outer-work";
 
 export type { ModelRequestExecution } from "@oh-my-pi/pi-utils/model-request-journal-composition";
 
@@ -154,13 +155,13 @@ function resolveUntrackedScope(init: ModelRequestExecutionInit): ModelRequestSco
 /** Wraps a gate-issued lease so the core cannot violate the lease protocol (order, once-only settle). */
 class GuardedLease implements ModelRequestLease {
 	readonly #lease: ModelRequestLease;
-	readonly #gateWork: ManagedOuterWorkScope | undefined;
+	readonly #gateWork: JournalOuterWork | undefined;
 	#begun = false;
 	#settled: Promise<void> | undefined;
 
-	constructor(lease: ModelRequestLease, gateWork?: ManagedOuterWorkScope) {
+	constructor(lease: ModelRequestLease, gateWork?: JournalOuterWork) {
 		this.#lease = lease;
-		this.#gateWork = gateWork?.active ? gateWork : undefined;
+		this.#gateWork = gateWork;
 		this.#gateWork?.transfer();
 	}
 
@@ -485,7 +486,7 @@ export class ModelRequestRuntime {
 		const signal = input.signal;
 		if (signal?.aborted) throw signal.reason ?? new AbortError("model request aborted before authorization");
 
-		const gateWork = beginManagedExecutionOuterWork(execution);
+		const gateWork = openJournalOuterWork(execution);
 		const attempt = this.#buildAttempt(attemptId, input, execution);
 		try {
 			const raced = await this.#raceGate(registration, attempt, gateWork);
@@ -505,25 +506,34 @@ export class ModelRequestRuntime {
 			}
 			if (decision.type === "deny") throw new ModelRequestDeniedError(decision.code, decision.message);
 			if (signal?.aborted) {
-				if (decision.type === "allow") await gateWork.track(this.#releaseUnused(decision.lease, true));
+				if (decision.type === "allow")
+					await joinJournalOuterWork(gateWork, this.#releaseUnused(decision.lease, true));
 				throw signal.reason ?? new AbortError("model request aborted after authorization");
 			}
 			try {
 				// The process requirement or the execution family may change while the gate is awaited.
 				assertJournalExecutionReady(execution);
 			} catch (error) {
-				if (decision.type === "allow") await gateWork.track(this.#releaseUnused(decision.lease, false));
+				if (decision.type === "allow")
+					await joinJournalOuterWork(gateWork, this.#releaseUnused(decision.lease, false));
 				throw error;
 			}
 			if (decision.type === "pass") {
-				await gateWork.end();
+				await gateWork?.end();
 				return { attemptId, lease: undefined };
 			}
-			return { attemptId, lease: new GuardedLease(decision.lease, gateWork) };
+			try {
+				return { attemptId, lease: new GuardedLease(decision.lease, gateWork) };
+			} catch (handoffError) {
+				gateWork?.abortTransfer();
+				gateWork?.noteFailure(handoffError);
+				await gateWork?.end();
+				throw handoffError;
+			}
 		} catch (error) {
-			gateWork.abortTransfer();
-			gateWork.noteFailure(error);
-			await gateWork.end();
+			gateWork?.abortTransfer();
+			gateWork?.noteFailure(error);
+			await gateWork?.end();
 			throw error;
 		}
 	}
@@ -566,10 +576,10 @@ export class ModelRequestRuntime {
 	async #raceGate(
 		registration: GateRegistration,
 		attempt: ModelRequestAttempt,
-		gateWork?: ManagedOuterWorkScope,
+		gateWork?: JournalOuterWork,
 	): Promise<RaceResult> {
 		const gateCall = (async () => registration.gate.authorize(attempt))();
-		if (gateWork?.active) gateWork.track(gateCall);
+		if (gateWork) gateWork.join(gateCall);
 		const { promise: interrupt, resolve: interruptWith } = Promise.withResolvers<RaceResult>();
 		// Set the moment the caller stops waiting, so an answer that lands afterwards is released, not used.
 		let raceOver = false;
@@ -590,9 +600,9 @@ export class ModelRequestRuntime {
 					const late = parseDecision(value);
 					if (late?.type === "allow") {
 						const release = this.#releaseUnused(late.lease, attempt.signal?.aborted === true);
-						if (gateWork?.active) {
+						if (gateWork) {
 							void release.catch(error => gateWork.noteFailure(error));
-							gateWork.track(release);
+							gateWork.join(release);
 						} else void release.catch(() => {});
 					}
 				}

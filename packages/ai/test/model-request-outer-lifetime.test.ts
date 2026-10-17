@@ -197,13 +197,11 @@ describe("model request outer producer lifetime (managed subprocess)", () => {
 });
 
 describe("journal outer-work helper export boundary", () => {
-	test("package exports do not publish utils journal-outer-work or top-level wildcard paths", () => {
-		const exports = packageJson.exports as Record<string, { import?: string }>;
-		expect(exports["./utils/journal-outer-work"]).toBeUndefined();
-		expect(exports["./model-request-journal-outer-work"]).toBeUndefined();
-		expect(exports["./model-request/journal-outer-work"]).toBeUndefined();
-		const star = exports["./*"]?.import;
-		expect(star).toBe("./src/*.ts");
-		expect(star).not.toContain("**");
+	test("package exports deny internal journal helper and legacy utils subpath", () => {
+		const exports = packageJson.exports as Record<string, unknown>;
+		expect(exports["./internal/journal-outer-work"]).toBeNull();
+		expect(exports["./internal/*"]).toBeNull();
+		expect(exports["./utils/journal-outer-work"]).toBeNull();
+		expect(exports["./*"]).toEqual({ types: "./src/*.ts", import: "./src/*.ts" });
 	});
 });

@@ -21,8 +21,8 @@ stream's uninstrumented-transport wrapper now retain that fast path only when th
 execution has no managed binding. The isolated transport regressions and before/after loopback
 smoke are prepared but unexecuted by this worker; actual wire measurements await parent verification.
 
-Outer producer lifetime (DES-004@13 §6.7.2i) uses an internal helper at `src/model-request/journal-outer-work.ts` (outside
-`package.json` `"./*"` → `src/*.ts` top-level subpaths and outside `./utils/*`)
+Outer producer lifetime (DES-004@13 §6.7.2i) uses `internal/journal-outer-work.ts` (`package.json` denies `./internal/*`;
+not a `./utils/*` or `"./*"` public subpath). Untracked callers allocate no journal outer-work scope.
 on managed executions only; untracked paths keep prior behavior without journal `begin`/`end`. Wired on managed
 `gatedSend`, runtime `gateCall`/`GuardedLease`, `transportFetch` debug preparation, and stream wrapper IIFEs.
 `test/model-request-outer-lifetime.test.ts` exercises managed subprocess cases; AC-OL runtime on the full fork is
