@@ -76,6 +76,7 @@ const scenarios = [
 	"a06-leaked-thinking-inner-pending",
 	"a06-thinking-loop-inner-pending",
 	"gate-authorize-throws-outer-end",
+	"required-transport-unsupported-outer-end",
 ] as const;
 
 const LOOPBACK_API = "openai-completions" as const;
@@ -110,15 +111,58 @@ if (!scenarios.some(value => value === scenario)) throw new Error(`unknown outer
 
 type ManagedHarness = {
 	readonly sessionFile: string;
+	readonly bindingRecordPath: string;
+	readBindingState(): string | undefined;
 	startAuthorityClose: () => Promise<void>;
 };
 
-async function raceAuthorityClose(harness: ManagedHarness, ms: number): Promise<"pending" | "settled"> {
+async function countProviderLeaseDirs(provider: string, root?: string): Promise<number> {
+	const dir = root ? path.join(root, provider) : __providerInFlightForTesting.providerDir(provider);
+	let entries: string[];
+	try {
+		entries = await fsp.readdir(dir);
+	} catch {
+		return 0;
+	}
+	let count = 0;
+	for (const entry of entries) {
+		if (entry === ".wakeup") continue;
+		try {
+			if ((await fsp.stat(path.join(dir, entry))).isDirectory()) count++;
+		} catch {
+			// ignore races while authority is closing
+		}
+	}
+	return count;
+}
+
+/** Snapshot binding + OS lease state while outer raw work is still in flight (entry already returned). */
+async function snapshotOuterInflight(
+	harness: ManagedHarness,
+	provider?: { readonly name: string; readonly root?: string },
+): Promise<{ readonly bindingState: string | undefined; readonly osLeaseCount: number }> {
+	return {
+		bindingState: harness.readBindingState(),
+		osLeaseCount: provider === undefined ? 0 : await countProviderLeaseDirs(provider.name, provider.root),
+	};
+}
+
+async function raceAuthorityClose(
+	harness: ManagedHarness,
+	ms: number,
+	provider?: { readonly name: string; readonly root?: string },
+): Promise<{
+	readonly authorityRace: "pending" | "settled";
+	readonly bindingState: string | undefined;
+	readonly osLeaseCount: number;
+}> {
 	const closing = harness.startAuthorityClose();
-	return Promise.race([
+	const snap = await snapshotOuterInflight(harness, provider);
+	const authorityRace = await Promise.race([
 		closing.then(() => "settled" as const),
 		new Promise<"pending">(resolve => setTimeout(() => resolve("pending"), ms)),
 	]);
+	return { authorityRace, bindingState: snap.bindingState, osLeaseCount: snap.osLeaseCount };
 }
 
 async function finishAuthorityClose(
@@ -192,7 +236,9 @@ CREATE TABLE store_config_event(${common},key TEXT NOT NULL,value_json TEXT NOT 
 			"INSERT INTO store_config_event(id,tx_seq,created_at_ms,key,value_json,approval_id,writer_id) VALUES('epoch-1',2,2,'budget_authority_epoch',?,NULL,?)",
 		)
 		.run(JSON.stringify({ schemaVersion: 1, authorityEpoch: 1, physicalBindingId }), epochWriterId);
+	let bindingRecordPath = "";
 	await withRawModelRequestJournalLeases({ storeId, control: "exclusive", maintenance: "exclusive" }, async raw => {
+		bindingRecordPath = raw.recordPath;
 		const stat = fs.statSync(databasePath);
 		fs.writeFileSync(
 			raw.recordPath,
@@ -224,6 +270,15 @@ CREATE TABLE store_config_event(${common},key TEXT NOT NULL,value_json TEXT NOT 
 				let authorityClosing: Promise<void> | undefined;
 				const harness: ManagedHarness = {
 					sessionFile,
+					bindingRecordPath,
+					readBindingState: () => {
+						try {
+							const parsed = JSON.parse(fs.readFileSync(bindingRecordPath, "utf8")) as { state?: string };
+							return parsed.state;
+						} catch {
+							return undefined;
+						}
+					},
 					startAuthorityClose: () => (authorityClosing ??= closeJournalSession(session)),
 				};
 				return body(harness);
@@ -366,12 +421,16 @@ async function runScenario(): Promise<Record<string, unknown>> {
 							body: JSON.stringify(helloContext()),
 						}),
 				});
-				const authorityRace = await raceAuthorityClose(harness, 80);
+				const { authorityRace, bindingState, osLeaseCount } = await raceAuthorityClose(harness, 80);
 				hold.resolve();
 				await response.text();
 				const authority = await finishAuthorityClose(harness);
 				loopback.stop();
-				return { blockedBeforeRead: authorityRace, authorityOk: authority.ok };
+				return {
+					blockedBeforeRead: authorityRace,
+					bindingActiveDuringRace: bindingState === "active",
+					authorityOk: authority.ok,
+				};
 			});
 		}
 		case "pass-body-cancel-reject": {
@@ -437,8 +496,12 @@ async function runScenario(): Promise<Record<string, unknown>> {
 			});
 		}
 		case "e02-guarded-concurrent-settle-reentry": {
-			const { lease, settled } = recordingLease();
-			registerModelRequestGate("outer-lifetime", { authorize: async () => ({ type: "allow", lease }) }, undefined);
+			const backing = recordingLease();
+			registerModelRequestGate(
+				"outer-lifetime",
+				{ authorize: async () => ({ type: "allow", lease: backing.lease }) },
+				undefined,
+			);
 			const model = loopbackModel("openai-completions", "http://127.0.0.1:9");
 			return withManagedHarness(async harness => {
 				const permit = await runtime.authorize({
@@ -449,15 +512,18 @@ async function runScenario(): Promise<Record<string, unknown>> {
 					wire: undefined,
 				});
 				const guarded = permit.lease;
-				if (!guarded) throw new Error("expected lease");
+				if (!guarded) throw new Error("expected guarded lease");
 				guarded.beginSend();
 				guarded.observeResponse({ status: 200, headers: {} });
-				await Promise.all([
-					guarded.settle({ type: "response-ended", status: 200 }),
-					guarded.settle({ type: "not-sent", aborted: true }),
-				]);
+				const first = guarded.settle({ type: "response-ended", status: 200 });
+				const second = guarded.settle({ type: "not-sent", aborted: true });
+				await Promise.all([first, second]);
 				const authority = await finishAuthorityClose(harness);
-				return { settled, authorityOk: authority.ok };
+				return {
+					settled: backing.settled,
+					concurrentSettleJoined: first === second,
+					authorityOk: authority.ok,
+				};
 			});
 		}
 		case "gate-decision-unrecognizable": {
@@ -530,13 +596,18 @@ async function runScenario(): Promise<Record<string, unknown>> {
 				});
 				await Bun.sleep(30);
 				const wireBefore = loopback.requests.length;
-				const authorityRace = await raceAuthorityClose(harness, 100);
+				const { authorityRace, bindingState, osLeaseCount } = await raceAuthorityClose(harness, 100);
 				holdBody.resolve();
 				await inflight;
 				const authority = await finishAuthorityClose(harness);
 				loopback.stop();
 				delete Bun.env.PI_REQ_DEBUG;
-				return { wireBefore, authorityRace, authorityOk: authority.ok };
+				return {
+					wireBefore,
+					authorityRace,
+					bindingActiveDuringRace: bindingState === "active",
+					authorityOk: authority.ok,
+				};
 			});
 		}
 		case "a02-inflight-heartbeat-flush-pending": {
@@ -565,7 +636,10 @@ async function runScenario(): Promise<Record<string, unknown>> {
 				await started.promise;
 				finish.resolve();
 				await Bun.sleep(15);
-				const authorityRace = await raceAuthorityClose(harness, 80);
+				const { authorityRace, bindingState, osLeaseCount } = await raceAuthorityClose(harness, 80, {
+					name: "tests",
+					root,
+				});
 				resumeHeartbeat.resolve();
 				await result;
 				const authority = await finishAuthorityClose(harness);
@@ -573,7 +647,12 @@ async function runScenario(): Promise<Record<string, unknown>> {
 				__providerInFlightForTesting.setRoot(undefined);
 				__providerInFlightForTesting.setHeartbeatTimings(undefined);
 				__providerInFlightForTesting.setHeartbeatWriter(undefined);
-				return { authorityRace, authorityOk: authority.ok };
+				return {
+					authorityRace,
+					bindingActiveDuringRace: bindingState === "active",
+					osLeaseCountDuringRace: osLeaseCount,
+					authorityOk: authority.ok,
+				};
 			});
 		}
 		case "a02-inflight-heartbeat-flush-reject": {
@@ -629,14 +708,22 @@ async function runScenario(): Promise<Record<string, unknown>> {
 					maxInFlightRequests: { tests: 1 },
 				}).result();
 				await Bun.sleep(10);
-				const authorityRace = await raceAuthorityClose(harness, 80);
+				const { authorityRace, bindingState, osLeaseCount } = await raceAuthorityClose(harness, 80, {
+					name: "tests",
+					root,
+				});
 				releaseRemover.resolve();
 				await result;
 				const authority = await finishAuthorityClose(harness);
 				await fsp.rm(root, { recursive: true, force: true });
 				__providerInFlightForTesting.setRoot(undefined);
 				__providerInFlightForTesting.setLeaseRemover(undefined);
-				return { authorityRace, authorityOk: authority.ok };
+				return {
+					authorityRace,
+					bindingActiveDuringRace: bindingState === "active",
+					osLeaseCountDuringRace: osLeaseCount,
+					authorityOk: authority.ok,
+				};
 			});
 		}
 		case "a02-inflight-remove-lease-reject": {
@@ -692,7 +779,10 @@ async function runScenario(): Promise<Record<string, unknown>> {
 					path.join(ownerLease, "info.json"),
 					JSON.stringify({ pid: process.pid, timestamp: Date.now(), token: "owner-hold" }),
 				);
-				const authorityRace = await raceAuthorityClose(harness, 80);
+				const { authorityRace, bindingState, osLeaseCount } = await raceAuthorityClose(harness, 80, {
+					name: "tests",
+					root,
+				});
 				releaseFirst.resolve();
 				await fsp.rm(ownerLease, { recursive: true, force: true });
 				await Bun.write(path.join(providerDir, ".wakeup"), String(Date.now()));
@@ -700,7 +790,13 @@ async function runScenario(): Promise<Record<string, unknown>> {
 				const authority = await finishAuthorityClose(harness);
 				await fsp.rm(root, { recursive: true, force: true });
 				__providerInFlightForTesting.setRoot(undefined);
-				return { authorityRace, calls: callIndex, authorityOk: authority.ok };
+				return {
+					authorityRace,
+					calls: callIndex,
+					bindingActiveDuringRace: bindingState === "active",
+					osLeaseCountDuringRace: osLeaseCount,
+					authorityOk: authority.ok,
+				};
 			});
 		}
 		case "a02-inflight-waiter-pending": {
@@ -725,14 +821,22 @@ async function runScenario(): Promise<Record<string, unknown>> {
 				const second = streamSimple(mock.model, streamContext(), { maxInFlightRequests: { tests: 1 } });
 				const secondResult = second.result();
 				await waiting;
-				const authorityRace = await raceAuthorityClose(harness, 80);
+				const { authorityRace, bindingState, osLeaseCount } = await raceAuthorityClose(harness, 80, {
+					name: "tests",
+					root,
+				});
 				releaseFirst.resolve();
 				await Promise.all([firstResult, secondResult]);
 				const authority = await finishAuthorityClose(harness);
 				await fsp.rm(root, { recursive: true, force: true });
 				__providerInFlightForTesting.setRoot(undefined);
 				__providerInFlightForTesting.setWaitObserver(undefined);
-				return { authorityRace, authorityOk: authority.ok };
+				return {
+					authorityRace,
+					bindingActiveDuringRace: bindingState === "active",
+					osLeaseCountDuringRace: osLeaseCount,
+					authorityOk: authority.ok,
+				};
 			});
 		}
 		case "a02-inflight-waiter-reject": {
@@ -761,6 +865,10 @@ async function runScenario(): Promise<Record<string, unknown>> {
 				});
 				const secondResult = second.result();
 				await waiting;
+				const { authorityRace, bindingState, osLeaseCount } = await raceAuthorityClose(harness, 80, {
+					name: "tests",
+					root,
+				});
 				controller.abort(new Error("waiter aborted"));
 				let waiterFailed = false;
 				try {
@@ -774,7 +882,13 @@ async function runScenario(): Promise<Record<string, unknown>> {
 				await fsp.rm(root, { recursive: true, force: true });
 				__providerInFlightForTesting.setRoot(undefined);
 				__providerInFlightForTesting.setWaitObserver(undefined);
-				return { waiterFailed, authorityOk: authority.ok };
+				return {
+					waiterFailed,
+					authorityRace,
+					bindingActiveDuringRace: bindingState === "active",
+					osLeaseCountDuringRace: osLeaseCount,
+					authorityOk: authority.ok,
+				};
 			});
 		}
 		case "a03-header-resolver-pending": {
@@ -793,12 +907,16 @@ async function runScenario(): Promise<Record<string, unknown>> {
 				const outer = stream(model, streamContext(), {
 					fetch: transportFetch(base, modelRequestBuiltinFetch),
 				});
-				const authorityRace = await raceAuthorityClose(harness, 80);
+				const { authorityRace, bindingState, osLeaseCount } = await raceAuthorityClose(harness, 80);
 				hold.resolve();
 				await outer.result();
 				const authority = await finishAuthorityClose(harness);
 				loopback.stop();
-				return { authorityRace, authorityOk: authority.ok };
+				return {
+					authorityRace,
+					bindingActiveDuringRace: bindingState === "active",
+					authorityOk: authority.ok,
+				};
 			});
 		}
 		case "a03-header-resolver-reject": {
@@ -882,11 +1000,15 @@ async function runScenario(): Promise<Record<string, unknown>> {
 			const model = { ...mock.model, api, provider: "ol-ext" };
 			return withManagedHarness(async harness => {
 				const outer = stream(model, streamContext());
-				const authorityRace = await raceAuthorityClose(harness, 80);
+				const { authorityRace, bindingState, osLeaseCount } = await raceAuthorityClose(harness, 80);
 				hold.resolve();
 				await outer.result();
 				const authority = await finishAuthorityClose(harness);
-				return { authorityRace, authorityOk: authority.ok };
+				return {
+					authorityRace,
+					bindingActiveDuringRace: bindingState === "active",
+					authorityOk: authority.ok,
+				};
 			});
 		}
 		case "a06-leaked-thinking-inner-pending": {
@@ -901,11 +1023,15 @@ async function runScenario(): Promise<Record<string, unknown>> {
 			});
 			return withManagedHarness(async harness => {
 				const outer = streamSimple(mock.model, streamContext());
-				const authorityRace = await raceAuthorityClose(harness, 80);
+				const { authorityRace, bindingState, osLeaseCount } = await raceAuthorityClose(harness, 80);
 				hold.resolve();
 				await outer.result();
 				const authority = await finishAuthorityClose(harness);
-				return { authorityRace, authorityOk: authority.ok };
+				return {
+					authorityRace,
+					bindingActiveDuringRace: bindingState === "active",
+					authorityOk: authority.ok,
+				};
 			});
 		}
 		case "a06-thinking-loop-inner-pending": {
@@ -920,11 +1046,44 @@ async function runScenario(): Promise<Record<string, unknown>> {
 			});
 			return withManagedHarness(async harness => {
 				const outer = streamSimple(mock.model, streamContext());
-				const authorityRace = await raceAuthorityClose(harness, 80);
+				const { authorityRace, bindingState, osLeaseCount } = await raceAuthorityClose(harness, 80);
 				hold.resolve();
 				await outer.result();
 				const authority = await finishAuthorityClose(harness);
-				return { authorityRace, authorityOk: authority.ok };
+				return {
+					authorityRace,
+					bindingActiveDuringRace: bindingState === "active",
+					authorityOk: authority.ok,
+				};
+			});
+		}
+		case "required-transport-unsupported-outer-end": {
+			registerModelRequestGate("outer-lifetime", { authorize: async () => ({ type: "pass" }) }, undefined);
+			const loopback = await startLoopbackProvider(scripted(openAiText("transport")));
+			const model = loopbackModel("openai-completions", loopback.origin);
+			const url = `${loopback.origin}/v1/chat/completions`;
+			return withManagedHarness(async harness => {
+				let failed = false;
+				try {
+					await gatedSend({
+						model,
+						kind: "chat",
+						input: url,
+						init: { method: "POST", body: JSON.stringify(helloContext()) },
+						transport: fetch,
+						send: () =>
+							fetch(url, {
+								method: "POST",
+								headers: { "content-type": "application/json" },
+								body: JSON.stringify(helloContext()),
+							}),
+					});
+				} catch {
+					failed = true;
+				}
+				const authority = await finishAuthorityClose(harness);
+				loopback.stop();
+				return { failed, authorityOk: authority.ok, wireAttempts: loopback.requests.length };
 			});
 		}
 		case "gate-authorize-throws-outer-end": {

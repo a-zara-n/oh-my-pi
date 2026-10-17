@@ -59,6 +59,16 @@ const SCENARIOS: ReadonlyArray<{
 		rows: ["E-01", "AC-OL-02", "AC-OL-06"],
 		expect: v => {
 			expect(v.blockedBeforeRead).toBe("pending");
+			expect(v.bindingActiveDuringRace).toBe(true);
+			expect(v.authorityOk).toBe(true);
+		},
+	},
+	{
+		name: "required-transport-unsupported-outer-end",
+		rows: ["E-01", "E-02", "AC-OL-05"],
+		expect: v => {
+			expect(v.failed).toBe(true);
+			expect(v.wireAttempts).toBe(0);
 			expect(v.authorityOk).toBe(true);
 		},
 	},
@@ -84,6 +94,7 @@ const SCENARIOS: ReadonlyArray<{
 		rows: ["E-02", "AC-OL-14"],
 		expect: v => {
 			expect(v.settled).toEqual([{ type: "response-ended", status: 200 }]);
+			expect(v.concurrentSettleJoined).toBe(true);
 			expect(v.authorityOk).toBe(true);
 		},
 	},
@@ -109,6 +120,7 @@ const SCENARIOS: ReadonlyArray<{
 		expect: v => {
 			expect(v.wireBefore).toBe(0);
 			expect(v.authorityRace).toBe("pending");
+			expect(v.bindingActiveDuringRace).toBe(true);
 			expect(v.authorityOk).toBe(true);
 		},
 	},
@@ -117,6 +129,8 @@ const SCENARIOS: ReadonlyArray<{
 		rows: ["A-02", "AC-OL-12"],
 		expect: v => {
 			expect(v.authorityRace).toBe("pending");
+			expect(v.bindingActiveDuringRace).toBe(true);
+			expect(v.osLeaseCountDuringRace).toBeGreaterThanOrEqual(1);
 			expect(v.authorityOk).toBe(true);
 		},
 	},
@@ -132,6 +146,7 @@ const SCENARIOS: ReadonlyArray<{
 		rows: ["A-02", "AC-OL-12"],
 		expect: v => {
 			expect(v.authorityRace).toBe("pending");
+			expect(v.osLeaseCountDuringRace).toBeGreaterThanOrEqual(1);
 			expect(v.authorityOk).toBe(true);
 		},
 	},
@@ -147,6 +162,7 @@ const SCENARIOS: ReadonlyArray<{
 		rows: ["A-02", "AC-OL-12"],
 		expect: v => {
 			expect(v.authorityRace).toBe("pending");
+			expect(v.osLeaseCountDuringRace).toBeGreaterThanOrEqual(1);
 			expect(v.authorityOk).toBe(true);
 		},
 	},
@@ -155,6 +171,7 @@ const SCENARIOS: ReadonlyArray<{
 		rows: ["A-02", "AC-OL-12"],
 		expect: v => {
 			expect(v.waiterFailed).toBe(true);
+			expect(v.authorityRace).toBe("pending");
 			expect(v.authorityOk).toBe(true);
 		},
 	},
@@ -163,6 +180,7 @@ const SCENARIOS: ReadonlyArray<{
 		rows: ["A-02", "AC-OL-12"],
 		expect: v => {
 			expect(v.authorityRace).toBe("pending");
+			expect(v.osLeaseCountDuringRace).toBeGreaterThanOrEqual(2);
 			expect(v.calls).toBe(2);
 			expect(v.authorityOk).toBe(true);
 		},
@@ -198,6 +216,7 @@ const SCENARIOS: ReadonlyArray<{
 		expect: v => {
 			expect(v.failed).toBe(true);
 			expect(v.authorityOk).toBe(true);
+			expect(v.authorityRejected).not.toBe(true);
 		},
 	},
 	{
