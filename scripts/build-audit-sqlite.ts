@@ -10,13 +10,15 @@ if (!sourceArgument || !outputArgument || process.argv.length !== 4) throw new E
 if (process.platform !== "darwin" || process.arch !== "arm64" || Bun.revision !== SQLITE_PIN.bunRevision) throw new Error("Pinned darwin/arm64 Bun build required");
 const canonical = resolve(sourceArgument);
 const output = resolve(outputArgument);
-const source = verifyCanonicalSource(canonical);
+verifyCanonicalSource(canonical);
 mkdirSync(output, { mode: 0o700 });
 const scratch = join(output, "build");
 mkdirSync(scratch, { mode: 0o700 });
 const inputs = join(scratch, "source");
 cpSync(canonical, inputs, { recursive: true, dereference: false, errorOnExist: true, force: false });
-// The verifier has excluded every untracked file; execute only this verified copy.
+// Authenticate the actual private build inputs after the final source read.
+// A prior verification of the mutable source pathname is not copy provenance.
+const source = verifyCanonicalSource(inputs);
 const environment = { PATH: "/usr/bin:/bin:/usr/sbin:/sbin", HOME: scratch, TMPDIR: scratch, LC_ALL: "C", MACOSX_DEPLOYMENT_TARGET: "14.0", SOURCE_DATE_EPOCH: "1792161920" };
 function run(command: string[], cwd = scratch): string {
 	const result = Bun.spawnSync(command, { cwd, env: environment, stdout: "pipe", stderr: "pipe" });

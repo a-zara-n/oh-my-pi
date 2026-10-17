@@ -29,9 +29,12 @@ bun scripts/build-audit-sqlite.ts /private/tmp/omp-sqlite-canonical "$PWD/native
 Omit only the archive argument to explicitly download the pinned archive. The
 acquisition script is never imported by the build or runtime. The build has no
 network code, package installation, runtime download, environment library
-fallback, or global installation. It executes verified upstream configure/make
-in an output-local disposable source copy, generates the **unmodified**
-amalgamation, verifies its SHA3, applies exact-count source preimages, compiles,
+fallback, or global installation. After its preliminary source check it copies
+into the new private 0700 output tree and independently verifies the **actual
+copied inputs** before executing their configure/make. The artifact provenance
+comes from this copied-tree verification, never the mutable original path's
+earlier result. It generates the **unmodified** amalgamation, verifies its SHA3,
+applies exact-count source preimages, compiles,
 ad-hoc signs (no Keychain), verifies that signature, and probes live metadata
 through a tiny native program linked only to that same dylib. Generated source,
 probe, and the source build remain inside the output directory, not Git.
