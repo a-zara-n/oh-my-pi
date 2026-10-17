@@ -368,6 +368,72 @@ mac("r11 actual File logical principal ownership", () => {
 			});
 		} finally { await fixture.close(); }
 	});
+	for (const cleanupDepth of [0, 1]) for (const pendingSource of [false, true]) {
+		test(`concurrent sibling closes join ${cleanupDepth === 0 ? "root" : "parent"} cleanup with ${pendingSource ? "accepted source queues" : "a sealed root"}`, async () => {
+			const fixture = new R11JournalFixture();
+			try {
+				const rootCell = fixture.open();
+				await fixture.withBinding(rootCell, async binding => {
+					const root = await fixture.ready(binding, rootCell);
+					const parent = cleanupDepth === 0 ? root : await fixture.ready(binding, fixture.open(), root);
+					const siblings = [
+						await fixture.ready(binding, fixture.open(), parent, mainAgent, rootCell),
+						await fixture.ready(binding, fixture.open(), parent, mainAgent, rootCell),
+					];
+					const source: ModelRequestSourceInput = { kind: "assistant", args: [{ role: "assistant",
+						content: [{ type: "text", text: "accepted sibling source" }], api: "openai-completions",
+						provider: "openai", model: "fixture-model", stopReason: "stop", timestamp: 1,
+						usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
+							cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } }] };
+					const pending = pendingSource ? siblings.map(sibling =>
+						appendJournalSource(sibling.session, sibling.execution, source,
+							{ schemaVersion: 1, sourceKind: "assistant", resultId: null, provenance: { kind: "non-wire", reason: "local" } })) : [];
+					// No await between accepted work, independently owned sibling closes,
+					// and ancestor cleanup. Empty queues also exercise real lock overlap.
+					if (!pendingSource) rootCell.seal();
+					const siblingCloses = siblings.map(sibling => closeJournalSession(sibling.session));
+					const cleanup = closeJournalSession(parent.session);
+					for (const [index, sibling] of siblings.entries()) {
+						expect(closeJournalSession(sibling.session)).toBe(siblingCloses[index]);
+						expect(() => assertJournalExecutionReady(sibling.execution)).toThrow();
+					}
+					const [acks] = await Promise.all([
+						Promise.all(pending), Promise.all([...siblingCloses, cleanup]),
+					]);
+					for (const [index, sibling] of siblings.entries()) {
+						if (pendingSource) {
+							const ack = acks[index]!;
+							assertAck(ack, sibling.cell, 1);
+							expect(sibling.cell.getEntry(ack.sourceEntryId!)).toMatchObject({ type: "message", message: source.args[0] });
+							const durable = parseSessionContent(fs.readFileSync(sibling.cell.getSessionFile(), "utf8")).entries;
+							expect(durable.find(entry => entry.id === ack.sourceEntryId)).toEqual(sibling.cell.getEntry(ack.sourceEntryId!));
+							expect(durable.find(entry => entry.id === ack.metadataEntryId)).toEqual(metadata(sibling.cell)[0]);
+						}
+						const closes = registry(rootCell).filter(entry => entry.record.sessionId === sibling.cell.getSessionId() &&
+							(entry.record.event === "member-closed" || entry.record.event === "owner-closed"));
+						expect(closes.map(entry => entry.record.event)).toEqual(["member-closed", "owner-closed"]);
+						for (const entry of closes) expect(entry.record).toMatchObject({
+							journalEpoch: epoch(sibling.cell).journalEpoch, throughSeq: pendingSource ? 1 : 0, outcome: "closed",
+						});
+						expect(closes[1]?.record).toMatchObject({ ownerId: epoch(sibling.cell).journalOwnerId });
+					}
+					if (cleanupDepth !== 0 && pendingSource) assertJournalExecutionReady(root.execution);
+					rootCell.seal();
+					await Promise.all([...fixture.cells].reverse().map(cell => cell.close()));
+					const durableRegistry = parseSessionContent(fs.readFileSync(rootCell.getSessionFile(), "utf8")).entries
+						.filter(entry => entry.type === "model_request_registry");
+					expect(durableRegistry).toEqual(registry(rootCell));
+					validateModelRequestRegistry(rootCell.getHeader(), durableRegistry);
+					for (const cell of fixture.cells) {
+						expect(durableRegistry.filter(entry => entry.record.sessionId === cell.getSessionId() &&
+							(entry.record.event === "member-closed" || entry.record.event === "owner-closed"))).toHaveLength(2);
+					}
+					assertReleasedNow(rootLock(fixture, rootCell));
+				});
+			} finally { await fixture.close(); }
+		});
+	}
+
 	for (const [depth, closeDepth] of [[2, 0], [4, 1]] as const) {
 		test(`depth ${depth} accepted append drains before ancestor ${closeDepth} closes`, async () => {
 			const fixture = new R11JournalFixture();

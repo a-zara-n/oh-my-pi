@@ -3452,19 +3452,22 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 			]);
 			for (const drain of drains) if (drain.status === "rejected") failures.push(drain.reason);
 			if (failures.length > 0) throw new AggregateError(failures, "Journal principal drain failed");
+			// Drain before joining the actual root queue: accepted child appends
+			// may still need to join it. Only the durable closes are serialized.
 			// One owned graph operation closes deepest-first, without recursively
 			// awaiting another session's view of this same completion promise.
 			states.sort((left, right) => right.family.ancestors.length - left.family.ancestors.length);
 			for (const state of states) {
 				try {
-					await withVerifiedModelRequestJournalLeases(state.binding, state.registryId, async scope => {
-						state.cell.#assertOwnerScope(state, scope);
-						await principalCloseContext.run(state.root, () => state.root.#appendRegistry([
-							{ event: "member-closed", sessionId: state.cell.getSessionId(), journalEpoch: state.journalEpoch, throughSeq: state.throughSeq, outcome: "closed" },
-							{ event: "owner-closed", ownerId: state.ownerId, sessionId: state.cell.getSessionId(), journalEpoch: state.journalEpoch, throughSeq: state.throughSeq, outcome: "closed" },
-						]));
-						state.cell.#assertOwnerScope(state, scope);
-					});
+					await principalCloseContext.run(state.root, () => state.root.#enqueueAccepted(() =>
+						withVerifiedModelRequestJournalLeases(state.binding, state.registryId, async scope => {
+							state.cell.#assertOwnerScope(state, scope);
+							await state.root.#appendRegistry([
+								{ event: "member-closed", sessionId: state.cell.getSessionId(), journalEpoch: state.journalEpoch, throughSeq: state.throughSeq, outcome: "closed" },
+								{ event: "owner-closed", ownerId: state.ownerId, sessionId: state.cell.getSessionId(), journalEpoch: state.journalEpoch, throughSeq: state.throughSeq, outcome: "closed" },
+							]);
+							state.cell.#assertOwnerScope(state, scope);
+						})));
 					state.closed = true;
 				} catch (error) { state.cell.#fail(error); failures.push(error); }
 			}
