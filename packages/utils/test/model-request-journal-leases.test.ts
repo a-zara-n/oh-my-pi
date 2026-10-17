@@ -57,7 +57,7 @@ mac("fixed model request journal OS leases", () => {
 				expect(output).toBe("held\n");
 				reader.releaseLock();
 				const request = {storeId, control: "shared" as const, maintenance: "shared" as const, ...(registryId === undefined ? {} : {registryId})};
-				await expect(withRawModelRequestJournalLeases(request, async () => {})).rejects.toThrow("unavailable");
+				await expect(Promise.resolve().then(() => withRawModelRequestJournalLeases(request, async () => {}))).rejects.toThrow();
 				holder.kill("SIGKILL");
 				await holder.exited;
 				await withRawModelRequestJournalLeases(request, async raw => { raw.assertHeld(); });
@@ -105,5 +105,61 @@ mac("fixed model request journal OS leases", () => {
 			lease.release();
 			expect(() => lease.assertHeld()).toThrow("ended");
 		} finally { rmSync(directory, {recursive: true, force: true}); }
+	});
+
+	test("synchronous scope returns synchronously and nested genuine subset borrows retain owner/root", () => {
+		const storeId = `test-${randomUUID()}`;
+		let namespace: string | undefined;
+		let outer: RawModelRequestJournalLeaseScope | undefined;
+		let child: RawModelRequestJournalLeaseScope | undefined;
+		try {
+			const value = withRawModelRequestJournalLeases({storeId, control: "shared", maintenance: "shared", ownerId: "writer-test", registryId: "root-test"}, raw => {
+				namespace = raw.namespacePath;
+				outer = raw;
+				const nested = withRawModelRequestJournalLeases({storeId, control: "shared", maintenance: "shared"}, borrowed => {
+					child = borrowed;
+					expect(borrowed.ownerId).toBe("writer-test");
+					expect(borrowed.registryId).toBe("root-test");
+					borrowed.assertHeld();
+					return 7;
+				});
+				expect(nested).toBe(7);
+				expect(() => child?.assertHeld()).toThrow();
+				raw.assertHeld();
+				expect(() => withRawModelRequestJournalLeases({storeId, control: "exclusive", maintenance: "shared"}, () => {})).toThrow();
+				expect(() => withRawModelRequestJournalLeases({storeId, control: "shared", maintenance: "shared", ownerId: "different-owner"}, () => {})).toThrow();
+				expect(() => withRawModelRequestJournalLeases({storeId, control: "shared", maintenance: "shared", registryId: "different-root"}, () => {})).toThrow();
+				return nested;
+			});
+			expect(value).toBe(7);
+			expect(() => outer?.assertHeld()).toThrow();
+			withRawModelRequestJournalLeases({storeId, control: "exclusive", maintenance: "exclusive"}, raw => raw.assertHeld());
+		} finally { if (namespace !== undefined) rmSync(namespace, {recursive: true, force: true}); }
+	});
+
+	test("throw, hostile thenable and rejected native Promise all expire scopes and release leases", async () => {
+		const storeId = `test-${randomUUID()}`;
+		let namespace: string | undefined;
+		let escaped: RawModelRequestJournalLeaseScope | undefined;
+		const request = {storeId, control: "exclusive" as const, maintenance: "exclusive" as const};
+		try {
+			expect(() => withRawModelRequestJournalLeases(request, raw => {
+				namespace = raw.namespacePath;
+				escaped = raw;
+				throw new Error("body-failure");
+			})).toThrow("body-failure");
+			expect(() => escaped?.assertHeld()).toThrow();
+			let thenRead = false;
+			expect(() => withRawModelRequestJournalLeases(request, () => Object.defineProperty({}, "then", {get() { thenRead = true; throw new Error("must-not-run"); }}))).toThrow();
+			expect(thenRead).toBe(false);
+			await expect(withRawModelRequestJournalLeases(request, async raw => {
+				escaped = raw;
+				await Promise.resolve();
+				raw.assertHeld();
+				throw new Error("async-body-failure");
+			})).rejects.toThrow("async-body-failure");
+			expect(() => escaped?.assertHeld()).toThrow();
+			withRawModelRequestJournalLeases(request, raw => raw.assertHeld());
+		} finally { if (namespace !== undefined) rmSync(namespace, {recursive: true, force: true}); }
 	});
 });

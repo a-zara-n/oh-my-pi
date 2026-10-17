@@ -1,11 +1,12 @@
-import { Database } from "bun:sqlite";
+import type { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { chmodSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { retainModelRequestWriterCredential, retireModelRequestWriterCredential, withVerifiedModelRequestJournalBinding, type ModelRequestJournalAuthorityResources } from "../src/model-request-journal-authority";
+import { retainModelRequestWriterCredential, retireModelRequestWriterCredential, withVerifiedModelRequestJournalBinding, withVerifiedModelRequestJournalLeases, type ModelRequestJournalAuthorityResources } from "../src/model-request-journal-authority";
 import { withRawModelRequestJournalLeases } from "../src/model-request-journal-leases";
+import { assertModelRequestJournalDatabase, openModelRequestJournalDatabase } from "../src/model-request-journal-sqlite-control";
 
 const mac = process.platform === "darwin" ? describe : describe.skip;
 interface SQLiteFixture {
@@ -16,10 +17,11 @@ interface SQLiteFixture {
 	close(): void;
 }
 async function fixture(): Promise<SQLiteFixture> {
-	const directory = mkdtempSync(join(tmpdir(), "journal-authority-db-"));
+	const directory = realpathSync(mkdtempSync(join(tmpdir(), "journal-authority-db-")));
 	const storeId = `test-${randomUUID()}`;
 	const databasePath = join(directory, "state.sqlite3");
-	const db = new Database(databasePath);
+	writeFileSync(databasePath, "", {mode: 0o600});
+	const db = openModelRequestJournalDatabase(databasePath, {strict: true, safeIntegers: false});
 	chmodSync(databasePath, 0o600);
 	const writerId = `writer-${randomUUID()}`;
 	const epochWriterId = `writer-${randomUUID()}`;
@@ -57,6 +59,33 @@ async function fixture(): Promise<SQLiteFixture> {
 }
 
 mac("self-opened SQLite fixed authority rejections", () => {
+	test("owned RO snapshot and live writer permit real credential binding and root scope", async () => {
+		const input = await fixture();
+		let entered = 0;
+		try {
+			const owned = assertModelRequestJournalDatabase(input.db);
+			expect(owned.liveWriterGenerations).toHaveLength(1);
+			await withVerifiedModelRequestJournalBinding({resources: input.resources, requester: input.requester, mode: "resume", rootSessionId: "root"}, async binding => {
+				entered++;
+				await withVerifiedModelRequestJournalLeases(binding, "registry-test", async scope => {
+					scope.assertActive();
+					entered++;
+				});
+			});
+			expect(entered).toBe(2);
+		} finally { input.close(); }
+	});
+
+	test("closing the actual registered writer irrevocably invalidates its binding", async () => {
+		const input = await fixture();
+		try {
+			await expect(withVerifiedModelRequestJournalBinding({resources: input.resources, requester: input.requester, mode: "resume", rootSessionId: "root"}, async binding => {
+				input.db.close();
+				await withVerifiedModelRequestJournalLeases(binding, "registry-test", async () => {});
+			})).rejects.toThrow();
+		} finally { input.close(); }
+	});
+
 	test("real registered credential cannot authenticate a modified database token", async () => {
 		const input = await fixture();
 		try {
@@ -74,7 +103,7 @@ mac("self-opened SQLite fixed authority rejections", () => {
 			input.db.query("UPDATE writer SET role='operator-command' WHERE id=?").run(input.requesterWriterId);
 			let entered = false;
 			const request = {resources: input.resources, requester: input.requester, mode: "resume" as const, rootSessionId: "root"};
-			const observer = new Database(input.resources.databasePath, {readonly: true, strict: true});
+			const observer = openModelRequestJournalDatabase(input.resources.databasePath, {readonly: true, create: false, strict: true});
 			try {
 				expect(input.db.query<{role: string}, [string]>("SELECT role FROM writer WHERE id=?").get(input.requesterWriterId)?.role).toBe("operator-command");
 				expect(observer.query<{role: string}, [string]>("SELECT role FROM writer WHERE id=?").get(input.requesterWriterId)?.role).toBe("cli-tool");

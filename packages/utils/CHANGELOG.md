@@ -4,11 +4,19 @@
 
 ### Added
 
+- Added the isolated audit SQLite preload, a fixed source-owned VFS control codec, exclusive
+  STORE_ID/database creation and per-connection identity/generation registry. The authority reader
+  now verifies actual owned main/WAL/shm and live writer generations in one real RO snapshot rather
+  than stopping at the historical unsupported descriptor boundary. Parent native build/runtime
+  acceptance is still required; this entry does not claim managed sending or completed A0/C.
+- Added synchronous raw-lease callback support with genuine lexical-scope borrowing, strict
+  identity/order checks, native-Promise lifetime handling and all-lease cleanup on failure.
+
 - Added fixed macOS model-request journal raw leases and shared credential retain/retire/inspect
   operations, with alias retirement tombstones, single-read credential normalization, intrinsic
   token copy/zeroing, and real SQLite/OS rejection regressions.
-  Verified binding issuance remains blocked on a supported actual-SQLite-fd identity API;
-  this does not enable managed sending.
+  The initial implementation stopped before verified binding issuance at the actual-SQLite-fd
+  boundary; that historical partial work did not enable managed sending.
 
 ### Fixed
 

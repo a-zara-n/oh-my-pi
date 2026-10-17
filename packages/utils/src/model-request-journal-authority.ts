@@ -1,8 +1,9 @@
-import { Database } from "bun:sqlite";
+import type { Database } from "bun:sqlite";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { withRawModelRequestJournalLeases, type RawModelRequestJournalLeaseScope } from "./model-request-journal-leases";
+import { assertModelRequestJournalDatabase, openModelRequestJournalDatabase } from "./model-request-journal-sqlite-control";
 
 export type ModelRequestWriterRole = "model-agent" | "harness-core" | "harness-runner" | "operator-command" | "cli-tool";
 export interface ModelRequestWriterCredential {
@@ -152,6 +153,7 @@ interface BindingState {
 	readonly raw: RawModelRequestJournalLeaseScope;
 	readonly record: AuthorityRecord;
 	open: boolean;
+	writerGenerations?: readonly bigint[];
 }
 const bindings = new WeakMap<object, BindingState>();
 function recordAt(raw: RawModelRequestJournalLeaseScope): AuthorityRecord {
@@ -247,28 +249,39 @@ function verify(state: BindingState): AuthorityRecord {
 	state.raw.assertHeld();
 	const record = recordAt(state.raw);
 	if (record.state !== "active" || JSON.stringify(record) !== JSON.stringify(state.record)) throw new Error("Journal authority changed");
-	const fd = openSync(state.resources.databasePath, constants.O_RDONLY | constants.O_NOFOLLOW);
 	let db: Database | undefined;
+	let failure: unknown;
 	try {
-		const stat = fstatSync(fd);
-		const named = lstatSync(state.resources.databasePath);
-		if (!stat.isFile() || stat.uid !== process.getuid?.() || (stat.mode & 0o7777) !== 0o600 || stat.dev !== named.dev || stat.ino !== named.ino || stat.dev !== record.dbDevice || stat.ino !== record.dbInode) throw new Error("Journal database identity rejected");
-		db = new Database(state.resources.databasePath, {readonly: true, strict: true});
+		// The factory owns this real RO connection. Pathname fds and caller connections are not evidence.
+		db = openModelRequestJournalDatabase(state.resources.databasePath, {readonly: true, create: false, strict: true, safeIntegers: false});
+		const initial = assertModelRequestJournalDatabase(db);
+		if (initial.device !== record.dbDevice || initial.inode !== record.dbInode || initial.liveWriterGenerations.length === 0) throw new Error("Journal database identity rejected");
 		db.exec("PRAGMA trusted_schema=OFF; PRAGMA query_only=ON; BEGIN");
 		const credential = credentials.get(state.requester);
 		if (credential === undefined) throw new Error("Journal requester unsupported");
-		const verdict = inspectModelRequestWriterCredential(state.requester, controlSnapshot(db, state.resources.storeId, credential.credential.writerId, record));
+		const snapshot = controlSnapshot(db, state.resources.storeId, credential.credential.writerId, record);
+		// BEGIN alone is not a snapshot: the fixed SELECTs above must have entered a real read transaction.
+		const actual = assertModelRequestJournalDatabase(db);
+		if (actual.transactionState !== 1 || actual.transactionGeneration === 0n || actual.connectionGeneration !== initial.connectionGeneration || actual.device !== record.dbDevice || actual.inode !== record.dbInode || actual.liveWriterGenerations.length !== initial.liveWriterGenerations.length || actual.liveWriterGenerations.some((generation, index) => generation !== initial.liveWriterGenerations[index])) throw new Error("Journal database snapshot rejected");
+		if (state.writerGenerations === undefined) state.writerGenerations = actual.liveWriterGenerations;
+		else if (state.writerGenerations.length !== actual.liveWriterGenerations.length || state.writerGenerations.some((generation, index) => generation !== actual.liveWriterGenerations[index])) throw new Error("Journal live writer generation changed");
+		const verdict = inspectModelRequestWriterCredential(state.requester, snapshot);
 		const allowed = state.mode === "bootstrap-new" ? BOOTSTRAP_ROLES : RESUME_ROLES;
 		if (!verdict.ok || !verdict.active || !validRole(verdict.row.role) || !allowed.includes(verdict.row.role) || verdict.row.sessionId !== null && verdict.row.sessionId !== state.rootSessionId) throw new Error("Journal requester rejected");
-		// Bun's fileControl buffer must hold at least eight bytes; HAS_MOVED writes the first int.
-		const moved = new Int32Array(2);
-		if (db.fileControl(20, moved) !== 0 || moved[0] !== 0) throw new Error("Journal database identity unavailable");
-		// Bun exposes an opaque handle index, not the actual SQLite file descriptor.
-		// HAS_MOVED does not establish fstat identity against this nofollow fd under swap-back.
-		// Positive issuance remains unsupported until that required native identity is available.
-		throw new Error("Journal SQLite descriptor identity unsupported");
+		const final = assertModelRequestJournalDatabase(db);
+		if (final.transactionGeneration !== actual.transactionGeneration || final.transactionState !== 1 || JSON.stringify(recordAt(state.raw)) !== JSON.stringify(record)) throw new Error("Journal authority snapshot changed");
+		db.exec("ROLLBACK");
+		return record;
+	} catch (error) {
+		failure = error;
+		state.open = false;
+		throw error;
 	} finally {
-		try { db?.close(); } finally { closeSync(fd); }
+		try { db?.close(); }
+		catch (error) {
+			if (failure !== undefined) throw new AggregateError([failure, error], "Journal verification and connection close failed");
+			throw error;
+		}
 	}
 }
 export async function withVerifiedModelRequestJournalBinding<T>(request: Readonly<{resources: ModelRequestJournalAuthorityResources; requester: object; mode: "bootstrap-new" | "resume"; rootSessionId: string}>, use: (binding: ModelRequestJournalLeaseBinding) => Promise<T>): Promise<T> {

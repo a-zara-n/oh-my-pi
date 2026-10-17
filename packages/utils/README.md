@@ -69,12 +69,53 @@ Security regression evidence: the integrating parent reproduced the pre-fix acce
 read the token once and leave the alias unauthenticated. The worker did not execute checks.
 Post-fix verification of direct libc account lookup remains with the parent.
 
-**Implementation boundary:** verified issuance is currently stopped because Bun's public SQLite
-API does not expose the actual connection's file descriptor for the required `fstat` identity
-check. A separately opened descriptor or `SQLITE_FCNTL_HAS_MOVED` is not accepted as equivalent.
-The fixed self-opened read-only codec and negative checks are present, but this is not a completed
-managed-binding implementation and does not enable managed sending. No native ABI offsets or
-fallback identity proofs are used.
+The audit-only `model-request-journal-sqlite-control` subpath owns three operations:
+`openModelRequestJournalDatabase`, `createModelRequestJournalDatabase`, and
+`assertModelRequestJournalDatabase`, plus their closed options/identity/inspection/initialization types.
+Options are only `readonly`, `create`, `strict`, and `safeIntegers` (optional booleans).
+Exclusive creation owns `STORE_ID` and `state.sqlite3`; on Darwin it walks directory handles with
+public libc `openat`, creates both with `O_EXCL|O_NOFOLLOW`, and generates the 32-hex store ID.
+An opaque initialization identity is not operator approval or an active authority claim.
+Store's private orchestration must bind its genuine factory result to the fixed schema/seed,
+held record, first epoch transaction and active transition. No phase/expected-identity setter exists.
+
+The fixed control allocates its own 256-byte buffer, accepts no caller buffer, and validates the
+native protocol/result/state/generations and owned main/WAL/shm identities. Inspection is fd identity
+diagnostics, never credential/epoch/readiness authorization. Foreign, closed, replaced or ordinary
+system-SQLite connections cannot pass it. Reader assertions independently recheck all live registered
+writers on the same path; a reader on A cannot bless a writer still holding B after swap-back.
+Ordinary factory opens without the custom library retain Bun behavior; exclusive creation then
+returns `identity: undefined`, not a substitute pathname-fd proof.
+
+The authority verifier now self-opens an owned RO connection, installs the fixed native authorizer,
+and reads its closed control codec in one actual SELECT-established read transaction. It compares the
+authority's device/inode, live writer generations and the same snapshot again before success.
+Secrets/policy/verified handles remain in this single JS module, not native code. Native errors propagate;
+there is no `HAS_MOVED`, independent-fd, global-hook, pointer-offset or constant-reject fallback.
+These are implementation changes, **not a claim of passed acceptance**: parent integration must build
+the exact source pin and exercise actual main/WAL/shm lifetime, initial phases and real File readiness.
+Earlier actual-fd failures and partial verification records remain historical evidence.
+
+`withRawModelRequestJournalLeases` also supports synchronous callbacks and returns their value
+synchronously. Acquisition errors therefore throw before the callback; an async wrapper still exposes
+them as rejection. Native Promise results retain the scope until settlement; arbitrary thenables are
+rejected without invoking `then`. Nested operations borrow only a genuine private lexical scope,
+retain inherited owner/root leases, reject upgrades/different explicit identities, and expire only the
+child's local lifetime. A child cannot release its parent's leases. No wait/retry or second lock state
+was added.
+
+The isolated preload is `scripts/audit-library-bootstrap.ts`. It verifies the fixed artifact manifest,
+signed dylib hash, Bun revision, actual SQLite source ID and exact live compile options before importing
+an application graph. It refuses an already initialized SQLite runtime. It performs no network fetch,
+global install, normal OMP registration or Keychain operation. See `native/audit-sqlite/README.md` for
+the explicit source acquisition/offline build and public-domain provenance. For native utility tests:
+
+```sh
+bun --preload ./scripts/audit-library-bootstrap.ts test packages/utils/test/model-request-journal-authority-sqlite.test.ts packages/utils/test/model-request-journal-sqlite-control.test.ts packages/utils/test/model-request-journal-leases.test.ts
+```
+
+The two SQLite suites require that real built artifact; they do not mock or skip a missing native
+implementation. Run ordinary credential/raw-lease regressions without the preload separately.
 
 ## Install
 
