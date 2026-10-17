@@ -25,6 +25,13 @@
 
 ### Fixed
 
+- Registered audit SQLite connections now always use Bun's immediate, checked `close(true)`,
+  including when a caller requests unchecked close; outstanding prepared statements are finalized.
+  Ordinary connections outside the fixed native registry retain Bun's existing close behavior.
+  The parent reproduced a successful acknowledgment after a valid factory RO inspection followed
+  by main-file rename and `close(true)`. This is rename-before-close evidence, not proof of an
+  xClose-only race or authority credential misissuance. Native close-status propagation and these
+  factory regressions require the parent's rebuilt-artifact verification; workers did not run them.
 - Fixed a credential accessor counterexample where alias checking hashed a decoy token but
   retained a retired writer's secret from a later getter read. Retention now validates a
   single-read normalized snapshot and hashes the same intrinsic-copied token it stores.

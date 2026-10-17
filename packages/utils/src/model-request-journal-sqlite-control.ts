@@ -173,8 +173,9 @@ export function openModelRequestJournalDatabase(filename: string, options: Model
 			reference = new WeakRef(state);
 			references.add(reference);
 		}
-		Object.defineProperty(database, "close", {configurable: false, writable: false, value(throwOnError?: boolean) {
-			try { return closeDatabase.call(database, throwOnError); }
+		// Managed evidence must not acknowledge Bun's unchecked or deferred close.
+		Object.defineProperty(database, "close", {configurable: false, writable: false, value() {
+			try { return closeDatabase.call(database, true); }
 			finally {
 				state.closed = true;
 				if (reference !== undefined) references?.delete(reference);
@@ -183,7 +184,7 @@ export function openModelRequestJournalDatabase(filename: string, options: Model
 		}});
 		return database;
 	} catch (error) {
-		try { closeDatabase.call(database); } catch (closeError) { throw new AggregateError([error, closeError], "Journal SQLite open and close failed"); }
+		try { closeDatabase.call(database, true); } catch (closeError) { throw new AggregateError([error, closeError], "Journal SQLite open and close failed"); }
 		throw error;
 	}
 }

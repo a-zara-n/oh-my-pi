@@ -101,7 +101,29 @@ mac("owned SQLite fixed control", () => {
 					const readerA = openModelRequestJournalDatabase(filename, {readonly: true, create: false});
 					try { assertModelRequestJournalDatabase(readerA); } finally { readerA.close(); }
 				}).toThrow();
-			} finally { writerB.close(); }
+			} finally { expect(() => writerB.close()).toThrow(); }
 		} finally { fs.rmSync(directory, {recursive: true, force: true}); }
+	});
+
+	test("managed close rejects actual main identity loss even when unchecked close is requested", () => {
+		for (const throwOnError of [undefined, false, true]) {
+			const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "owned-close-")));
+			const filename = path.join(directory, "state.sqlite3");
+			const moved = `${filename}.moved`;
+			try {
+				const created = createModelRequestJournalDatabase(filename);
+				created.database.exec("CREATE TABLE evidence(id INTEGER PRIMARY KEY) STRICT");
+				created.database.close();
+				const reader = openModelRequestJournalDatabase(filename, {readonly: true, create: false});
+				try {
+					expect(assertModelRequestJournalDatabase(reader).inode).toBeGreaterThan(0);
+					fs.renameSync(filename, moved);
+					try {
+						expect(() => reader.close(throwOnError)).toThrow();
+						expect(() => assertModelRequestJournalDatabase(reader)).toThrow();
+					} finally { fs.renameSync(moved, filename); }
+				} finally { reader.close(); }
+			} finally { fs.rmSync(directory, {recursive: true, force: true}); }
+		}
 	});
 });
