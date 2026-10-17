@@ -233,26 +233,32 @@ function observeQuietly(operation: string, observe: () => void): void {
  * once: when the body ends, when it fails, when the caller cancels it, or when the request's signal aborts.
  */
 function observeResponse(
-	lease: ModelRequestLease,
+	lease: ModelRequestLease | undefined,
 	response: Response,
 	signal: AbortSignal | undefined,
 	work?: JournalOuterWork,
 ): { readonly response: Response; readonly settlement: Promise<void> } {
-	observeQuietly("observeResponse", () =>
-		lease.observeResponse({ status: response.status, headers: responseHeaders(response.headers) }),
-	);
+	if (lease !== undefined) {
+		observeQuietly("observeResponse", () =>
+			lease.observeResponse({ status: response.status, headers: responseHeaders(response.headers) }),
+		);
+	}
 	const { promise: settlement, resolve: resolveSettlement } = Promise.withResolvers<void>();
+	const joinBodyTask = (task: Promise<void>): void => {
+		work?.join(task);
+	};
 	const upstream = response.body;
 	if (upstream === null) {
-		void (async () => {
+		const ended = (async () => {
 			try {
-				await settleQuietly(lease, { type: "response-ended", status: response.status });
+				if (lease !== undefined) await settleQuietly(lease, { type: "response-ended", status: response.status });
 			} catch (error) {
 				if (work !== undefined) work.noteFailure(error);
 			} finally {
 				resolveSettlement();
 			}
 		})();
+		joinBodyTask(ended);
 		return { response, settlement };
 	}
 	let settled = false;
@@ -262,15 +268,16 @@ function observeResponse(
 		if (settled) return;
 		settled = true;
 		signal?.removeEventListener("abort", onAbort);
-		void (async () => {
+		const settlementTask = (async () => {
 			try {
-				await settleQuietly(lease, outcome);
+				if (lease !== undefined) await settleQuietly(lease, outcome);
 			} catch (error) {
 				if (work !== undefined) work.noteFailure(error);
 			} finally {
 				resolveSettlement();
 			}
 		})();
+		joinBodyTask(settlementTask);
 	};
 	if (signal?.aborted) onAbort();
 	else signal?.addEventListener("abort", onAbort, { once: true });
@@ -286,7 +293,9 @@ function observeResponse(
 				controller.close();
 				return;
 			}
-			observeQuietly("observeChunk", () => lease.observeChunk(Uint8Array.from(value)));
+			if (lease !== undefined) {
+				observeQuietly("observeChunk", () => lease.observeChunk(Uint8Array.from(value)));
+			}
 			controller.enqueue(value);
 		} catch (error) {
 			finish({
@@ -300,21 +309,27 @@ function observeResponse(
 	};
 	const passthrough = new ReadableStream<Uint8Array>({
 		pull(controller) {
-			inFlight = pullOnce(controller);
-			return inFlight;
+			const read = pullOnce(controller);
+			inFlight = read;
+			work?.join(read);
+			return read;
 		},
 		async cancel(reason) {
-			// Consumers stop reading as soon as they see the protocol's terminal event, which can be a moment before the
-			// transport reports the end of the body. Let a read that is already in flight land (bounded to one macrotask)
-			// so a body that was in fact fully delivered is settled as ended, not as aborted.
-			if (inFlight !== undefined) {
-				const grace = Promise.withResolvers<void>();
-				const timer = setTimeout(grace.resolve, 0);
-				await Promise.race([inFlight, grace.promise]);
-				clearTimeout(timer);
-			}
-			finish({ type: "response-failed", status: response.status, aborted: true, transportClosed: true });
-			await reader.cancel(reason);
+			const cleanup = (async () => {
+				// Consumers stop reading as soon as they see the protocol's terminal event, which can be a moment before the
+				// transport reports the end of the body. Let a read that is already in flight land (bounded to one macrotask)
+				// so a body that was in fact fully delivered is settled as ended, not as aborted.
+				if (inFlight !== undefined) {
+					const grace = Promise.withResolvers<void>();
+					const timer = setTimeout(grace.resolve, 0);
+					await Promise.race([inFlight, grace.promise]);
+					clearTimeout(timer);
+				}
+				finish({ type: "response-failed", status: response.status, aborted: true, transportClosed: true });
+				await reader.cancel(reason);
+			})();
+			work?.join(cleanup);
+			return cleanup;
 		},
 	});
 	const wrapped = new Response(passthrough, {
@@ -385,6 +400,7 @@ async function sendRequired(
 	permit: ModelRequestPermit,
 	signal: AbortSignal | undefined,
 	work: JournalOuterWork,
+	bodyLifetime: { transferred: boolean },
 ): Promise<Response> {
 	const { input, init, transport } = args;
 	const lease = permit.lease;
@@ -431,12 +447,9 @@ async function sendRequired(
 		}
 		responseAwaited = true;
 		const response = await responsePromise;
-		if (lease === undefined) {
-			await work.end();
-			return response;
-		}
 		const observed = observeResponse(lease, response, signal, work);
 		retainResponseBodyOuterWork(work, observed.settlement);
+		bodyLifetime.transferred = true;
 		return observed.response;
 	} catch (error) {
 		if (record !== undefined) record.state = "ended";
@@ -446,7 +459,11 @@ async function sendRequired(
 		// Preserve both failures rather than leaving a detached rejection or claiming not-sent.
 		if (responsePromise !== undefined && !responseAwaited) {
 			try {
-				await joinJournalOuterWork(work, responsePromise);
+				const lateResponse = await joinJournalOuterWork(work, responsePromise);
+				await joinJournalOuterWork(
+					work,
+					observeResponse(lease, lateResponse, signal, work).settlement,
+				);
 			} catch (transportError) {
 				if (transportError !== failure)
 					failure = new AggregateError([failure, transportError], "model request dispatch and release failed");
@@ -503,119 +520,126 @@ export async function gatedSend(args: GatedSendArgs): Promise<Response> {
 	assertJournalExecutionReady(execution);
 	const managed = execution !== undefined && execution.journalState !== "untracked";
 	const work = managed ? openJournalOuterWork(execution) : undefined;
-	if (managed) {
-		if (
-			runtime !== canonicalRuntime ||
-			runtime.authorize !== canonicalAuthorize ||
-			runtime.currentExecution !== canonicalCurrentExecution
-		) {
-			throw new ModelRequestDeniedError("gate-error", "required model request runtime identity changed");
+	const bodyLifetime = { transferred: false };
+	const endWorkUnlessBodyTransferred = async (): Promise<void> => {
+		if (work !== undefined && !bodyLifetime.transferred) await work.end();
+	};
+	try {
+		if (managed) {
+			if (
+				runtime !== canonicalRuntime ||
+				runtime.authorize !== canonicalAuthorize ||
+				runtime.currentExecution !== canonicalCurrentExecution
+			) {
+				throw new ModelRequestDeniedError("gate-error", "required model request runtime identity changed");
+			}
+			try {
+				assertModelRequestBuiltinFetch(args.transport);
+			} catch (error) {
+				throw new ModelRequestDeniedError(
+					"transport-unsupported",
+					"required model request needs the startup builtin fetch",
+					{
+						cause: error,
+					},
+				);
+			}
+		}
+		if (!runtime.hasGate() && !managed) return args.send();
+		const { input, init } = args;
+		const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
+		const link = nextModelRequestAttemptLink();
+		const permit = await joinJournalOuterWork(
+			work,
+			authorizeDispatch(runtime, {
+				requestId: link.requestId,
+				reason: link.reason,
+				...(link.retryOf === undefined ? {} : { retryOf: link.retryOf }),
+				kind: args.kind,
+				model: modelRef(currentModelRequestDestination() ?? args.model),
+				wire: buildModelRequestWire(input, init),
+				...(signal === undefined || signal === null ? {} : { signal }),
+			}),
+		);
+		link.record(permit.attemptId);
+		const lease = permit.lease;
+		try {
+			// Authorization can yield across a newly required or faulted execution family.
+			assertJournalExecutionReady(execution);
+		} catch (error) {
+			work?.noteFailure(error);
+			if (lease !== undefined) {
+				try {
+					await joinJournalOuterWork(
+						work,
+						settleQuietly(lease, { type: "not-sent", aborted: signal?.aborted === true }),
+					);
+				} catch (settleError) {
+					work?.noteFailure(settleError);
+				}
+			}
+			throw error;
+		}
+		if (managed) {
+			if (work === undefined) {
+				throw new ModelRequestDeniedError("gate-error", "model request journal outer work unavailable");
+			}
+			return await sendRequired(args, runtime, execution!, permit, signal ?? undefined, work, bodyLifetime);
+		}
+		if (lease === undefined) return args.send();
+		const effectiveSignal = signal ?? undefined;
+		if (effectiveSignal?.aborted) {
+			try {
+				await joinJournalOuterWork(work, settleQuietly(lease, { type: "not-sent", aborted: true }));
+			} catch (settleError) {
+				work?.noteFailure(settleError);
+			}
+			throw effectiveSignal.reason ?? new Error("model request aborted before it was sent");
 		}
 		try {
-			assertModelRequestBuiltinFetch(args.transport);
+			lease.beginSend();
 		} catch (error) {
-			throw new ModelRequestDeniedError(
-				"transport-unsupported",
-				"required model request needs the startup builtin fetch",
-				{
-					cause: error,
-				},
-			);
+			// Nothing was sent. A gate whose bookkeeping fails must not leak the lease, and the failure is the gate's:
+			// terminal, not a transport error a retry layer would replay.
+			work?.noteFailure(error);
+			try {
+				await joinJournalOuterWork(work, settleQuietly(lease, { type: "not-sent", aborted: false }));
+			} catch (settleError) {
+				work?.noteFailure(settleError);
+			}
+			throw new ModelRequestDeniedError("gate-error", "model request gate failed while starting to send", {
+				cause: error,
+			});
 		}
-	}
-	if (!runtime.hasGate() && !managed) return args.send();
-	const { input, init } = args;
-	const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
-	const link = nextModelRequestAttemptLink();
-	const permit = await joinJournalOuterWork(
-		work,
-		authorizeDispatch(runtime, {
-		requestId: link.requestId,
-		reason: link.reason,
-		...(link.retryOf === undefined ? {} : { retryOf: link.retryOf }),
-		kind: args.kind,
-		model: modelRef(currentModelRequestDestination() ?? args.model),
-		wire: buildModelRequestWire(input, init),
-		...(signal === undefined || signal === null ? {} : { signal }),
-		}),
-	);
-	link.record(permit.attemptId);
-	const lease = permit.lease;
-	try {
-		// Authorization can yield across a newly required or faulted execution family.
-		assertJournalExecutionReady(execution);
-	} catch (error) {
-		work?.noteFailure(error);
-		if (lease !== undefined) {
+		let response: Response;
+		try {
+			response = await joinJournalOuterWork(work, args.send());
+		} catch (error) {
+			work?.noteFailure(error);
 			try {
 				await joinJournalOuterWork(
 					work,
-					settleQuietly(lease, { type: "not-sent", aborted: signal?.aborted === true }),
+					settleQuietly(lease, {
+						type: "request-failed",
+						sent: "maybe",
+						aborted: effectiveSignal?.aborted === true,
+						transportClosed: true,
+					}),
 				);
 			} catch (settleError) {
 				work?.noteFailure(settleError);
 			}
+			throw error;
 		}
-		await work?.end();
-		throw error;
-	}
-	if (managed) {
-		if (work === undefined) {
-			throw new ModelRequestDeniedError("gate-error", "model request journal outer work unavailable");
-		}
-		return sendRequired(args, runtime, execution!, permit, signal ?? undefined, work);
-	}
-	if (lease === undefined) return args.send();
-	const effectiveSignal = signal ?? undefined;
-	if (effectiveSignal?.aborted) {
-		try {
-			await joinJournalOuterWork(work, settleQuietly(lease, { type: "not-sent", aborted: true }));
-		} catch (settleError) {
-			work?.noteFailure(settleError);
-		}
-		await work?.end();
-		throw effectiveSignal.reason ?? new Error("model request aborted before it was sent");
-	}
-	try {
-		lease.beginSend();
+		const observed = observeResponse(lease, response, effectiveSignal, work);
+		retainResponseBodyOuterWork(work, observed.settlement);
+		bodyLifetime.transferred = true;
+		return observed.response;
 	} catch (error) {
-		// Nothing was sent. A gate whose bookkeeping fails must not leak the lease, and the failure is the gate's:
-		// terminal, not a transport error a retry layer would replay.
-		work?.noteFailure(error);
-		try {
-			await joinJournalOuterWork(work, settleQuietly(lease, { type: "not-sent", aborted: false }));
-		} catch (settleError) {
-			work?.noteFailure(settleError);
-		}
-		await work?.end();
-		throw new ModelRequestDeniedError("gate-error", "model request gate failed while starting to send", {
-			cause: error,
-		});
-	}
-	let response: Response;
-	try {
-		response = await joinJournalOuterWork(work, args.send());
-	} catch (error) {
-		work?.noteFailure(error);
-		try {
-			await joinJournalOuterWork(
-				work,
-				settleQuietly(lease, {
-					type: "request-failed",
-					sent: "maybe",
-					aborted: effectiveSignal?.aborted === true,
-					transportClosed: true,
-				}),
-			);
-		} catch (settleError) {
-			work?.noteFailure(settleError);
-		}
-		await work?.end();
 		throw error;
+	} finally {
+		await endWorkUnlessBodyTransferred();
 	}
-	const observed = observeResponse(lease, response, effectiveSignal, work);
-	retainResponseBodyOuterWork(work, observed.settlement);
-	return observed.response;
 }
 
 /**

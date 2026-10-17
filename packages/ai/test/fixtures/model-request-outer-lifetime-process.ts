@@ -482,7 +482,7 @@ async function runScenario(): Promise<Record<string, unknown>> {
 				loopback.stop();
 				return {
 					message: failure instanceof Error ? failure.message : String(failure),
-					authorityRejected: !authority.ok,
+					authorityOk: authority.ok,
 				};
 			});
 		}
@@ -503,7 +503,7 @@ async function runScenario(): Promise<Record<string, unknown>> {
 				}
 				const authority = await finishAuthorityClose(harness);
 				loopback.stop();
-				return { denied: code.includes("over budget"), authorityRejected: !authority.ok };
+				return { denied: code.includes("over budget"), authorityOk: authority.ok };
 			});
 		}
 		case "a01-tf-debug-holds-wire": {
@@ -948,7 +948,7 @@ async function runScenario(): Promise<Record<string, unknown>> {
 				}
 				const authority = await finishAuthorityClose(harness);
 				loopback.stop();
-				return { sendFailed, authorityRejected: !authority.ok };
+				return { sendFailed, authorityOk: authority.ok };
 			});
 		}
 		case "guarded-transfer-cleanup-on-settle-reject": {
