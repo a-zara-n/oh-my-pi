@@ -14,7 +14,7 @@ import {
 	SessionWriteConflictError,
 	type WriteTextAtomicOptions,
 } from "@oh-my-pi/pi-coding-agent/session/session-storage";
-import { type SessionTitleUpdate, serializeTitleSlot } from "@oh-my-pi/pi-coding-agent/session/session-title-slot";
+import { type SessionTitleUpdate, serializeTitleSlot } from "@oh-my-pi/pi-utils/session-title-slot";
 
 class ControlledTitleUpdateBackend implements SessionStorageBackend {
 	readonly #sessionPath: string;

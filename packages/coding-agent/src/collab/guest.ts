@@ -27,7 +27,7 @@ import type { AgentHubRemote, AgentHubRemoteTranscript } from "@oh-my-pi/pi-tui/
 import type { InteractiveModeContext } from "../modes/types";
 import { AgentRegistry } from "../registry/agent-registry";
 import type { AgentSessionEvent } from "../session/agent-session";
-import type { SessionEntry } from "../session/session-entries";
+import type { SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
 import { mintSessionId } from "../session/session-manager";
 import { FileSessionStorage } from "../session/session-storage";
 import { shouldDisableReasoning, toReasoningEffort } from "@oh-my-pi/pi-tui/thinking";

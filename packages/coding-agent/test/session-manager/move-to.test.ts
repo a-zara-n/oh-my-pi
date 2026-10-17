@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { SessionHeader } from "@oh-my-pi/pi-coding-agent/session/session-entries";
+import type { SessionHeader } from "@oh-my-pi/pi-utils/session-entries";
 import { loadEntriesFromFile } from "@oh-my-pi/pi-coding-agent/session/session-loader";
 import { resetSessionIndexForTests } from "@oh-my-pi/pi-coding-agent/session/session-index";
 import { resolveResumableSession } from "@oh-my-pi/pi-coding-agent/session/session-listing";

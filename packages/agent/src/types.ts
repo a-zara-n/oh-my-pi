@@ -1,23 +1,27 @@
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
+export type { AgentMessage, CustomAgentMessages } from "@oh-my-pi/pi-utils/agent-messages";
+import type {
+	AssistantMessage,
+	ImageContent,
+	Message,
+	ServiceTier,
+	TextContent,
+	ToolCallProviderMetadata,
+	ToolResultMessage,
+	ToolResultProviderMetadata,
+} from "@oh-my-pi/pi-utils/model-data";
 import type {
 	ApiKey,
-	AssistantMessage,
 	AssistantMessageEvent,
 	AssistantMessageEventStream,
 	Context,
 	Effort,
-	ImageContent,
-	Message,
 	Model,
-	ServiceTier,
 	SimpleStreamOptions,
 	Static,
 	streamSimple,
-	TextContent,
 	Tool,
-	ToolCallProviderMetadata,
 	ToolChoice,
-	ToolResultMessage,
-	ToolResultProviderMetadata,
 	TSchema,
 } from "@oh-my-pi/pi-ai";
 import type { Dialect } from "@oh-my-pi/pi-ai/dialect";
@@ -960,30 +964,6 @@ export interface AfterToolCallContext {
 	context: AgentContext;
 }
 
-/**
- * Extensible interface for custom app messages.
- * Apps can extend via declaration merging:
- *
- * @example
- * ```typescript
- * declare module "@oh-my-pi/agent" {
- *   interface CustomAgentMessages {
- *     artifact: ArtifactMessage;
- *     notification: NotificationMessage;
- *   }
- * }
- * ```
- */
-export interface CustomAgentMessages {
-	// Empty by default - apps extend via declaration merging
-}
-
-/**
- * AgentMessage: Union of LLM messages + custom messages.
- * This abstraction allows apps to add custom message types while maintaining
- * type safety and compatibility with the base LLM messages.
- */
-export type AgentMessage = Message | CustomAgentMessages[keyof CustomAgentMessages];
 
 /**
  * Agent state containing all configuration and conversation data.

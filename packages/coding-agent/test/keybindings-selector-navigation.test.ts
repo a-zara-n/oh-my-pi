@@ -10,7 +10,8 @@ import { SessionSelectorComponent } from "@oh-my-pi/pi-tui/overlays/session-sele
 import { TreeSelectorComponent } from "@oh-my-pi/pi-tui/overlays/tree-selector";
 import { initTheme } from "@oh-my-pi/pi-tui/theme";
 import { HistoryStorage } from "@oh-my-pi/pi-coding-agent/session/history-storage";
-import type { SessionMessageEntry, SessionTreeNode } from "@oh-my-pi/pi-coding-agent/session/session-entries";
+import type { SessionMessageEntry } from "@oh-my-pi/pi-utils/session-entries";
+import type { SessionTreeNode } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import type { SessionInfo } from "@oh-my-pi/pi-coding-agent/session/session-listing";
 import { setKeybindings, type TUI } from "@oh-my-pi/pi-tui";
 import { TempDir } from "@oh-my-pi/pi-utils";

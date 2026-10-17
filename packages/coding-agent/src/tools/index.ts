@@ -33,7 +33,7 @@ import type { ArtifactManager } from "../session/artifacts";
 import type { ClientBridge } from "../session/client-bridge";
 import type { CustomMessage } from "../session/messages";
 import type { ModelRequestRootAssignment } from "../session/model-request-context";
-import type { UsageStatistics } from "../session/session-entries";
+import type { UsageStatistics } from "@oh-my-pi/pi-utils/session-entries";
 import type { SessionManager } from "../session/session-manager";
 import type { ToolChoiceQueue } from "../session/tool-choice-queue";
 import { TaskTool } from "../task";

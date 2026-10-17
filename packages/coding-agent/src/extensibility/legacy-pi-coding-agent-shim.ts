@@ -61,7 +61,7 @@ import {
 	truncateTail,
 } from "@oh-my-pi/pi-tui/tools/streaming-output";
 import { childModelRequestRootOf } from "../session/model-request-context";
-import type { SessionEntry } from "../session/session-entries";
+import type { SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
 import type { Tool, ToolSession } from "../tools";
 import { BashTool } from "../tools/bash";
 import { GlobTool } from "../tools/glob";

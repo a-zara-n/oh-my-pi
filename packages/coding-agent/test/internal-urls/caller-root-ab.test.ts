@@ -25,7 +25,7 @@ import { resetRegisteredArtifactDirsForTests } from "@oh-my-pi/pi-coding-agent/i
 import { InternalUrlFilesystem } from "@oh-my-pi/pi-coding-agent/internal-urls/url-filesystem";
 import { AgentRegistry, MAIN_AGENT_ID } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import { ensurePersistedRoster } from "@oh-my-pi/pi-coding-agent/registry/persisted-agents";
-import { CURRENT_SESSION_VERSION } from "@oh-my-pi/pi-coding-agent/session/session-entries";
+import { CURRENT_SESSION_VERSION } from "@oh-my-pi/pi-utils/session-entries";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { GrepTool } from "@oh-my-pi/pi-coding-agent/tools/grep";
 import { ShellFsOp } from "@oh-my-pi/pi-natives";

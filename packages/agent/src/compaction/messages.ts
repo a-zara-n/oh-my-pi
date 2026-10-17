@@ -1,3 +1,5 @@
+import type { AgentMessage, BranchSummaryMessage, CompactionSummaryMessage, CoreCompactionMessage, CustomMessage, HookMessage } from "@oh-my-pi/pi-utils/agent-messages";
+export type { BranchSummaryMessage, CompactionSummaryMessage, CoreCompactionMessage, CustomMessage, HookMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import type {
 	ImageContent,
 	Message,
@@ -5,10 +7,9 @@ import type {
 	ProviderPayload,
 	TextContent,
 	ToolResultMessage,
-} from "@oh-my-pi/pi-ai";
+} from "@oh-my-pi/pi-utils/model-data";
 import { prompt } from "@oh-my-pi/pi-utils";
-import type { AgentMessage } from "../types";
-import type { SessionEntry } from "./entries";
+import type { SessionEntry } from "@oh-my-pi/pi-utils/compaction-entries";
 import branchSummaryContextPrompt from "./prompts/branch-summary-context.md" with { type: "text" };
 import compactionSummaryContextPrompt from "./prompts/compaction-summary-context.md" with { type: "text" };
 import handoffSummaryContextPrompt from "./prompts/handoff-summary-context.md" with { type: "text" };
@@ -17,74 +18,7 @@ const COMPACTION_SUMMARY_TEMPLATE = compactionSummaryContextPrompt;
 const HANDOFF_SUMMARY_TEMPLATE = handoffSummaryContextPrompt;
 const BRANCH_SUMMARY_TEMPLATE = branchSummaryContextPrompt;
 
-export interface CustomMessage<T = unknown> {
-	role: "custom";
-	customType: string;
-	content: string | (TextContent | ImageContent)[];
-	display: boolean;
-	details?: T;
-	/** Who initiated this message for billing/attribution semantics. */
-	attribution?: MessageAttribution;
-	timestamp: number;
-}
 
-/** Legacy hook message type (pre-extensions). Kept for session migration. */
-export interface HookMessage<T = unknown> {
-	role: "hookMessage";
-	customType: string;
-	content: string | (TextContent | ImageContent)[];
-	display: boolean;
-	details?: T;
-	/** Who initiated this message for billing/attribution semantics. */
-	attribution?: MessageAttribution;
-	timestamp: number;
-}
-
-export interface BranchSummaryMessage {
-	role: "branchSummary";
-	summary: string;
-	fromId: string;
-	timestamp: number;
-}
-
-export interface CompactionSummaryMessage {
-	role: "compactionSummary";
-	summary: string;
-	shortSummary?: string;
-	tokensBefore: number;
-	/** Estimated context tokens after the rewrite (display metadata). */
-	tokensAfter?: number;
-	/** Harness compaction method that produced this summary (display metadata). */
-	method?: string;
-	providerPayload?: ProviderPayload;
-	/** Runtime-only ordered archive blocks for snapcompact: old text region,
-	 *  imaged middle, then new text region. When present, `summary` is already
-	 *  the final lead-in text (no legacy wrapper applied). */
-	blocks?: (TextContent | ImageContent)[];
-	/** Snapcompact image blocks, kept for display counts / legacy consumers. */
-	images?: ImageContent[];
-	/** Post-pass dead-end warning attached to this compaction (progress guard). */
-	warning?: string;
-	/**
-	 * Thinking-binding rewrite marker when it must differ from `timestamp`: a
-	 * natively replayed summary predates it before the retained tail so that
-	 * tail's bound thinking stays valid. `timestamp` remains the commit time,
-	 * which is what invalidates the tail's pre-compaction usage reports.
-	 */
-	historyRewriteAt?: number;
-	timestamp: number;
-}
-
-export type CoreCompactionMessage = CustomMessage | HookMessage | BranchSummaryMessage | CompactionSummaryMessage;
-
-declare module "../types" {
-	interface CustomAgentMessages {
-		custom: CustomMessage;
-		hookMessage: HookMessage;
-		branchSummary: BranchSummaryMessage;
-		compactionSummary: CompactionSummaryMessage;
-	}
-}
 export type ConvertToLlm = (messages: AgentMessage[]) => Message[];
 
 function getPrunedToolResultContent(message: ToolResultMessage): (TextContent | ImageContent)[] {

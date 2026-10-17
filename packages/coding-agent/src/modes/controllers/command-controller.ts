@@ -57,7 +57,7 @@ import { buildToolsMarkdown } from "@oh-my-pi/pi-tui/prompt/tools-markdown";
 import type { AsyncJobSnapshotItem } from "../../session/agent-session";
 import type { AuthStorage, OAuthAccountIdentity } from "../../session/auth-storage";
 import type { CompactMode } from "../../session/compact-modes";
-import type { NewSessionOptions } from "../../session/session-entries";
+import type { NewSessionOptions } from "@oh-my-pi/pi-utils/session-entries";
 import {
 	cleanSourceCheckoutIfConfigured,
 	createSessionWorktree,

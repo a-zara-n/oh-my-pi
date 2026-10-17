@@ -1,3 +1,5 @@
+import type { OutputArtifactError } from "@oh-my-pi/pi-utils/agent-messages";
+export type { OutputArtifactError } from "@oh-my-pi/pi-utils/agent-messages";
 import * as fs from "node:fs";
 import type { AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
 import { formatBytes, materializeString, sanitizeText } from "@oh-my-pi/pi-utils";
@@ -33,8 +35,6 @@ const ELLIPSIS = "…";
 // Interfaces
 // =============================================================================
 
-/** First failed artifact I/O operation; safe to persist without exposing filesystem errors. */
-export type OutputArtifactError = "open" | "write" | "flush" | "end";
 
 /** Captured output with inline truncation and artifact storage metadata. */
 export interface OutputSummary {

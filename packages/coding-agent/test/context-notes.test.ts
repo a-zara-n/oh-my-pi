@@ -7,7 +7,7 @@ import {
 	MAX_CONTEXT_NOTES_BYTES,
 } from "@oh-my-pi/pi-coding-agent/session/context-notes";
 import type { ContextNotesEntry } from "@oh-my-pi/pi-coding-agent/session/context-notes";
-import type { CustomEntry, ResetBoundaryEntry, SessionEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
+import type { CustomEntry, ResetBoundaryEntry, SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { ContextNotesTool, NewContextTool } from "@oh-my-pi/pi-coding-agent/tools/context-notes";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools/index";

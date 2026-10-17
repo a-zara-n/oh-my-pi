@@ -44,7 +44,7 @@
 
 import type { SessionEntry as WireSessionEntry } from "@oh-my-pi/pi-wire";
 import type { AgentSessionEvent } from "../session/agent-session";
-import type { SessionEntry } from "../session/session-entries";
+import type { SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
 
 /**
  * Per-payload ceiling for host→guest frames. Bun's default WebSocket

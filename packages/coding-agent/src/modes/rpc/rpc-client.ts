@@ -15,7 +15,8 @@ import type { BashResult } from "../../exec/bash-executor";
 import type { AgentSessionEvent, SessionStats } from "../../session/agent-session";
 import type { BtwHistoryRecord } from "../../session/btw-history";
 import type { CacheWarmingMode } from "../../session/cache-warmer";
-import type { SessionEntry, SessionTreeNode } from "../../session/session-entries";
+import type { SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
+import type { SessionTreeNode } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import { MAX_RPC_FRAME_BYTES, MAX_RPC_REASSEMBLED_BYTES, RpcFrameDecoder, type RpcProtocolVersion } from "./rpc-frame";
 import type { RpcGoalOp, RpcGoalResult } from "./rpc-goal";
 import {

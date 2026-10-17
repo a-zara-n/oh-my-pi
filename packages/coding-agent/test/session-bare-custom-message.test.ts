@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import { convertToLlm, normalizeCustomMessagePayload } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { buildSessionContext } from "@oh-my-pi/pi-coding-agent/session/session-context";
-import type { CustomMessageEntry, SessionEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
+import type { CustomMessageEntry, SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 
 describe("bare custom_message recovery", () => {

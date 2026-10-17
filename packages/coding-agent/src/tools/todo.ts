@@ -13,7 +13,7 @@ import { isRecord, prompt } from "@oh-my-pi/pi-utils";
 
 import todoDescription from "../prompts/tools/todo.md" with { type: "text" };
 import type { ToolSession } from "../sdk";
-import type { SessionEntry } from "../session/session-entries";
+import type { SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
 
 import { normalizePathLikeInput, resolveToCwd } from "./path-utils";
 

@@ -4,7 +4,7 @@ import * as path from "node:path";
 import { type AgentMessage, type AgentTool, agentLoop } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, Context, Message } from "@oh-my-pi/pi-ai";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
-import { setStreamingPartialJson } from "@oh-my-pi/pi-ai/utils/block-symbols";
+import { setStreamingPartialJson } from "@oh-my-pi/pi-utils/model-data";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { Settings } from "../src/config/settings";
 import { disposeAllVmContexts } from "../src/eval/js/context-manager";

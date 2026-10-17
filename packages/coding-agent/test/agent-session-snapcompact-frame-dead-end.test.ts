@@ -10,7 +10,7 @@ import { loadExtensions } from "@oh-my-pi/pi-coding-agent/extensibility/extensio
 import { ExtensionRunner } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/runner";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
-import type { CompactionEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
+import type { CompactionEntry } from "@oh-my-pi/pi-utils/session-entries";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { getProjectAgentDir, TempDir } from "@oh-my-pi/pi-utils";
 import * as snapcompact from "@oh-my-pi/snapcompact";

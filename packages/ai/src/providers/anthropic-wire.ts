@@ -1,3 +1,5 @@
+import type { ProviderInputTransformation, StopDetails } from "@oh-my-pi/pi-utils/model-data";
+export type { StopDetails } from "@oh-my-pi/pi-utils/model-data";
 /**
  * Anthropic Messages API wire types.
  *
@@ -11,7 +13,7 @@
  * `scope`, tool `strict`/`eager_input_streaming`, mid-conversation `system`
  * role) are first-class here instead of being patched in via casts.
  */
-import type { ProviderInputTransformation, TokenTaskBudget } from "../types";
+import type { TokenTaskBudget } from "../types";
 import { isRecord } from "../utils";
 
 // ─── Cache control ──────────────────────────────────────────────────────────
@@ -461,13 +463,6 @@ export type ContentBlockDelta =
 	| { type: "thinking_delta"; thinking: string }
 	| { type: "signature_delta"; signature: string };
 
-export type StopDetails = {
-	type: string;
-	category?: string | null;
-	explanation?: string | null;
-	fallback_credit_token?: string | null;
-	fallback_has_prefill_claim?: boolean | null;
-};
 
 export type MessageDelta = {
 	stop_reason?: StopReason | null;

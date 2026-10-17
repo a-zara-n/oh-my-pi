@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { isAssistantMessageLine } from "@oh-my-pi/pi-coding-agent/session/session-entries";
+import { isAssistantMessageLine } from "@oh-my-pi/pi-utils/session-entries";
 import type { SessionStatus } from "@oh-my-pi/pi-coding-agent/session/session-listing";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { MemorySessionStorage } from "@oh-my-pi/pi-coding-agent/session/session-storage";

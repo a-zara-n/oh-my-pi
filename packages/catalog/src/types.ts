@@ -1,3 +1,5 @@
+import type { Api, Provider } from "@oh-my-pi/pi-utils/model-data";
+export type { Api, KnownApi, Provider, Usage } from "@oh-my-pi/pi-utils/model-data";
 import type { ModelIdentity } from "./compat/types";
 import type { Effort } from "./effort";
 
@@ -6,24 +8,6 @@ import type { Effort } from "./effort";
 export type { FetchImpl } from "@oh-my-pi/pi-utils";
 export type { KnownProvider } from "./provider-models/descriptors";
 
-export type KnownApi =
-	| "openai-completions"
-	| "openai-responses"
-	| "openrouter"
-	| "openai-codex-responses"
-	| "azure-openai-responses"
-	| "anthropic-messages"
-	| "bedrock-converse-stream"
-	| "google-generative-ai"
-	| "google-gemini-cli"
-	| "google-vertex"
-	| "ollama-chat"
-	| "cursor-agent"
-	| "factory-droid-agent"
-	| "gitlab-duo-agent"
-	| "devin-agent"
-	| "apple-foundation-models";
-export type Api = KnownApi | (string & {});
 
 /** Catalog kinds used to isolate role-specific runners from session chat models. */
 export const MODEL_KINDS = [
@@ -187,79 +171,10 @@ export interface ThinkingConfig {
 	requiresEffort?: boolean;
 }
 
-// `Provider` is any provider-id string; `KnownProvider` (re-exported above) enumerates
-// the built-in model providers from the catalog descriptor table.
-export type Provider = string;
 
 /** Token budgets for each thinking level (token-based providers only) */
 export type ThinkingBudgets = { [key in Effort]?: number };
 
-export interface Usage {
-	/** Non-cached conversation input tokens (matches the bucket the provider bills as new input). */
-	input: number;
-	/** Total conversation output tokens for the turn, including thinking, assistant text, and tool-call argument tokens. */
-	output: number;
-	/** Conversation tokens read from the prompt cache. */
-	cacheRead: number;
-	/** Conversation tokens written to the prompt cache (cache creation). */
-	cacheWrite: number;
-	/** Sum of input + output + cacheRead + cacheWrite plus provider-side orchestration tokens when reported. */
-	totalTokens: number;
-	/** Provider-reported occupied context tokens when the value is authoritative but not a billable input/output bucket. */
-	contextTokens?: number;
-	/** Provider-side orchestration tokens, billed but not part of the conversation prompt/cache buckets. */
-	orchestration?: {
-		/** Non-cached orchestration input tokens. */
-		input?: number;
-		/** Orchestration tokens read from provider-side cache. */
-		cacheRead?: number;
-		/** Orchestration output tokens. */
-		output?: number;
-	};
-	/** Copilot premium-request counter, when applicable. */
-	premiumRequests?: number;
-	/**
-	 * Reasoning/thinking tokens included in `output`, when the provider reports them
-	 * (OpenAI `output_tokens_details.reasoning_tokens`, Google `thoughtsTokenCount`).
-	 * Always a subset of `output` — non-reasoning output is `output - reasoningTokens`.
-	 *
-	 * Providers that don't expose this leave it undefined rather than guessing;
-	 * `undefined` means unknown, NOT zero.
-	 */
-	reasoningTokens?: number;
-	/**
-	 * Cache-write TTL breakdown (Anthropic only). When set, the components sum to
-	 * `cacheWrite`. Absent providers do not populate this.
-	 */
-	cttl?: {
-		ephemeral5m?: number;
-		ephemeral1h?: number;
-	};
-	/**
-	 * Server-side tool invocations made during this turn (Anthropic web_search /
-	 * web_fetch, OpenAI built-in tools when reported). Counts requests, not tokens.
-	 */
-	server?: {
-		webSearch?: number;
-		webFetch?: number;
-	};
-	/** Provider-reported credit meter values for credit-based billing APIs. */
-	credits?: {
-		/** Uncommitted per-response credit cost, when reported. */
-		cost?: number;
-		/** Final committed credit cost, when reported. */
-		committedCost?: number;
-		/** Final committed ACU cost, when reported. */
-		acuCost?: number;
-	};
-	cost: {
-		input: number;
-		output: number;
-		cacheRead: number;
-		cacheWrite: number;
-		total: number;
-	};
-}
 
 export type OpenAIReasoningFormat =
 	| "openai"

@@ -17,7 +17,7 @@ import type {
 	ToolChoice,
 } from "../types";
 import { normalizeSystemPrompts } from "../utils";
-import { clearStreamingPartialJson, kStreamingPartialJson } from "../utils/block-symbols";
+import { clearStreamingPartialJson, kStreamingPartialJson } from "@oh-my-pi/pi-utils/model-data";
 import { withReplaySafeStreamRetry } from "../utils/empty-completion-retry";
 import { AssistantMessageEventStream } from "../utils/event-stream";
 import type { CapturedHttpErrorResponse, RawHttpRequestDump } from "../utils/http-inspector";

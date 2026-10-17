@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { serializeTitleSlot } from "@oh-my-pi/pi-coding-agent/session/session-title-slot";
+import { serializeTitleSlot } from "@oh-my-pi/pi-utils/session-title-slot";
 import { SqlSessionStorage, type SqlSessionStorageClient } from "@oh-my-pi/pi-coding-agent/session/sql-session-storage";
 import { SQL } from "bun";
 

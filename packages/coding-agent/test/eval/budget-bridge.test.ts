@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { runEvalBudget } from "../../src/eval/budget-bridge";
 import type { GoalModeState } from "../../src/goals/state";
-import type { UsageStatistics } from "../../src/session/session-entries";
+import type { UsageStatistics } from "@oh-my-pi/pi-utils/session-entries";
 import type { ToolSession } from "../../src/tools";
 
 type TurnBudget = { total: number | null; spent: number; hard: boolean };

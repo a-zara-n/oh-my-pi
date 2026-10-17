@@ -1,3 +1,5 @@
+import type { RetryFallbackRole } from "@oh-my-pi/pi-utils/session-entries";
+export type { RetryFallbackRole } from "@oh-my-pi/pi-utils/session-entries";
 import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { Model } from "@oh-my-pi/pi-ai";
 import type { ModelRegistry } from "../config/model-registry";
@@ -172,17 +174,6 @@ export function getRetryFallbackChains(settings: Settings): RetryFallbackChains 
 	return expandDefaultRetryFallbackChains(configuredChains, Object.keys(settings.getModelRoles()));
 }
 
-/**
- * A dynamic role pinned to one model selector with its own fallback chain.
- * Subagents own one under `subagent:<id>`; `session_init` persists it so cold
- * revival restores the same routing the spawn installed.
- */
-export interface RetryFallbackRole {
-	/** Selector the role is assigned (the chain's primary). */
-	primary: string;
-	/** Fallback selectors walked after the primary. */
-	chain: string[];
-}
 
 /** Reads the primary and non-empty chain installed for `role`, if any. */
 export function getRetryFallbackRole(settings: Settings, role: string): RetryFallbackRole | undefined {

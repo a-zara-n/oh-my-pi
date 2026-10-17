@@ -23,7 +23,8 @@ import { ASIDE_MESSAGE_COMMIT, ASIDE_MESSAGE_DISCARD, SPECULATIVE_STREAM_SESSION
 import type { AssistantMessage, AssistantMessageEvent, Context, Message, ToolResultMessage } from "@oh-my-pi/pi-ai";
 import { createMockModel, type MockResponse } from "@oh-my-pi/pi-ai/providers/mock";
 import { transformMessages } from "@oh-my-pi/pi-ai/providers/transform-messages";
-import { kCursorExecResolved, setStreamingPartialJson } from "@oh-my-pi/pi-ai/utils/block-symbols";
+import { kCursorExecResolved } from "@oh-my-pi/pi-ai/utils/block-symbols";
+import { setStreamingPartialJson } from "@oh-my-pi/pi-utils/model-data";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import type { HarmonyDetection } from "@oh-my-pi/pi-ai/utils/harmony-leak";
 import * as harmonyLeak from "@oh-my-pi/pi-ai/utils/harmony-leak";

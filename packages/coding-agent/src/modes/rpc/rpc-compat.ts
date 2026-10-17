@@ -1,4 +1,4 @@
-import type { SessionEntry } from "../../session/session-entries";
+import type { SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
 
 /**
  * Slice canonical append-history for the Pi-compatible `get_entries` command.

@@ -6,7 +6,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { getProjectDir, isEnoent, pathIsWithin } from "@oh-my-pi/pi-utils";
 import { ANONYMIZED_REVIEW_NOTE, anonymizeSessionTranscripts } from "../session/session-anonymizer";
-import type { SessionEntry, SessionHeader } from "../session/session-entries";
+import type { SessionEntry, SessionHeader } from "@oh-my-pi/pi-utils/session-entries";
 import { loadSessionFile } from "../session/session-loader";
 import { resolveSessionFileArg } from "./session-arg";
 import { CliUsageError } from "./usage-error";

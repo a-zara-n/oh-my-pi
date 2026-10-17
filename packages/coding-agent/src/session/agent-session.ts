@@ -421,7 +421,7 @@ import {
 	type SessionDumpLiveState,
 } from "./session-dump-format";
 import { collectSubSessions, type SubSession } from "./sub-sessions";
-import type { BranchSummaryEntry, NewSessionOptions } from "./session-entries";
+import type { BranchSummaryEntry, NewSessionOptions } from "@oh-my-pi/pi-utils/session-entries";
 import { SessionHandoff, type SessionHandoffHost } from "./session-handoff";
 import {
 	COMPACTION_CHECK_NONE,

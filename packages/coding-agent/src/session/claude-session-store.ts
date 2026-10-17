@@ -15,7 +15,7 @@ import { isRecord, parseJsonlLenient } from "@oh-my-pi/pi-utils";
 import { resolveClaudePaths } from "../config/claude-paths";
 import { collectForeignJsonRecords, type ForeignJsonRecord, readForeignJsonRecords } from "./foreign-session-jsonl";
 import type { ForeignSessionInfo, ForeignSessionStore } from "./foreign-session-store";
-import type { ModelChangeEntry, SessionMessageEntry } from "./session-entries";
+import type { ModelChangeEntry, SessionMessageEntry } from "@oh-my-pi/pi-utils/session-entries";
 import { SessionManager } from "./session-manager";
 
 interface ClaudeHistoryMetadata {

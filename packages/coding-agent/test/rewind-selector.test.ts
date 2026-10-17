@@ -11,7 +11,7 @@ import { KeybindingsManager } from "@oh-my-pi/pi-tui/app-keybindings";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { type BranchVariantPath, RewindSelectorComponent } from "@oh-my-pi/pi-tui/overlays/rewind-selector";
 import { initTheme } from "@oh-my-pi/pi-tui/theme";
-import type { SessionMessageEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
+import type { SessionMessageEntry } from "@oh-my-pi/pi-utils/session-entries";
 import { setKeybindings, type TUI } from "@oh-my-pi/pi-tui";
 
 const UP = "\x1b[A";

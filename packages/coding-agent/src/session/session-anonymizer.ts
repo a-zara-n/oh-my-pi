@@ -16,7 +16,7 @@ import { logger } from "@oh-my-pi/pi-utils";
 import { getBundledAgentsMap } from "../task/agents";
 import { BUILTIN_TOOL_NAMES, isMCPToolName } from "../tools/builtin-names";
 import { lexShellCommand } from "../tools/shell-tokenize";
-import type { SessionEntry, SessionHeader } from "./session-entries";
+import type { SessionEntry, SessionHeader } from "@oh-my-pi/pi-utils/session-entries";
 import { collectSubSessions, type SubSession } from "./sub-sessions";
 
 type JsonObject = Record<string, unknown>;

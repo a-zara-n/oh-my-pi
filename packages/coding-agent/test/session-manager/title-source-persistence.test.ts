@@ -2,17 +2,15 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import {
-	CURRENT_SESSION_VERSION,
+import { CURRENT_SESSION_VERSION,
 	SESSION_TITLE_SLOT_BYTES,
 	type SessionHeader,
-	TITLE_CHANGE_ENTRY_TYPE,
-} from "@oh-my-pi/pi-coding-agent/session/session-entries";
+	TITLE_CHANGE_ENTRY_TYPE, } from "@oh-my-pi/pi-utils/session-entries";
 import { resetSessionIndexForTests } from "@oh-my-pi/pi-coding-agent/session/session-index";
 import { loadEntriesFromFile } from "@oh-my-pi/pi-coding-agent/session/session-loader";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { FileSessionStorage, type WriteTextAtomicOptions } from "@oh-my-pi/pi-coding-agent/session/session-storage";
-import type { SessionTitleUpdate } from "@oh-my-pi/pi-coding-agent/session/session-title-slot";
+import type { SessionTitleUpdate } from "@oh-my-pi/pi-utils/session-title-slot";
 import { getConfigRootDir, removeSyncWithRetries, setAgentDir } from "@oh-my-pi/pi-utils";
 
 import { makeAssistantMessage } from "./helpers";

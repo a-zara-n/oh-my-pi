@@ -1,4 +1,6 @@
-import type { Usage } from "@oh-my-pi/pi-ai";
+import type { StructuredSubagentSchemaMode } from "@oh-my-pi/pi-utils/session-entries";
+export type { StructuredSubagentSchemaMode } from "@oh-my-pi/pi-utils/session-entries";
+import type { Usage } from "@oh-my-pi/pi-utils/model-data";
 import { isRecord } from "@oh-my-pi/pi-utils";
 import type { ThemeColor } from "../theme/theme";
 import type { ConfiguredThinkingLevel } from "../render/render-utils";
@@ -2165,14 +2167,6 @@ export const taskToolRenderer = {
 /** Source of an agent definition */
 export type AgentSource = "bundled" | "user" | "project";
 
-/**
- * Enforcement policy for a structured subagent output schema.
- *
- * `permissive` preserves legacy retry-budget overrides; `strict` turns every
- * invalid final payload, including an exhausted retry override, into a failed
- * `schema_violation` result.
- */
-export type StructuredSubagentSchemaMode = "permissive" | "strict";
 
 /** Origin of the schema selected for a structured subagent invocation. */
 export type StructuredSubagentSchemaSource = "caller" | "agent" | "session" | "none";

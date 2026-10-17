@@ -5,7 +5,7 @@ import { logger } from "@oh-my-pi/pi-utils";
 import { ADVISOR_TRANSCRIPT_FILENAME, isAdvisorTranscriptName } from "../advisor/transcript-recorder";
 import { resolveExplicitModelRole } from "../config/model-resolver";
 import { assistantTurnProducedOutput } from "../session/messages";
-import { EPHEMERAL_MODEL_CHANGE_ROLE } from "../session/session-entries";
+import { EPHEMERAL_MODEL_CHANGE_ROLE } from "@oh-my-pi/pi-utils/session-entries";
 import { visitEntriesFromFileStream } from "../session/session-loader";
 import { loadBundledAgents } from "../task/agents";
 import { isReadOnlyAgent } from "../task/read-only-policy";

@@ -8,7 +8,7 @@ import {
 	isImageDataUrl,
 } from "./blob-store";
 import { isModelRequestJournalDescriptor, isModelRequestMetadataEntry } from "./model-request-journal";
-import type { FileEntry } from "./session-entries";
+import type { FileEntry } from "@oh-my-pi/pi-utils/session-entries";
 
 const MAX_PERSIST_CHARS = 500_000;
 const TRUNCATION_NOTICE = "\n\n[Session persistence truncated large content]";

@@ -15,7 +15,7 @@ import {
 	finalizeToolCallArgumentsDone,
 } from "@oh-my-pi/pi-ai/providers/openai-shared";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
-import { kStreamingPartialJson } from "@oh-my-pi/pi-ai/utils/block-symbols";
+import { kStreamingPartialJson } from "@oh-my-pi/pi-utils/model-data";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async";

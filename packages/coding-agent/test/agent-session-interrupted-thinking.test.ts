@@ -15,7 +15,7 @@ import {
 	INTERRUPTED_THINKING_MESSAGE_TYPE,
 	USER_INTERRUPT_LABEL,
 } from "@oh-my-pi/pi-coding-agent/session/messages";
-import type { SessionEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
+import type { SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { TempDir } from "@oh-my-pi/pi-utils";

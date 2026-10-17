@@ -53,7 +53,7 @@ import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
 import type { AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import type { SessionEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
+import type { SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
 
 interface RelayData {
 	role: "host" | "guest";

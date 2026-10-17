@@ -1,6 +1,6 @@
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, ToolResultMessage } from "@oh-my-pi/pi-ai";
-import type { SessionEntry } from "./session-entries";
+import type { SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
 
 export const TOOL_EXECUTION_START_CUSTOM_TYPE = "tool_execution_start";
 export const SESSION_EXIT_CUSTOM_TYPE = "session_exit";

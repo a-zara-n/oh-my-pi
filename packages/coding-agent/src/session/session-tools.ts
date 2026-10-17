@@ -48,7 +48,7 @@ import { buildToolNamespacesInfo, resolveCodeMode, type ToolNamespacesInfo } fro
 import { toolReadsSkillUris } from "../system-prompt";
 
 import type { CustomMessage } from "./messages";
-import type { SessionEntry } from "./session-entries";
+import type { SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
 import type { SessionManager } from "./session-manager";
 
 import { cfgDisabledExtensions, cfgSkills, type SkillsSettings } from "../extensibility/settings";

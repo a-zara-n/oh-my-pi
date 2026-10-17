@@ -59,7 +59,8 @@ import {
 	sanitizeOpenAIResponsesAssistantHistoryItemsForReplay,
 	stripOpenAIResponsesComputerLinkedReasoningIdsForReplay,
 } from "../utils";
-import { clearStreamingPartialJson, kStreamingLastParseLen, kStreamingPartialJson } from "../utils/block-symbols";
+import { kStreamingLastParseLen } from "../utils/block-symbols";
+import { clearStreamingPartialJson, kStreamingPartialJson } from "@oh-my-pi/pi-utils/model-data";
 import { hasVisibleAssistantContent } from "../utils/empty-completion-retry";
 import { AssistantMessageEventStream } from "../utils/event-stream";
 import { escapeHarmonyControlTokens, isHarmonyDialectModel } from "../utils/harmony-leak";

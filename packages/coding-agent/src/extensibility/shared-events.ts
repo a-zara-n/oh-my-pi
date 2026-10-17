@@ -18,7 +18,7 @@ import type { AssistantRetryRecovery, ImageContent, TextContent, ToolResultMessa
 import type { Rule } from "../capability/rule";
 import type { Goal } from "@oh-my-pi/pi-tui/tools/goal";
 import type { GoalModeState } from "../goals/state";
-import type { BranchSummaryEntry, CompactionEntry, SessionEntry } from "../session/session-entries";
+import type { BranchSummaryEntry, CompactionEntry, SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
 import type { CacheWarmingAction } from "../session/cache-warmer";
 import type { TodoItem } from "@oh-my-pi/pi-tui/tools/todo";
 

@@ -24,7 +24,7 @@ import {
 } from "@oh-my-pi/pi-coding-agent/internal-urls/registry-helpers";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
-import { CURRENT_SESSION_VERSION, type SessionEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
+import { CURRENT_SESSION_VERSION, type SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { ReadTool } from "@oh-my-pi/pi-coding-agent/tools/read";
 import { removeWithRetries } from "@oh-my-pi/pi-utils";

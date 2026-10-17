@@ -1,11 +1,10 @@
+import { getStreamingPartialJson, setStreamingPartialJson } from "@oh-my-pi/pi-utils/model-data";
 import { describe, expect, it } from "bun:test";
 import { wrapInbandToolStream } from "../src/dialect/owned-stream";
 import type { AssistantMessage, AssistantMessageEvent, ThinkingContent, ToolCall, Usage } from "../src/types";
 import {
-	getStreamingPartialJson,
 	isCursorExecResolved,
 	kCursorExecResolved,
-	setStreamingPartialJson,
 } from "../src/utils/block-symbols";
 import { AssistantMessageEventStream } from "../src/utils/event-stream";
 

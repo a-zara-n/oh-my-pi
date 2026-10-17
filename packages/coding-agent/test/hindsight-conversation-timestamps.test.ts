@@ -4,7 +4,7 @@ import type { HindsightConfig } from "@oh-my-pi/pi-coding-agent/hindsight/config
 import { HindsightSessionState } from "@oh-my-pi/pi-coding-agent/hindsight/state";
 import { extractMessages } from "@oh-my-pi/pi-coding-agent/hindsight/transcript";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
-import type { SessionEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
+import type { SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
 
 function captureBodies(): unknown[] {
 	const bodies: unknown[] = [];

@@ -72,7 +72,7 @@ import {
 } from "./retry-fallback-chains";
 import { describeUsageFallback } from "./retry-fallback-reason";
 import { getLatestCompactionEntry } from "./session-context";
-import { EPHEMERAL_MODEL_CHANGE_ROLE, type SessionEntry } from "./session-entries";
+import { EPHEMERAL_MODEL_CHANGE_ROLE, type SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
 import type { SessionManager } from "./session-manager";
 import { sameMessageContent, sessionMessagePersistenceKey } from "./turn-persistence";
 import { journalJudgmentUsage } from "../judgment";

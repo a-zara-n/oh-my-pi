@@ -19,7 +19,7 @@ import type { Rule } from "../capability/rule";
 import type { Skill } from "../extensibility/skills";
 import type { AgentRegistry } from "../registry/agent-registry";
 import type { LocalProtocolOptions } from "./local-protocol";
-import type { SessionEntry } from "../session/session-entries";
+import type { SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
 import type { ToolSession } from "../tools";
 import type { CoordinationDetails } from "@oh-my-pi/pi-tui/tools/wait";
 import type { ProcReadDetails, ProcWriteDetails } from "@oh-my-pi/pi-tui/tools/proc-render";

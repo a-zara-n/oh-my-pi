@@ -8,7 +8,7 @@ import type {
 	TextContent,
 	ToolCall,
 } from "../types";
-import { getStreamingPartialJson, setStreamingPartialJson } from "./block-symbols";
+import { getStreamingPartialJson, setStreamingPartialJson } from "@oh-my-pi/pi-utils/model-data";
 import { AssistantMessageEventStream } from "./event-stream";
 import glyphNotice from "./glyph-notice.md" with { type: "text" };
 

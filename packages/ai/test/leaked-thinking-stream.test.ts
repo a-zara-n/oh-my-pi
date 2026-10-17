@@ -11,7 +11,7 @@ import type {
 	ThinkingContent,
 	ToolCall,
 } from "@oh-my-pi/pi-ai/types";
-import { getStreamingPartialJson, setStreamingPartialJson } from "@oh-my-pi/pi-ai/utils/block-symbols";
+import { getStreamingPartialJson, setStreamingPartialJson } from "@oh-my-pi/pi-utils/model-data";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { wrapLeakedThinkingStream } from "@oh-my-pi/pi-ai/utils/leaked-thinking-stream";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";

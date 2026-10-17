@@ -260,7 +260,7 @@ remain separate. `replaceQueue("steering" | "followUp", messages)` replaces only
 Extend `AgentMessage` via declaration merging:
 
 ```typescript
-declare module "@oh-my-pi/pi-agent" {
+declare module "@oh-my-pi/pi-utils/agent-messages" {
 	interface CustomAgentMessages {
 		notification: { role: "notification"; text: string; timestamp: number };
 	}

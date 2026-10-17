@@ -1,3 +1,4 @@
+import { clearStreamingPartialJson, kStreamingPartialJson } from "@oh-my-pi/pi-utils/model-data";
 import * as fs from "node:fs";
 import { scheduler } from "node:timers/promises";
 import * as tls from "node:tls";
@@ -67,7 +68,6 @@ import {
 } from "../utils";
 import { createAbortSourceTracker } from "../utils/abort";
 import {
-	clearStreamingPartialJson,
 	copyPerCallContextMessage,
 	type ConversationalUserCarrier,
 	isConversationalUser,
@@ -76,7 +76,6 @@ import {
 	kConversationalUser,
 	kStreamingBlockIndex,
 	kStreamingLastParseLen,
-	kStreamingPartialJson,
 } from "../utils/block-symbols";
 import { withReplaySafeStreamRetry } from "../utils/empty-completion-retry";
 import { AssistantMessageEventStream } from "../utils/event-stream";

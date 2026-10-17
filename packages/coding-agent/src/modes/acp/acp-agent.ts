@@ -65,7 +65,7 @@ import { autosaveApprovedPlan } from "../../plan-mode/plan-autosave";
 import type { AgentSession, AgentSessionEvent } from "../../session/agent-session";
 import { BlobStore, resolveImageDataSync } from "../../session/blob-store";
 import { isSilentAbort, SKILL_PROMPT_MESSAGE_TYPE, USER_INTERRUPT_LABEL } from "../../session/messages";
-import type { UsageStatistics } from "../../session/session-entries";
+import type { UsageStatistics } from "@oh-my-pi/pi-utils/session-entries";
 import type { SessionInfo as StoredSessionInfo } from "../../session/session-listing";
 import { SessionManager } from "../../session/session-manager";
 import { executeAcpBuiltinSlashCommand } from "../../slash-commands/acp-builtins";

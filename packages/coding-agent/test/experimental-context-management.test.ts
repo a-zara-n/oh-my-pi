@@ -14,7 +14,7 @@ import {
 	convertToLlm,
 	SKILL_PROMPT_MESSAGE_TYPE,
 } from "@oh-my-pi/pi-coding-agent/session/messages";
-import type { CompactionEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
+import type { CompactionEntry } from "@oh-my-pi/pi-utils/session-entries";
 import { ExtensionRuntime, loadExtensionFromFactory } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/loader";
 import { ExtensionRunner } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/runner";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";

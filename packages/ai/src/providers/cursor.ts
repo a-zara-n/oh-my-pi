@@ -1,3 +1,4 @@
+import { clearStreamingPartialJson, kStreamingPartialJson } from "@oh-my-pi/pi-utils/model-data";
 import * as fs from "node:fs/promises";
 import http2 from "node:http2";
 import { cursorModelParameters } from "@oh-my-pi/pi-catalog/compat/behavior";
@@ -214,13 +215,11 @@ import type {
 import { normalizeSystemPrompts, normalizeToolCallId } from "../utils";
 import {
 	type CursorExecResolvedCarrier,
-	clearStreamingPartialJson,
 	kCursorExecResolved,
 	kStreamingBlockIndex,
 	kStreamingBlockKind,
 	kStreamingEnvelopeId,
 	kStreamingLastParseLen,
-	kStreamingPartialJson,
 } from "../utils/block-symbols";
 import { deterministicUuid } from "../utils/deterministic-id";
 import { AssistantMessageEventStream } from "../utils/event-stream";

@@ -11,7 +11,7 @@ import {
 	modelMentionDisplayName,
 	modelMentionTag,
 } from "@oh-my-pi/pi-tui/prompt/model-mention-syntax";
-import type { SessionEntry } from "./session-entries";
+import type { SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
 import type { SessionManager } from "./session-manager";
 
 /** Journal entry identifying a model the user authorized for delegation. */

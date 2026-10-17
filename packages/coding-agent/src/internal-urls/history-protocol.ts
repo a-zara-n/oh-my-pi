@@ -36,7 +36,7 @@ import {
 	type PythonExecutionMessage,
 } from "../session/messages";
 import { loadSessionMessagesReadOnly } from "../session/session-loader";
-import type { SessionEntry } from "../session/session-entries";
+import type { SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
 import historyPromptDoc from "../prompts/internal-urls/history.md" with { type: "text" };
 import { artifactsDirsFromRegistry, sessionFilesFromDisk } from "./registry-helpers";
 import type {

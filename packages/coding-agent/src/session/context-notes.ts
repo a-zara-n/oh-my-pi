@@ -1,5 +1,5 @@
 import { prompt } from "@oh-my-pi/pi-utils";
-import type { CustomEntry, SessionEntry } from "./session-entries";
+import type { CustomEntry, SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
 import contextNotesPrompt from "../prompts/system/context-notes.md" with { type: "text" };
 
 export const CONTEXT_NOTES_ENTRY_TYPE = "experimental_context_notes";

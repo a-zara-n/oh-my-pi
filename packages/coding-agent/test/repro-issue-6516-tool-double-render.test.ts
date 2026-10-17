@@ -9,7 +9,7 @@ import { initTheme } from "@oh-my-pi/pi-tui/theme";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { buildSessionContext } from "@oh-my-pi/pi-coding-agent/session/session-context";
-import type { SessionEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
+import type { SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
 

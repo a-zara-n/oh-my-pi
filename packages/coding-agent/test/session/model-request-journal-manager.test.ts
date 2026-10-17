@@ -3,18 +3,17 @@ import { readFile, readdir, writeFile } from "node:fs/promises";
 import * as path from "node:path";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { TempDir } from "@oh-my-pi/pi-utils";
-import type {
-	ModelRequestJournalDescriptor,
+import type { ModelRequestJournalDescriptor,
 	ModelRequestLifecycleRecord,
 	ModelRequestMetadataEntry,
 	ModelUsageEntry,
 	ModelRequestSourceLinkInput,
 	SessionEntry,
 	SessionHeader,
-	SessionMessageEntry,
-} from "../../src/session/session-entries";
+	SessionMessageEntry, } from "@oh-my-pi/pi-utils/session-entries";
 import { loadModelRequestJournalFromFile } from "../../src/session/session-loader";
-import { type ModelRequestSourceInput, SessionManager } from "../../src/session/session-manager";
+import type { ModelRequestSourceInput } from "@oh-my-pi/pi-utils/session-entries";
+import { SessionManager } from "../../src/session/session-manager";
 import { FileSessionStorage } from "../../src/session/session-storage";
 
 const timestamp = "2026-10-16T00:00:00.000Z";

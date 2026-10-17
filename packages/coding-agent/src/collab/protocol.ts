@@ -25,7 +25,7 @@ import {
 } from "@oh-my-pi/pi-wire";
 import type { CollabSessionState } from "@oh-my-pi/pi-tui/status-line/types";
 import type { AgentSessionEvent } from "../session/agent-session";
-import type { SessionEntry, SessionHeader } from "../session/session-entries";
+import type { SessionEntry, SessionHeader } from "@oh-my-pi/pi-utils/session-entries";
 
 export type {
 	CollabPromptDetails,

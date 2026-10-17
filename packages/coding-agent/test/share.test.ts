@@ -10,7 +10,7 @@ import {
 	shareSession,
 } from "../src/export/share";
 import { SecretObfuscator } from "../src/secrets/obfuscator";
-import type { SessionEntry } from "../src/session/session-entries";
+import type { SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
 import type { SessionManager } from "../src/session/session-manager";
 
 const IV_LENGTH = 12;

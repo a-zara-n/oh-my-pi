@@ -118,7 +118,7 @@ import {
 } from "./retry-fallback-chains";
 import { getOpenAiRemoteCompactionPayload } from "./session-context";
 import { formatSessionDumpText } from "./session-dump-format";
-import type { CompactionEntry, SessionEntry } from "./session-entries";
+import type { CompactionEntry, SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
 import { formatSessionHistoryMarkdown } from "./session-history-format";
 import type { SessionManager } from "./session-manager";
 import { buildSessionMetadata } from "./session-metadata";

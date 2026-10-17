@@ -1,7 +1,8 @@
 import { beforeAll, describe, expect, it } from "bun:test";
 import { TreeSelectorComponent } from "@oh-my-pi/pi-tui/overlays/tree-selector";
 import { initTheme } from "@oh-my-pi/pi-tui/theme";
-import type { SessionEntry, SessionTreeNode } from "@oh-my-pi/pi-coding-agent/session/session-entries";
+import type { SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
+import type { SessionTreeNode } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 
 beforeAll(async () => {
 	await initTheme(false, undefined, undefined, "dark", "light");

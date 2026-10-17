@@ -3,7 +3,7 @@ import { type CopyPickSource, CopySelectorComponent } from "@oh-my-pi/pi-tui/ove
 import { assistantText } from "@oh-my-pi/pi-tui/overlays/copy-targets";
 import type { CustomCommandContext } from "../../../../extensibility/custom-commands/types";
 import { isTranscriptEntry } from "../../../../session/session-context";
-import type { SessionEntry } from "../../../../session/session-entries";
+import type { SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
 import type { TextReviewSource } from "@oh-my-pi/pi-tui/overlays/annotation-types";
 
 export type AnnotationSourceKind = "code-review" | "last" | "session" | "file" | "prompt";

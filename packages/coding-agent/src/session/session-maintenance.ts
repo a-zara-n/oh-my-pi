@@ -105,7 +105,7 @@ import {
 } from "./role-models";
 import type { SessionContext } from "./session-context";
 import { buildSessionContext, getLatestCompactionEntry, getOpenAiRemoteCompactionPayload } from "./session-context";
-import type { CompactionEntry, SessionEntry } from "./session-entries";
+import type { CompactionEntry, SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
 import type { SessionManager } from "./session-manager";
 import type { ShakeMode, ShakeResult } from "./shake-types";
 import { resolveSpeculationLeadTokens, SPECULATION_LEAD_MIN_TOKENS } from "./speculation-lead";

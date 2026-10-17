@@ -1,22 +1,11 @@
-import type { AssistantMessage, ImageContent, MessageAttribution, TextContent } from "@oh-my-pi/pi-ai";
+import type { BashExecutionMessage, CustomMessage, CustomMessageContent, CustomMessagePayload, FileMentionMessage, HookMessage, NormalizedCustomMessagePayload, PythonExecutionMessage } from "@oh-my-pi/pi-utils/agent-messages";
+export type { BashExecutionMessage, CustomMessage, CustomMessageContent, CustomMessagePayload, FileMentionMessage, HookMessage, NormalizedCustomMessagePayload, PythonExecutionMessage } from "@oh-my-pi/pi-utils/agent-messages";
+import type { AssistantMessage, ImageContent, MessageAttribution, TextContent } from "@oh-my-pi/pi-utils/model-data";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { COLLAB_PROMPT_MESSAGE_TYPE } from "@oh-my-pi/pi-wire";
-import type { OutputMeta } from "../tools/output-meta";
-import type { BranchSummaryMessage, CompactionSummaryMessage } from "@oh-my-pi/pi-agent-core/compaction/messages";
 
-declare module "@oh-my-pi/pi-agent-core" {
-	interface CustomAgentMessages {
-		bashExecution: BashExecutionMessage;
-		pythonExecution: PythonExecutionMessage;
-		custom: CustomMessage;
-		hookMessage: HookMessage;
-		branchSummary: BranchSummaryMessage;
-		compactionSummary: CompactionSummaryMessage;
-		fileMention: FileMentionMessage;
-	}
-}
 export { COLLAB_PROMPT_MESSAGE_TYPE, type CollabPromptDetails } from "@oh-my-pi/pi-wire";
-export type { BranchSummaryMessage, CompactionSummaryMessage } from "@oh-my-pi/pi-agent-core/compaction/messages";
+export type { BranchSummaryMessage, CompactionSummaryMessage } from "@oh-my-pi/pi-utils/agent-messages";
 
 export const SKILL_PROMPT_MESSAGE_TYPE = "skill-prompt";
 
@@ -35,19 +24,6 @@ export const DEFAULT_CUSTOM_MESSAGE_TYPE = "custom-message";
 /** Custom message carrying a coding request delegated by the live voice model. */
 export const LIVE_DELEGATION_MESSAGE_TYPE = "live-delegation";
 
-/** Content shape accepted for extension-injected messages. */
-export type CustomMessageContent = string | (TextContent | ImageContent)[];
-
-/** Public input accepted by `pi.sendMessage` and `AgentSession.sendCustomMessage`. */
-export type CustomMessagePayload<T = unknown> =
-	| string
-	| Partial<Pick<CustomMessage<T>, "customType" | "content" | "display" | "details" | "attribution">>;
-
-/** Custom message payload after applying runtime defaults. */
-export type NormalizedCustomMessagePayload<T = unknown> = Pick<
-	CustomMessage<T>,
-	"customType" | "content" | "display" | "details" | "attribution"
->;
 
 /** Details persisted on a `/tan` background-dispatch breadcrumb. */
 export interface BackgroundTanDispatchDetails {
@@ -188,86 +164,8 @@ export function normalizeCustomMessagePayload<T = unknown>(
 	};
 }
 
-/**
- * Message type for bash executions via the ! command.
- */
-export interface BashExecutionMessage {
-	role: "bashExecution";
-	command: string;
-	output: string;
-	exitCode: number | undefined;
-	cancelled: boolean;
-	truncated: boolean;
-	/** Images extracted from terminal graphics in the command's stdout. */
-	images?: ImageContent[];
-	meta?: OutputMeta;
-	timestamp: number;
-	/** If true, this message is excluded from LLM context (!! prefix) */
-	excludeFromContext?: boolean;
-}
 
-/**
- * Message type for user-initiated Python executions via the $ command.
- * Shares the same kernel session as eval's Python backend.
- */
-export interface PythonExecutionMessage {
-	role: "pythonExecution";
-	code: string;
-	output: string;
-	exitCode: number | undefined;
-	cancelled: boolean;
-	truncated: boolean;
-	meta?: OutputMeta;
-	timestamp: number;
-	/** If true, this message is excluded from LLM context ($ prefix) */
-	excludeFromContext?: boolean;
-}
 
-/**
- * Message type for extension-injected messages via sendMessage().
- */
-export interface CustomMessage<T = unknown> {
-	role: "custom";
-	customType: string;
-	content: CustomMessageContent;
-	display: boolean;
-	details?: T;
-	/** Who initiated this message for billing/attribution semantics. */
-	attribution?: MessageAttribution;
-	timestamp: number;
-}
-
-/**
- * Legacy hook message type (pre-extensions). Kept for session migration.
- */
-export interface HookMessage<T = unknown> {
-	role: "hookMessage";
-	customType: string;
-	content: CustomMessageContent;
-	display: boolean;
-	details?: T;
-	/** Who initiated this message for billing/attribution semantics. */
-	attribution?: MessageAttribution;
-	timestamp: number;
-}
-
-/**
- * Message type for auto-read file mentions via @filepath syntax.
- */
-export interface FileMentionMessage {
-	role: "fileMention";
-	files: Array<{
-		path: string;
-		content: string;
-		lineCount?: number;
-		/** File size in bytes, if known. */
-		byteSize?: number;
-		/** Why the file contents were omitted from auto-read. */
-		skippedReason?: "tooLarge" | "binary";
-		image?: ImageContent;
-	}>;
-	timestamp: number;
-}
 
 /** True for a `/skill:<name>` prompt the user invoked directly (attribution `user`), as opposed to an agent/autoload injection. */
 export function isUserInvokedSkillPrompt(message: CustomMessage): boolean {

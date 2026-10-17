@@ -18,8 +18,8 @@ import {
 	type WriteTextAtomicOptions,
 } from "@oh-my-pi/pi-coding-agent/session/session-storage";
 import { TempDir } from "@oh-my-pi/pi-utils";
-import type { SessionEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
-import type { SessionTitleUpdate } from "@oh-my-pi/pi-coding-agent/session/session-title-slot";
+import type { SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
+import type { SessionTitleUpdate } from "@oh-my-pi/pi-utils/session-title-slot";
 
 interface DetachableWriter extends SessionStorageWriter {
 	detach(): void;

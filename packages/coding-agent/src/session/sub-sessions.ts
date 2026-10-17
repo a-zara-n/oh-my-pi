@@ -10,7 +10,7 @@ import * as path from "node:path";
 import { isEnoent } from "@oh-my-pi/pi-utils";
 import { isAdvisorTranscriptName } from "../advisor/transcript-recorder";
 import { getAgentTombstonePath } from "../registry/agent-tombstone";
-import type { SessionEntry, SessionHeader } from "./session-entries";
+import type { SessionEntry, SessionHeader } from "@oh-my-pi/pi-utils/session-entries";
 import { loadSessionFile } from "./session-loader";
 
 /** Persisted subagent session transcript, keyed by slash-joined agent path. */

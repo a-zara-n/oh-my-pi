@@ -7,7 +7,7 @@ import { initTheme, theme } from "@oh-my-pi/pi-tui/theme";
 import { getLatestTodoPhasesFromEntries, USER_TODO_EDIT_CUSTOM_TYPE } from "@oh-my-pi/pi-coding-agent/tools/todo";
 import { type TodoPhase, todoToolRenderer } from "@oh-my-pi/pi-tui/tools/todo";
 import { buildSessionContext } from "../src/session/session-context";
-import type { SessionEntry } from "../src/session/session-entries";
+import type { SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
 
 const TIMESTAMP = "2026-07-25T00:00:00.000Z";
 

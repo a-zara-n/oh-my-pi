@@ -6,7 +6,8 @@ import { RpcWordPredictor } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-mode";
 import type { TextPrediction } from "@oh-my-pi/pi-coding-agent/predict/client";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { FileSessionStorage } from "@oh-my-pi/pi-coding-agent/session/session-storage";
-import type { SessionEntry, SessionTreeNode } from "@oh-my-pi/pi-coding-agent/session/session-entries";
+import type { SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
+import type { SessionTreeNode } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 
 function customEntry(id: string, parentId: string | null): SessionEntry {
 	return { type: "custom", id, parentId, timestamp: new Date().toISOString(), customType: "probe" };

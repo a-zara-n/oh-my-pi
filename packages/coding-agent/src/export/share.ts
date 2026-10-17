@@ -27,7 +27,7 @@ import { $ } from "bun";
 import { obfuscateToolArguments } from "../secrets/message-transform";
 import type { SecretObfuscator } from "../secrets/obfuscator";
 import { SecretValueSet } from "../secrets/placeholder";
-import { type SessionEntry, type SessionHeader, TITLE_CHANGE_ENTRY_TYPE } from "../session/session-entries";
+import { type SessionEntry, type SessionHeader, TITLE_CHANGE_ENTRY_TYPE } from "@oh-my-pi/pi-utils/session-entries";
 import type { SessionManager } from "../session/session-manager";
 import type { OutputMeta } from "@oh-my-pi/pi-tui/tools/output-meta";
 import type { SubSession } from "../session/sub-sessions";

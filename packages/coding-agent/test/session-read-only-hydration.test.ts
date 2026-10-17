@@ -1,11 +1,9 @@
 import { describe, expect, it, spyOn } from "bun:test";
 import * as path from "node:path";
 import { BlobStore } from "@oh-my-pi/pi-coding-agent/session/blob-store";
-import type {
-	CompactionEntry,
+import type { CompactionEntry,
 	FileEntry,
-	SessionMessageEntry,
-} from "@oh-my-pi/pi-coding-agent/session/session-entries";
+	SessionMessageEntry, } from "@oh-my-pi/pi-utils/session-entries";
 import { formatSessionHistoryMarkdown } from "@oh-my-pi/pi-coding-agent/session/session-history-format";
 import {
 	loadSessionMessagesReadOnly,

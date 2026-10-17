@@ -1,3 +1,4 @@
+import { kStreamingPartialJson } from "@oh-my-pi/pi-utils/model-data";
 import { describe, expect, it } from "bun:test";
 import { buildResponsesDeltaInput } from "@oh-my-pi/pi-ai/providers/openai-shared";
 import {
@@ -5,7 +6,6 @@ import {
 	kStreamingBlockIndex,
 	kStreamingBlockKind,
 	kStreamingLastParseLen,
-	kStreamingPartialJson,
 } from "@oh-my-pi/pi-ai/utils/block-symbols";
 import type { ResponseInputItem } from "../src/providers/openai-responses-wire";
 

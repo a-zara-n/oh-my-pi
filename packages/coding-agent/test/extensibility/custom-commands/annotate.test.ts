@@ -34,7 +34,7 @@ import {
 	type ReviewTargetUI,
 } from "@oh-my-pi/pi-coding-agent/extensibility/custom-commands/bundled/review/target";
 import { buildTextReviewPrompt } from "@oh-my-pi/pi-coding-agent/extensibility/custom-commands/bundled/annotate/text-review";
-import type { SessionMessageEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
+import type { SessionMessageEntry } from "@oh-my-pi/pi-utils/session-entries";
 import type {
 	CodeReviewAnnotation,
 	TextReviewAnnotation,

@@ -1,3 +1,4 @@
+import { clearStreamingPartialJson, kStreamingPartialJson } from "@oh-my-pi/pi-utils/model-data";
 /**
  * Amazon Bedrock Converse Stream provider.
  *
@@ -37,10 +38,8 @@ import type {
 import { isRecord, normalizeSystemPrompts, normalizeToolCallId, resolveCacheRetention } from "../utils";
 import { resolveAwsAmbientRegion } from "../utils/aws-profile";
 import {
-	clearStreamingPartialJson,
 	kStreamingBlockIndex,
 	kStreamingLastParseLen,
-	kStreamingPartialJson,
 } from "../utils/block-symbols";
 import { AssistantMessageEventStream } from "../utils/event-stream";
 import type { RawHttpRequestDump } from "../utils/http-inspector";

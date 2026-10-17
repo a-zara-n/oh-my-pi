@@ -13,16 +13,14 @@ import {
 } from "./blob-store";
 import { buildSessionContext } from "./session-context";
 import { validateModelRequestJournal, type ModelRequestJournalValidation } from "./model-request-journal";
-import type { FileEntry, RawFileEntry, SessionEntry, SessionHeader } from "./session-entries";
+import type { FileEntry, RawFileEntry, SessionEntry, SessionHeader } from "@oh-my-pi/pi-utils/session-entries";
 import { migrateToCurrentVersion } from "./session-migrations";
 import { isExternalizableImagePosition, isPersistenceTruncatedString } from "./session-persistence";
 import { FileSessionStorage, type SessionStorage } from "./session-storage";
-import {
-	parseTitleSlotFromContent,
+import { parseTitleSlotFromContent,
 	parseTitleSlotLine,
 	type SessionTitleUpdate,
-	titleUpdateFromSlot,
-} from "./session-title-slot";
+	titleUpdateFromSlot, } from "@oh-my-pi/pi-utils/session-title-slot";
 
 const LF = new Uint8Array([0x0a]);
 

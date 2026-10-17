@@ -4,7 +4,7 @@ import { stringProperty } from "@oh-my-pi/pi-utils";
 import { stripXdUrlPrefix } from "@oh-my-pi/pi-tui/tools/xd-url";
 import type { CompletedRewindState } from "../tools/checkpoint";
 import { writeDeviceDispatch } from "../tools/resolve";
-import type { SessionEntry } from "./session-entries";
+import type { SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
 
 /** Extracts text from custom message content. */
 export function customMessageContentText(content: string | (TextContent | ImageContent)[]): string {

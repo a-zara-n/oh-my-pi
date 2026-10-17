@@ -25,7 +25,7 @@ import { readModelMentions } from "../src/session/model-mentions";
 import { anonymizeSessionTranscripts, SessionAnonymizer } from "../src/session/session-anonymizer";
 import { buildSessionContext, isTranscriptEntry } from "../src/session/session-context";
 import { formatSessionDumpText } from "../src/session/session-dump-format";
-import type { ModelRequestMetadataEntry, SessionEntry, SessionHeader } from "../src/session/session-entries";
+import type { ModelRequestMetadataEntry, SessionEntry, SessionHeader } from "@oh-my-pi/pi-utils/session-entries";
 import { formatSessionHistoryMarkdown } from "../src/session/session-history-format";
 import { readSessionInfo } from "../src/session/session-listing";
 import { SessionManager } from "../src/session/session-manager";

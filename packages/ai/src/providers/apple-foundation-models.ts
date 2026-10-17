@@ -26,7 +26,8 @@ import type {
 	ToolChoice,
 } from "../types";
 import { normalizeSystemPrompts } from "../utils";
-import { clearStreamingPartialJson, kStreamingLastParseLen, kStreamingPartialJson } from "../utils/block-symbols";
+import { kStreamingLastParseLen } from "../utils/block-symbols";
+import { clearStreamingPartialJson, kStreamingPartialJson } from "@oh-my-pi/pi-utils/model-data";
 import { AssistantMessageEventStream } from "../utils/event-stream";
 import { decodeFoundationModelsArguments, toFoundationModelsSchema, toolWireSchema } from "../utils/schema";
 import { transformMessages } from "./transform-messages";

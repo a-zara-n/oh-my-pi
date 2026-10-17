@@ -14,7 +14,7 @@ import {
 	type ProtocolHandler,
 } from "@oh-my-pi/pi-coding-agent/internal-urls";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
-import type { SessionEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
+import type { SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
 import * as sshFileTransfer from "@oh-my-pi/pi-coding-agent/ssh/file-transfer";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { formatOutputNotice } from "@oh-my-pi/pi-tui/tools/output-meta";

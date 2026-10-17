@@ -4,15 +4,11 @@
  * Extends the base AgentMessage type with coding-agent specific message types,
  * and provides a transformer to convert them to LLM-compatible messages.
  */
-import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
+import type { AgentMessage, BashExecutionMessage, CustomMessage, FileMentionMessage, HookMessage, PythonExecutionMessage } from "@oh-my-pi/pi-utils/agent-messages";
+export type { BranchSummaryMessage, CompactionSummaryMessage, CustomMessageContent, CustomMessagePayload, NormalizedCustomMessagePayload, BashExecutionMessage, PythonExecutionMessage, CustomMessage, HookMessage, FileMentionMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import {
 	isUserInterruptAbort,
 	isCustomMessageContent,
-	type BashExecutionMessage,
-	type PythonExecutionMessage,
-	type CustomMessage,
-	type HookMessage,
-	type FileMentionMessage,
 	isUserInvokedSkillPrompt,
 	isUserTurnInitiator,
 } from "@oh-my-pi/pi-tui/chat/messages";
@@ -24,9 +20,6 @@ export {
 	VIBE_MODE_CONTEXT_MESSAGE_TYPE,
 	DEFAULT_CUSTOM_MESSAGE_TYPE,
 	LIVE_DELEGATION_MESSAGE_TYPE,
-	type CustomMessageContent,
-	type CustomMessagePayload,
-	type NormalizedCustomMessagePayload,
 	type BackgroundTanDispatchDetails,
 	type SkillPromptDetails,
 	SILENT_ABORT_MARKER,
@@ -38,11 +31,6 @@ export {
 	resolveAbortLabel,
 	isCustomMessageContent,
 	normalizeCustomMessagePayload,
-	type BashExecutionMessage,
-	type PythonExecutionMessage,
-	type CustomMessage,
-	type HookMessage,
-	type FileMentionMessage,
 	isUserInvokedSkillPrompt,
 	isUserTurnInitiator,
 } from "@oh-my-pi/pi-tui/chat/messages";
@@ -51,7 +39,7 @@ import {
 	registerMessageCacheInvalidator,
 } from "@oh-my-pi/pi-agent-core/compaction/message-cache";
 import { convertMessageToLlm } from "@oh-my-pi/pi-agent-core/compaction/messages";
-import type { AssistantMessage, ImageContent, Message, TextContent, UserMessage } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, ImageContent, Message, TextContent, UserMessage } from "@oh-my-pi/pi-utils/model-data";
 import { copyPerCallContextMessage } from "@oh-my-pi/pi-ai/utils/block-symbols";
 import { isRecord, logger, prompt } from "@oh-my-pi/pi-utils";
 import { COLLAB_PROMPT_MESSAGE_TYPE } from "@oh-my-pi/pi-wire";
@@ -60,8 +48,6 @@ import { formatTitleConversationContext, type TitleConversationTurn } from "../t
 import { stripXdUrlPrefix } from "@oh-my-pi/pi-tui/tools/xd-url";
 
 export {
-	type BranchSummaryMessage,
-	type CompactionSummaryMessage,
 	createBranchSummaryMessage,
 	createCompactionSummaryMessage,
 	createCustomMessage,

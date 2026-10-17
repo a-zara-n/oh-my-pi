@@ -4,7 +4,7 @@ import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import * as snapcompact from "@oh-my-pi/snapcompact";
 import { type CompactionSummaryMessage, INTERRUPTED_THINKING_MESSAGE_TYPE } from "../../src/session/messages";
 import { buildSessionContext, type StrippedToolCallsMarker } from "../../src/session/session-context";
-import type { SessionEntry } from "../../src/session/session-entries";
+import type { SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
 
 const timestamp = "2026-07-09T00:00:00.000Z";
 

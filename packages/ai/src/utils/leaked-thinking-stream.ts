@@ -42,13 +42,8 @@ import type {
 	ThinkingContent,
 	ToolCall,
 } from "../types";
-import {
-	clearStreamingPartialJson,
-	copyCursorExecResolved,
-	getStreamingPartialJson,
-	type StreamingPartialJsonCarrier,
-	setStreamingPartialJson,
-} from "./block-symbols";
+import { copyCursorExecResolved } from "./block-symbols";
+import { clearStreamingPartialJson, getStreamingPartialJson, setStreamingPartialJson, type StreamingPartialJsonCarrier } from "@oh-my-pi/pi-utils/model-data";
 import { AssistantMessageEventStream } from "./event-stream";
 
 type StreamingToolCall = ToolCall & StreamingPartialJsonCarrier;

@@ -12,7 +12,7 @@ import {
 } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, Context, Message } from "@oh-my-pi/pi-ai";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
-import { setStreamingPartialJson } from "@oh-my-pi/pi-ai/utils/block-symbols";
+import { setStreamingPartialJson } from "@oh-my-pi/pi-utils/model-data";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import * as jsContextManager from "@oh-my-pi/pi-coding-agent/eval/js/context-manager";

@@ -18,7 +18,7 @@ import {
 } from "@oh-my-pi/pi-tui/status-line/context-usage";
 import type { ContextUsageBreakdown, SessionStats } from "./agent-session-types";
 import { getLatestCompactionEntry } from "./session-context";
-import type { SessionEntry } from "./session-entries";
+import type { SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
 import type { SessionManager } from "./session-manager";
 import { cfgSkillful } from "./settings";
 

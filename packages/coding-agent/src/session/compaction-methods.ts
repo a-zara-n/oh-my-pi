@@ -1,5 +1,6 @@
 /** Ordered automatic context-maintenance methods and their settings metadata. */
 
+import type { CompactionMethod } from "@oh-my-pi/pi-utils/session-entries";
 import {
 	type CompactionSettings as EngineCompactionSettings,
 	shouldUseProviderNativeCompaction,
@@ -37,8 +38,7 @@ export const COMPACTION_METHOD_CHOICES = [
 	},
 ] as const;
 
-/** One selectable automatic context-maintenance method. */
-export type CompactionMethod = (typeof COMPACTION_METHOD_CHOICES)[number]["value"];
+export type { CompactionMethod } from "@oh-my-pi/pi-utils/session-entries";
 
 /** Default fallback order: server-native first, portable summary last. */
 export const DEFAULT_COMPACTION_METHOD_ORDER: CompactionMethod[] = [

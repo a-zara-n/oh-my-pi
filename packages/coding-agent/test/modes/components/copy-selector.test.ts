@@ -11,7 +11,7 @@ import { KeybindingsManager } from "@oh-my-pi/pi-tui/app-keybindings";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { CopySelectorComponent, type CopyPickSource } from "@oh-my-pi/pi-tui/overlays/copy-selector";
 import { initTheme, theme } from "@oh-my-pi/pi-tui/theme";
-import type { SessionMessageEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
+import type { SessionMessageEntry } from "@oh-my-pi/pi-utils/session-entries";
 import { setKeybindings, type TUI } from "@oh-my-pi/pi-tui";
 
 const UP = "\x1b[A";

@@ -1,4 +1,4 @@
-export type { UsageStatistics } from "../../session/session-entries";
+export type { UsageStatistics } from "@oh-my-pi/pi-utils/session-entries";
 export type { ReadonlySessionManager } from "../../session/session-manager";
 export * from "./loader";
 export * from "./runner";

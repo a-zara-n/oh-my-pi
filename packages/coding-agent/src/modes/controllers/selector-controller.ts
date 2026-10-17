@@ -66,7 +66,8 @@ import type { ForeignSessionInfo, ForeignSessionSource } from "../../session/for
 import { previewModelCompactionPoint, setModelCompactionPoint } from "../../session/model-compaction-threshold";
 import { isTranscriptEntry, type TranscriptEntry } from "../../session/session-context";
 import { isUserRequestEntry } from "@oh-my-pi/pi-tui/chat/transcript-entry";
-import type { SessionEntry, SessionTreeNode } from "../../session/session-entries";
+import type { SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
+import type { SessionTreeNode } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import { readSessionInfo, type SessionInfo } from "../../session/session-listing";
 import { SessionManager } from "../../session/session-manager";
 import { loadPinnedSessionIds } from "../../session/session-pins";

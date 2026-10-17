@@ -18,7 +18,7 @@ import { COLLAB_PROTO, type CollabFrame, parseCollabLink } from "@oh-my-pi/pi-co
 import { CollabSocket } from "@oh-my-pi/pi-coding-agent/collab/relay-client";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
-import type { SessionEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
+import type { SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
 import { installInMemoryRelay, uninstallInMemoryRelay } from "./helpers/in-memory-relay";
 
 // In-memory transport: shared FakeWebSocket + InMemoryRelay harness (see

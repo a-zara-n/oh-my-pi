@@ -1,6 +1,6 @@
 import type { AssistantMessage, ImageContent } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
-import { getStreamingPartialJson } from "@oh-my-pi/pi-ai/utils/block-symbols";
+import { getStreamingPartialJson } from "@oh-my-pi/pi-utils/model-data";
 import { type Component, Loader, TERMINAL } from "@oh-my-pi/pi-tui";
 import { formatDuration, isRecord, logger, prompt, sanitizeText } from "@oh-my-pi/pi-utils";
 import { INTENT_FIELD } from "@oh-my-pi/pi-wire";

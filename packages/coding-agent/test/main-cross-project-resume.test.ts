@@ -17,7 +17,7 @@ import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import * as pluginHelpers from "@oh-my-pi/pi-coding-agent/discovery/helpers";
 import { createSessionManager, runRootCommand } from "@oh-my-pi/pi-coding-agent/main";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
-import type { SessionHeader } from "@oh-my-pi/pi-coding-agent/session/session-entries";
+import type { SessionHeader } from "@oh-my-pi/pi-utils/session-entries";
 import type { SessionInfo } from "@oh-my-pi/pi-coding-agent/session/session-listing";
 import * as sessionListingModule from "@oh-my-pi/pi-coding-agent/session/session-listing";
 import { loadEntriesFromFile } from "@oh-my-pi/pi-coding-agent/session/session-loader";

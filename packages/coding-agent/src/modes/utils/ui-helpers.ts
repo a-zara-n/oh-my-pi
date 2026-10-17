@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, ImageContent, Usage } from "@oh-my-pi/pi-ai";
-import { getStreamingPartialJson } from "@oh-my-pi/pi-ai/utils/block-symbols";
+import { getStreamingPartialJson } from "@oh-my-pi/pi-utils/model-data";
 import { type Component, Spacer, Text } from "@oh-my-pi/pi-tui";
 import { StatusNotice } from "@oh-my-pi/pi-tui/chrome/status-notice";
 import { QueuedMessagesBand } from "@oh-my-pi/pi-tui/prompt/queued-messages";

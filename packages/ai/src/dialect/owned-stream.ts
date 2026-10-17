@@ -5,13 +5,8 @@ import type {
 	ThinkingContent,
 	ToolCall,
 } from "../types";
-import {
-	clearStreamingPartialJson,
-	copyCursorExecResolved,
-	getStreamingPartialJson,
-	type StreamingPartialJsonCarrier,
-	setStreamingPartialJson,
-} from "../utils/block-symbols";
+import { copyCursorExecResolved } from "../utils/block-symbols";
+import { clearStreamingPartialJson, getStreamingPartialJson, setStreamingPartialJson, type StreamingPartialJsonCarrier } from "@oh-my-pi/pi-utils/model-data";
 import { AssistantMessageEventStream } from "../utils/event-stream";
 import { INVALID_ARGUMENTS_RAW_LIMIT, invalidToolCallArguments } from "../utils/tool-call-arguments";
 import { buildStringArgsResolver } from "./coercion";

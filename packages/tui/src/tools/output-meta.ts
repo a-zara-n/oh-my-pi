@@ -1,85 +1,9 @@
+import type { DiagnosticMeta, LimitsMeta, OutputMeta, SourceMeta, TruncationMeta } from "@oh-my-pi/pi-utils/agent-messages";
+export type { DiagnosticMeta, LimitsMeta, OutputMeta, SourceMeta, TruncationMeta } from "@oh-my-pi/pi-utils/agent-messages";
 import type { Theme } from "../theme/theme";
 import { formatBytes, wrapBrackets } from "../render/render-utils";
-import type { OutputArtifactError } from "./streaming-output";
 import { formatGroupedFiles } from "./grouped-file-output";
 
-/**
- * Truncation metadata for the output notice.
- */
-export interface TruncationMeta {
-	direction: "head" | "tail" | "middle";
-	truncatedBy: "lines" | "bytes" | "middle";
-	totalLines: number;
-	totalBytes: number;
-	outputLines: number;
-	outputBytes: number;
-	maxBytes?: number;
-	/** Line range shown (1-indexed, inclusive). Omitted for middle elision. */
-	shownRange?: { start: number; end: number };
-	/** Head/tail line ranges shown when direction === "middle". */
-	headRange?: { start: number; end: number };
-	tailRange?: { start: number; end: number };
-	/** Bytes elided from the middle. */
-	elidedBytes?: number;
-	/** Lines elided from the middle. */
-	elidedLines?: number;
-	/** Artifact ID if full output was saved */
-	artifactId?: string;
-	/** Bytes the artifact cap dropped from the saved file's middle; the artifact is then a head/tail sample. */
-	artifactElidedBytes?: number;
-	/** Next offset for pagination (head truncation only) */
-	nextOffset?: number;
-	/**
-	 * The single shown line is a byte-capped preview of one oversized line, not
-	 * a complete line. `outputBytes`/`totalBytes` are the preview vs full line
-	 * size; renders a distinct "partial" notice instead of a line range.
-	 */
-	partialLine?: boolean;
-}
-
-/**
- * Source resolution info for the output.
- */
-export type SourceMeta =
-	| { type: "path"; value: string }
-	| { type: "url"; value: string }
-	| { type: "internal"; value: string }
-	/** A complete aggregate report, whose entries may contain incomplete source captures. */
-	| { type: "report"; value: string };
-
-/**
- * LSP diagnostic info (for edit/write tools).
- */
-export interface DiagnosticMeta {
-	summary: string;
-	messages: string[];
-}
-
-/**
- * Limit-specific notices.
- */
-export interface LimitsMeta {
-	matchLimit?: { reached: number; suggestion: number };
-	/** `suggestion` is omitted when the tool is already at its hard cap, so no larger usable limit exists to advise. */
-	resultLimit?: { reached: number; suggestion?: number };
-	headLimit?: { reached: number; suggestion: number };
-	/** `unit` may be absent in sessions persisted before it was recorded. */
-	columnTruncated?: { maxColumn: number; unit?: "bytes" | "chars"; artifactId?: string; artifactElidedBytes?: number };
-}
-
-/**
- * Structured metadata for tool outputs.
- */
-export interface OutputMeta {
-	truncation?: TruncationMeta;
-	/** Capture failure of this output itself; aggregate reports keep source failures on their entries. */
-	artifactError?: OutputArtifactError;
-	source?: SourceMeta;
-	/** The output is a bounded page of session artifact storage its `source` re-reads with line selectors; spill-to-artifact skips it. */
-	pagedSource?: true;
-	diagnostics?: DiagnosticMeta;
-	limits?: LimitsMeta;
-}
 
 // Regex: split on the first `:digits:digits` boundary to separate path from the rest
 const DIAG_PATH_RE = /^(.+?):(\d+:\d+\s+.*)$/;

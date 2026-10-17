@@ -10,7 +10,7 @@
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
 import { unpackEnvelope } from "@oh-my-pi/pi-coding-agent/collab/protocol";
-import type { SessionEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
+import type { SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
 import type { FakeWebSocket, InMemoryRelay } from "./in-memory-relay";
 
 export const HIGH_WATER_MARK = 64 * 1024;

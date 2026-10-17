@@ -19,7 +19,7 @@ import {
 	kStreamingPartialJson,
 	type StreamingPartialJsonCarrier,
 	setStreamingPartialJson,
-} from "@oh-my-pi/pi-ai/utils/block-symbols";
+} from "@oh-my-pi/pi-utils/model-data";
 import { parseToolCallArguments } from "@oh-my-pi/pi-ai/utils/tool-call-arguments";
 import { parseStreamingJsonThrottled, readSseJson } from "@oh-my-pi/pi-utils";
 

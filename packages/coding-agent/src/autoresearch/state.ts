@@ -1,4 +1,4 @@
-import type { SessionEntry } from "../session/session-entries";
+import type { SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
 import { inferMetricUnitFromName } from "./helpers";
 import { currentResults, findBaselineMetric, isBetter } from "@oh-my-pi/pi-tui/apps/autoresearch-data";
 import type { RunRow, SessionRow } from "./storage";

@@ -1,8 +1,5 @@
-/** Item identity exposed to a workpool worker's incremental `yield` tool. */
-export interface WorkPoolYieldItem {
-	id: string;
-	index: number;
-}
+import type { WorkPoolYieldItem } from "@oh-my-pi/pi-utils/session-entries";
+export type { WorkPoolYieldItem } from "@oh-my-pi/pi-utils/session-entries";
 
 /** Build the per-batch output schema used to assemble one yield per item. */
 export function buildWorkPoolOutputSchema(items: WorkPoolYieldItem[]): Record<string, unknown> {

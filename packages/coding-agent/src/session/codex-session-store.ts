@@ -14,7 +14,7 @@ import type {
 import { isRecord } from "@oh-my-pi/pi-utils";
 import { readForeignJsonRecords } from "./foreign-session-jsonl";
 import type { ForeignSessionInfo, ForeignSessionStore } from "./foreign-session-store";
-import type { CompactionEntry, ModelChangeEntry, SessionEntry, SessionMessageEntry } from "./session-entries";
+import type { CompactionEntry, ModelChangeEntry, SessionEntry, SessionMessageEntry } from "@oh-my-pi/pi-utils/session-entries";
 import { SessionManager } from "./session-manager";
 
 interface CodexThreadRow {

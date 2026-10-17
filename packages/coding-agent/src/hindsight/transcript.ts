@@ -11,7 +11,7 @@
  */
 
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
-import type { SessionEntry } from "../session/session-entries";
+import type { SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
 import { type HindsightMessage, hasSubstantiveContent } from "./content";
 
 export interface ReadonlySessionManagerLike {

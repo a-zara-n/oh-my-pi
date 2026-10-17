@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { MemorySessionStorage } from "@oh-my-pi/pi-coding-agent/session/session-storage";
-import { serializeTitleSlot } from "@oh-my-pi/pi-coding-agent/session/session-title-slot";
+import { serializeTitleSlot } from "@oh-my-pi/pi-utils/session-title-slot";
 
 describe("MemorySessionStorage indexed mirror", () => {
 	test("explicitly rejects managed durability while preserving ordinary storage", async () => {

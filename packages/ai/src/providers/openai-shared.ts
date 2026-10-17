@@ -1,3 +1,4 @@
+import { clearStreamingPartialJson, kStreamingPartialJson } from "@oh-my-pi/pi-utils/model-data";
 import { toClinePassWireModelId } from "@oh-my-pi/pi-catalog/cline-pass-model-id";
 import type { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { toFirepassWireModelId, toFireworksWireModelId } from "@oh-my-pi/pi-catalog/fireworks-model-id";
@@ -79,10 +80,8 @@ import {
 	stripUnpairedOpenAIResponsesComputerReasoningIdsForReplay,
 } from "../utils";
 import {
-	clearStreamingPartialJson,
 	kStreamingArgumentsDone,
 	kStreamingLastParseLen,
-	kStreamingPartialJson,
 } from "../utils/block-symbols";
 import { hasVisibleAssistantContent } from "../utils/empty-completion-retry";
 import type { AssistantMessageEventStream } from "../utils/event-stream";

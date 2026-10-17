@@ -3,7 +3,7 @@ import * as path from "node:path";
 import type { AgentState } from "@oh-my-pi/pi-agent-core";
 import { APP_NAME, isEnoent } from "@oh-my-pi/pi-utils";
 import { getResolvedThemeColors, getThemeExportColors } from "@oh-my-pi/pi-tui/theme";
-import type { SessionEntry, SessionHeader } from "../../session/session-entries";
+import type { SessionEntry, SessionHeader } from "@oh-my-pi/pi-utils/session-entries";
 import { SessionManager } from "../../session/session-manager";
 import { collectSubSessions, type SubSession } from "../../session/sub-sessions";
 import type { ExportThemeNames } from "./args";

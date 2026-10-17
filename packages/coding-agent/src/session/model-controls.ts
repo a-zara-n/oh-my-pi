@@ -43,7 +43,7 @@ import type { EditMode } from "@oh-my-pi/pi-tui/tools/edit";
 import type { AgentSessionEvent } from "./agent-session-events";
 import type { ModelCycleResult, ResolvedRoleModel, RoleModelCycle, RoleModelCycleResult } from "./agent-session-types";
 import { formatRoleModelValue, resolveRoleModelFull } from "./role-models";
-import { EPHEMERAL_MODEL_CHANGE_ROLE } from "./session-entries";
+import { EPHEMERAL_MODEL_CHANGE_ROLE } from "@oh-my-pi/pi-utils/session-entries";
 import type { SessionManager } from "./session-manager";
 
 import { cfgDefaultThinkingLevel, cfgProvidersFireworksTier } from "./settings";
