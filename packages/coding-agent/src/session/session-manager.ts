@@ -2915,6 +2915,7 @@ export class SessionManager {
 				try {
 					if (cell) {
 						await cell.moveTo(resolvedCwd, nextSessionDir);
+						this.#expectedDiskSize = cell.existsSync(newSessionFile) ? cell.statSync(newSessionFile).size : null;
 						sessionMoved = sessionFileExisted && sessionPathChanged;
 					} else if (sessionFileExisted && sessionPathChanged) {
 						// The drain awaited: re-check that both paths still hold the
@@ -2960,6 +2961,7 @@ export class SessionManager {
 						try {
 							if (cell) {
 								await cell.moveTo(this.#cwd, path.dirname(oldSessionFile));
+								this.#expectedDiskSize = cell.existsSync(oldSessionFile) ? cell.statSync(oldSessionFile).size : null;
 							} else {
 								try {
 									await fs.promises.rename(newSessionFile, oldSessionFile);
@@ -2990,7 +2992,7 @@ export class SessionManager {
 				// #expectedDiskSize still applies; without a rename the destination
 				// holds no bytes this manager wrote, so a recreate-from-memory must
 				// publish against an absent file rather than a stale size.
-				if (sessionPathChanged && !sessionMoved) this.#expectedDiskSize = null;
+				if (!cell && sessionPathChanged && !sessionMoved) this.#expectedDiskSize = null;
 				this.#artifactManager = null;
 				this.#artifactManagerSessionFile = null;
 				// Path is repointed; hot-path appends may use `#sessionFile` again.
