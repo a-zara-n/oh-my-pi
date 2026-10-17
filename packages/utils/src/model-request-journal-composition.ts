@@ -2968,11 +2968,13 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 		next.#closed = true;
 	}
 	async newSession(options?: NewSessionOptions): Promise<string> {
+		this.#assertBindingAcceptsWork();
 		await this.close();
 		this.resetToNewSession(options);
 		return this.#sessionFile;
 	}
 	async moveTo(newCwd: string, targetSessionDir?: string): Promise<void> {
+		this.#assertBindingAcceptsWork();
 		this.#assertLive();
 		if (this.#header.modelRequestJournal || this.#header.modelRequestRegistry || this.#relocating) unavailable();
 		const resolvedCwd = path.resolve(newCwd);
