@@ -37,7 +37,7 @@ import { type Theme, theme } from "@oh-my-pi/pi-tui/theme";
 import type { AsyncJobSnapshot } from "../../session/agent-session";
 import { MAIN_AGENT_ID } from "../../registry/agent-registry";
 import type { SessionManager } from "../../session/session-manager";
-import { journalOuterWorkFromExecution, type JournalOuterWorkScope } from "../../session/journal-outer-work";
+import { journalOuterWorkFromExecution } from "../../session/internal/outer-work";
 import { addFileDeleteFallback, addFileWriteFallback } from "../../tools/file-write-fallback";
 import type { BranchHandler, NavigateTreeHandler, NewSessionHandler } from "../session-handler-types";
 import { accumulateToolCallResult, buildAggregatedToolCallResult } from "../shared-events";
@@ -487,7 +487,7 @@ interface ToolRegistrationScope {
 }
 
 interface HandlerJournalOuterWorkScope {
-	readonly outerWork: JournalOuterWorkScope;
+	readonly outerWork: ReturnType<typeof journalOuterWorkFromExecution>;
 }
 
 /** Identity reported by a session that is not a subagent and received no explicit identity. */

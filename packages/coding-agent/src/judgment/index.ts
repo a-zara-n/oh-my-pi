@@ -54,7 +54,7 @@ import { formatModelStringWithRouting, resolveRoleChain, type RoleChainCandidate
 import { roleCandidatePool } from "../config/model-roles";
 import type { Settings } from "../config/settings";
 import type { SessionManager } from "../session/session-manager";
-import { journalOuterWorkFromExecution } from "../session/journal-outer-work";
+import { journalOuterWorkFromExecution } from "../session/internal/outer-work";
 import { getTinyLocalModelSpec } from "../tiny/models";
 import localPromptTemplate from "../prompts/system/judgment-local.md" with { type: "text" };
 import { tinyModelClient } from "../tiny/title-client";
