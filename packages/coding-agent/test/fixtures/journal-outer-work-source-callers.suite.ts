@@ -50,7 +50,6 @@ import { R11JournalFixture } from "../../../utils/test/fixtures/model-request-jo
 import { createInMemoryAuthStorage } from "../helpers/agent-session-setup";
 import {
 	expectBindingAcceptsOuterWork,
-	expectBindingRejectsOuterWork,
 	closedSessionIds,
 	openManagedAgentHarness,
 	withManagedExecution,

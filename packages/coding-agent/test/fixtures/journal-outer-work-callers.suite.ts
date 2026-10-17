@@ -1,7 +1,7 @@
 import "../../../../scripts/audit-library-bootstrap";
 import { describe, expect, test } from "bun:test";
-import { beginJournalBindingWork, endJournalWork } from "@oh-my-pi/pi-utils/model-request-journal-composition";
 import { R11JournalFixture } from "../../../utils/test/fixtures/model-request-journal-r11";
+import { journalOuterWorkFromBinding } from "../../src/session/internal/outer-work";
 
 const mac = process.platform === "darwin" ? describe : describe.skip;
 

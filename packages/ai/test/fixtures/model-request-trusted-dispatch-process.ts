@@ -365,6 +365,7 @@ CREATE TABLE store_config_event(${common},key TEXT NOT NULL,value_json TEXT NOT 
 				cleanupAuthorityErrors.push(error instanceof Error ? error.message : String(error));
 			}
 		}
+		}
 	} finally {
 		try {
 			await cell.close();
