@@ -1,6 +1,6 @@
 import { bindModelRequestExecution, getModelRequestExecution } from "@oh-my-pi/pi-ai/model-request-execution";
 import { logger } from "@oh-my-pi/pi-utils";
-import { JournalOuterWorkOwner } from "../session/journal-outer-work";
+import { journalOuterWorkFromExecution } from "../session/journal-outer-work";
 
 import type { ModelRegistry } from "../config/model-registry";
 import type { Settings } from "../config/settings";
@@ -36,7 +36,7 @@ const schedulers = new Map<string, SchedulerEntry>();
 function createHolder(options: SchedulerOptions): SchedulerHolder {
 	// Bound where the session registers: a timer fires in its own context, not the registering session's.
 	const tick = bindModelRequestExecution(async (): Promise<void> => {
-		const outerWork = JournalOuterWorkOwner.fromExecution(getModelRequestExecution());
+		const outerWork = journalOuterWorkFromExecution(getModelRequestExecution());
 		await outerWork.run(async () => {
 			try {
 				const [depth, state] = await Promise.all([

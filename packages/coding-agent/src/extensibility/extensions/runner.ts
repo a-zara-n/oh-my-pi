@@ -37,7 +37,7 @@ import { type Theme, theme } from "@oh-my-pi/pi-tui/theme";
 import type { AsyncJobSnapshot } from "../../session/agent-session";
 import { MAIN_AGENT_ID } from "../../registry/agent-registry";
 import type { SessionManager } from "../../session/session-manager";
-import { JournalOuterWorkOwner } from "../../session/journal-outer-work";
+import { journalOuterWorkFromExecution, type JournalOuterWorkScope } from "../../session/journal-outer-work";
 import { addFileDeleteFallback, addFileWriteFallback } from "../../tools/file-write-fallback";
 import type { BranchHandler, NavigateTreeHandler, NewSessionHandler } from "../session-handler-types";
 import { accumulateToolCallResult, buildAggregatedToolCallResult } from "../shared-events";
@@ -487,7 +487,7 @@ interface ToolRegistrationScope {
 }
 
 interface HandlerJournalOuterWorkScope {
-	readonly outerWork: JournalOuterWorkOwner;
+	readonly outerWork: JournalOuterWorkScope;
 }
 
 /** Identity reported by a session that is not a subagent and received no explicit identity. */
@@ -1558,7 +1558,7 @@ export class ExtensionRunner {
 		const signals = [outerSignal, sessionStopSignal].filter((s): s is AbortSignal => s !== undefined);
 		const signal = signals.length === 0 ? undefined : signals.length === 1 ? signals[0] : AbortSignal.any(signals);
 		if (signal?.aborted) return undefined;
-		const outerWork = JournalOuterWorkOwner.fromExecution(this.#modelRequestExecution);
+		const outerWork = journalOuterWorkFromExecution(this.#modelRequestExecution);
 		return this.#handlerJournalOuterWork.run({ outerWork }, async () => {
 			const registrationScope: ToolRegistrationScope = { pending: new Set(), closed: false };
 			let handlerResult: R | typeof EXTENSION_HANDLER_TIMEOUT | typeof EXTENSION_HANDLER_ABORTED | undefined;

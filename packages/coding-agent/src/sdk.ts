@@ -181,7 +181,7 @@ import {
 	type SecretObfuscator,
 } from "./secrets";
 import { AgentSession, type InitialRetryFallbackState, type PlanYolo, type Prewalk } from "./session/agent-session";
-import { JournalOuterWorkOwner } from "./session/journal-outer-work";
+import { journalOuterWorkFromBinding } from "./session/journal-outer-work";
 import {
 	createAuthStorageSettingsSync,
 	discoverAuthStorage as discoverAuthStorageFromConfig,
@@ -1713,9 +1713,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	const extensionRoots = options.extensionRoots?.();
 	const explicit = extensionRoots?.explicit ?? options.additionalExtensionPaths ?? [];
 	const mode = extensionRoots?.mode ?? (options.disableExtensionDiscovery ? "explicit-only" : "merge");
-	const startupOuterWork = JournalOuterWorkOwner.fromBinding(
-		modelRequestRootSource.modelRequestJournalLeaseBinding,
-	);
+	const startupOuterWork = journalOuterWorkFromBinding(modelRequestRootSource.modelRequestJournalLeaseBinding);
 	return await startupOuterWork.run(() =>
 		withOmpExtensionRootScope(explicit, mode, () => createAgentSessionScoped(options, modelRequestRootSource)),
 	);
@@ -5241,7 +5239,7 @@ async function createAgentSessionScoped(
 		}
 
 		const startMemoryBackend = async () => {
-			await session.journalOuterWorkOwner().run(async () => {
+			await session.runJournalOuterWork(async () => {
 				const memoryBackend = await resolveMemoryBackend(settings);
 				await session.runInModelRequestContext(async () => {
 					const started = memoryBackend.start({

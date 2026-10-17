@@ -155,8 +155,7 @@ export function startMemoryStartupTask(options: {
 
 	const signal = session.beginLocalMemoryStartup?.() ?? new AbortController().signal;
 	void session
-		.journalOuterWorkOwner()
-		.run(() => runMemoryStartup({ session, settings, modelRegistry, agentDir, config: cfg, signal }))
+		.runJournalOuterWork(() => runMemoryStartup({ session, settings, modelRegistry, agentDir, config: cfg, signal }))
 		.catch(error => {
 			if (!signal.aborted) logger.warn("Memory startup failed", { error: String(error) });
 		})

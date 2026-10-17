@@ -364,7 +364,7 @@ import {
 	type ModelRequestRootAssignment,
 	withModelRequestExecution,
 } from "./model-request-context";
-import { JournalOuterWorkOwner } from "./journal-outer-work";
+import { journalOuterWorkFromExecution, type JournalOuterWorkScope } from "./journal-outer-work";
 import {
 	buildReplanTitleContext,
 	CHECKPOINT_ACTIVE_REMINDER_TYPE,
@@ -1054,7 +1054,8 @@ export class AgentSession implements SettingsScope {
 	#postPromptTasks = new Set<Promise<unknown>>();
 	#postPromptTasksPromise: Promise<void> | undefined = undefined;
 	/** Outer journal work for the in-flight `agent_end` maintenance pass (compaction continuations). */
-	#agentEndOuterWork: JournalOuterWorkOwner | undefined;
+	#journalOuterWorkScope: JournalOuterWorkScope | undefined;
+	#agentEndOuterWork: JournalOuterWorkScope | undefined;
 	#postPromptTasksResolve: (() => void) | undefined = undefined;
 	#postPromptTasksAbortController = new AbortController();
 	/**
@@ -3013,8 +3014,18 @@ export class AgentSession implements SettingsScope {
 	}
 
 	/** @internal */
-	journalOuterWorkOwner(): JournalOuterWorkOwner {
-		return JournalOuterWorkOwner.fromExecution(this.#modelRequestExecution);
+	runJournalOuterWork<T>(work: () => Promise<T>): Promise<T> {
+		const scope = journalOuterWorkFromExecution(this.#modelRequestExecution);
+		const previous = this.#journalOuterWorkScope;
+		this.#journalOuterWorkScope = scope;
+		return scope.run(work).finally(() => {
+			this.#journalOuterWorkScope = previous;
+		});
+	}
+
+	/** @internal Detach work onto the session's active outer-work scope (same open handle as the parent `run`). */
+	trackJournalOuterWork(promise: Promise<unknown>): void {
+		this.#journalOuterWorkScope?.trackDetached(promise);
 	}
 
 	/**
@@ -3058,7 +3069,7 @@ export class AgentSession implements SettingsScope {
 	async #admitSubmission<T>(work: () => Promise<T>): Promise<T> {
 		this.#admittedSubmissionCount++;
 		try {
-			return await this.journalOuterWorkOwner().run(() => this.runInModelRequestContext(work));
+			return await this.runJournalOuterWork(() => this.runInModelRequestContext(work));
 		} finally {
 			if (--this.#admittedSubmissionCount === 0 && this.#admittedSubmissionsSettled) {
 				const settled = this.#admittedSubmissionsSettled;
@@ -3328,9 +3339,8 @@ export class AgentSession implements SettingsScope {
 	}
 
 	async #drainExtensionEvents(): Promise<void> {
-		const outerWork = this.journalOuterWorkOwner();
 		try {
-			await outerWork.run(async () => {
+			await this.runJournalOuterWork(async () => {
 				try {
 					while (this.#queuedExtensionEvents.length > 0) {
 						const batch = this.#queuedExtensionEvents;
@@ -3380,7 +3390,7 @@ export class AgentSession implements SettingsScope {
 		}
 		const extensionEmit = this.#emitExtensionEvent(event);
 		if (options.detachExtensions) {
-			const outerWork = this.journalOuterWorkOwner();
+			const outerWork = journalOuterWorkFromExecution(this.#modelRequestExecution);
 			outerWork.trackDetached(extensionEmit);
 			void extensionEmit
 				.catch(error => {
@@ -3394,7 +3404,7 @@ export class AgentSession implements SettingsScope {
 					void outerWork.complete().catch(() => {});
 				});
 		} else {
-			await this.journalOuterWorkOwner().run(() => extensionEmit);
+			await this.runJournalOuterWork(() => extensionEmit);
 		}
 	}
 
@@ -3499,7 +3509,7 @@ export class AgentSession implements SettingsScope {
 			}
 		}
 		if (event.type !== "agent_end") {
-			const processing = this.journalOuterWorkOwner().run(() => this.#processAgentEvent(event));
+			const processing = this.runJournalOuterWork(() => this.#processAgentEvent(event));
 			if ((event.type === "message_start" || event.type === "message_end") && isAdvisorCard(event.message)) {
 				this.#advisors.trackCardEvent(processing);
 			}
@@ -3508,7 +3518,7 @@ export class AgentSession implements SettingsScope {
 		const { promise, resolve } = Promise.withResolvers<void>();
 		this.#trackPostPromptTask(promise);
 		this.#inFlightAgentEndMaintenance.add(promise);
-		const outerWork = this.journalOuterWorkOwner();
+		const outerWork = journalOuterWorkFromExecution(this.#modelRequestExecution);
 		this.#agentEndOuterWork = outerWork;
 		try {
 			// Maintenance starts now, not behind the revocation ack: it classifies this run's end
@@ -3536,9 +3546,7 @@ export class AgentSession implements SettingsScope {
 	#queueMessageEndPersistence(message: AgentMessage, promptGeneration: number): Promise<string | undefined> {
 		const key = sessionMessagePersistenceKey(message);
 		const pending = this.#messageEndPersistenceTail
-			.then(() =>
-				this.journalOuterWorkOwner().run(() => this.#persistMessageEnd(message, promptGeneration)),
-			)
+			.then(() => this.runJournalOuterWork(() => this.#persistMessageEnd(message, promptGeneration)))
 			.finally(() => {
 				if (key !== undefined && this.#pendingMessageEndPersistence.get(key) === pending) {
 					this.#pendingMessageEndPersistence.delete(key);
@@ -5494,7 +5502,7 @@ export class AgentSession implements SettingsScope {
 		this.#autolearnCaptureAbortController = controller;
 		const task = (async () => {
 			try {
-				await this.journalOuterWorkOwner().run(() =>
+				await this.runJournalOuterWork(() =>
 					this.runInModelRequestContext(() => capture(controller.signal), "memory"),
 				);
 			} catch (error) {
