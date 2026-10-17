@@ -199,7 +199,7 @@ async function loadSessionPicker(): Promise<SessionPicker> {
 		import("@oh-my-pi/pi-tui/apps/session-picker"),
 		import("./session/history-storage"),
 		import("./session/session-pins"),
-		import("./session/session-storage"),
+		import("@oh-my-pi/pi-utils/model-request-journal-composition"),
 	]);
 	return (sessions, options) => {
 		const storage = new FileSessionStorage();
