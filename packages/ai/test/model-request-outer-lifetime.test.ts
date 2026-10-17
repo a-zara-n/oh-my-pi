@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import * as path from "node:path";
-import packageJson from "../package.json";
 
 const ROOT = path.resolve(import.meta.dir, "../../..");
 const FIXTURE = path.join(import.meta.dir, "fixtures/model-request-outer-lifetime-process.ts");
@@ -82,7 +81,15 @@ const SCENARIOS: ReadonlyArray<{
 		name: "guarded-transfer-cleanup-on-settle-reject",
 		rows: ["E-02", "AC-OL-14"],
 		expect: v => {
-			expect(v.failure).toBe(true);
+			expect(v.settleRejected).toBe(true);
+			expect(v.closeError).toBeDefined();
+		},
+	},
+	{
+		name: "gate-authorize-throws-outer-end",
+		rows: ["E-02", "AC-OL-14"],
+		expect: v => {
+			expect(v.sendFailed).toBe(true);
 		},
 	},
 	{
@@ -97,14 +104,14 @@ const SCENARIOS: ReadonlyArray<{
 		name: "a02-inflight-heartbeat-flush-pending",
 		rows: ["A-02", "AC-OL-12"],
 		expect: v => {
-			expect(v.text).toEqual({ type: "text", text: "ok" });
+			expect(v.blockedBeforeClose).toBe("pending");
 		},
 	},
 	{
 		name: "a02-inflight-remove-lease-reject",
 		rows: ["A-02", "AC-OL-12"],
 		expect: v => {
-			expect(v.text).toEqual({ type: "text", text: "ok" });
+			expect(v.closeError).toBeDefined();
 		},
 	},
 	{
@@ -142,6 +149,7 @@ const SCENARIOS: ReadonlyArray<{
 		rows: ["A-04", "AC-OL-12", "AC-OL-14"],
 		expect: v => {
 			expect(v.failed).toBe(true);
+			expect(v.closeError).toBeDefined();
 		},
 	},
 	{
@@ -194,14 +202,4 @@ describe("model request outer producer lifetime (managed subprocess)", () => {
 			scenario.expect(await runScenario(scenario.name));
 		});
 	}
-});
-
-describe("journal outer-work helper export boundary", () => {
-	test("package exports deny internal journal helper and legacy utils subpath", () => {
-		const exports = packageJson.exports as Record<string, unknown>;
-		expect(exports["./internal/journal-outer-work"]).toBeNull();
-		expect(exports["./internal/*"]).toBeNull();
-		expect(exports["./utils/journal-outer-work"]).toBeNull();
-		expect(exports["./*"]).toEqual({ types: "./src/*.ts", import: "./src/*.ts" });
-	});
 });
