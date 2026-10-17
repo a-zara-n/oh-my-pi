@@ -342,6 +342,7 @@ mac("authority private binding lifetime with actual File principals", () => {
 		const fixture = new R11JournalFixture();
 		const handoff = Promise.withResolvers<{ work: JournalWorkHandle }>();
 		let operation: Promise<unknown> | undefined;
+		let outerWork: JournalWorkHandle | undefined;
 		let settled = false;
 		const childFailure = new Error("child outer work rejected");
 		try {
@@ -353,7 +354,8 @@ mac("authority private binding lifetime with actual File principals", () => {
 				endJournalWork(rejected, { type: "rejected", error: childFailure });
 				handoff.resolve({ work: fulfilled });
 			});
-			void operation.then(
+			void operation?.catch(error => handoff.reject(error));
+			void operation?.then(
 				() => {
 					settled = true;
 				},
@@ -362,11 +364,13 @@ mac("authority private binding lifetime with actual File principals", () => {
 				},
 			);
 			const { work } = await handoff.promise;
+			outerWork = work;
 			await Promise.resolve();
 			expect(settled).toBe(false);
 			expect(closedSessions(root)).toEqual([]);
 			assertExclusiveLease(path.join(fixture.namespace, "owners", `${fixture.writerId}.lock`), true);
 			endJournalWork(work, { type: "fulfilled" });
+			outerWork = undefined;
 			let combined: unknown;
 			try {
 				await operation;
@@ -376,14 +380,12 @@ mac("authority private binding lifetime with actual File principals", () => {
 			expect(settled).toBe(true);
 			expect(combined).toBeInstanceOf(AggregateError);
 			if (!(combined instanceof AggregateError)) throw new Error("Expected outer drain aggregation");
-			const outerDrain = combined.errors.find(error => error instanceof AggregateError);
-			expect(outerDrain).toBeInstanceOf(AggregateError);
-			if (!(outerDrain instanceof AggregateError)) throw new Error("Expected nested outer work failures");
-			expect(outerDrain.errors).toContain(childFailure);
+			expect(combined.errors).toContain(childFailure);
 			expect(closedSessions(root)).toEqual([root.getSessionId()]);
 		} finally {
-			handoff.resolve({ work: Object.freeze({}) as JournalWorkHandle });
-			await Promise.allSettled([operation]);
+			if (outerWork !== undefined) endJournalWork(outerWork, { type: "fulfilled" });
+			const settlements = await Promise.allSettled(operation === undefined ? [] : [operation]);
+			expect(settlements.every(result => result.status !== "pending")).toBe(true);
 			await fixture.close();
 		}
 	});
@@ -392,6 +394,7 @@ mac("authority private binding lifetime with actual File principals", () => {
 		const fixture = new R11JournalFixture();
 		const handoff = Promise.withResolvers<{ work: JournalWorkHandle; execution: ModelRequestExecution }>();
 		let operation: Promise<unknown> | undefined;
+		let outerWork: JournalWorkHandle | undefined;
 		try {
 			const root = fixture.open();
 			operation = fixture.withBinding(root, async binding => {
@@ -400,16 +403,62 @@ mac("authority private binding lifetime with actual File principals", () => {
 				retireModelRequestWriterCredential(fixture.requester);
 				handoff.resolve({ work, execution: principal.execution });
 			});
+			void operation?.catch(error => handoff.reject(error));
 			const { work, execution } = await handoff.promise;
-			await Promise.resolve();
+			outerWork = work;
 			await expect(
-				prepareJournalSend(execution, Object.freeze({ attemptId: randomUUID() })),
+				Promise.resolve().then(() =>
+					prepareJournalSend(execution, Object.freeze({ attemptId: randomUUID() })),
+				),
 			).rejects.toThrow();
 			endJournalWork(work, { type: "fulfilled" });
-			await Promise.allSettled([operation]);
+			outerWork = undefined;
+			let combined: unknown;
+			try {
+				await operation;
+			} catch (error) {
+				combined = error;
+			}
+			expect(combined).toBeInstanceOf(AggregateError);
+			if (!(combined instanceof AggregateError)) throw new Error("Expected retirement cleanup aggregation");
+			expect(combined.errors.some(error => error instanceof AggregateError)).toBe(true);
+			expect(closedSessions(root)).toEqual([]);
+			assertExclusiveLease(path.join(fixture.namespace, "owners", `${fixture.writerId}.lock`), false);
+		} finally {
+			if (outerWork !== undefined) endJournalWork(outerWork, { type: "fulfilled" });
+			const settlements = await Promise.allSettled(operation === undefined ? [] : [operation]);
+			expect(settlements.every(result => result.status !== "pending")).toBe(true);
+			await fixture.close();
+		}
+	});
+
+	test("revoked execution families still allow active outer work end while rejecting new execution work", async () => {
+		const fixture = new R11JournalFixture();
+		const handoff = Promise.withResolvers<{ work: JournalWorkHandle; execution: ModelRequestExecution }>();
+		let operation: Promise<unknown> | undefined;
+		let outerWork: JournalWorkHandle | undefined;
+		try {
+			const root = fixture.open();
+			operation = fixture.withBinding(root, async binding => {
+				const principal = await fixture.ready(binding, root);
+				const work = beginJournalBindingWork(binding);
+				void closeJournalSession(principal.session);
+				handoff.resolve({ work, execution: principal.execution });
+			});
+			void operation?.catch(error => handoff.reject(error));
+			const { work, execution } = await handoff.promise;
+			outerWork = work;
+			await Promise.resolve();
+			expect(execution.journalState).toBe("required-revoked");
+			expect(() => beginJournalExecutionWork(execution)).toThrow();
+			endJournalWork(work, { type: "fulfilled" });
+			outerWork = undefined;
+			await operation;
 			expect(closedSessions(root)).toEqual([root.getSessionId()]);
 		} finally {
-			await Promise.allSettled([operation]);
+			if (outerWork !== undefined) endJournalWork(outerWork, { type: "fulfilled" });
+			const settlements = await Promise.allSettled(operation === undefined ? [] : [operation]);
+			expect(settlements.every(result => result.status !== "pending")).toBe(true);
 			await fixture.close();
 		}
 	});
@@ -418,22 +467,36 @@ mac("authority private binding lifetime with actual File principals", () => {
 		const fixture = new R11JournalFixture();
 		const handoff = Promise.withResolvers<{ work: JournalWorkHandle; execution: ModelRequestExecution }>();
 		let operation: Promise<unknown> | undefined;
+		let outerWork: JournalWorkHandle | undefined;
 		try {
 			const root = fixture.open();
 			operation = fixture.withBinding(root, async binding => {
 				const principal = await fixture.ready(binding, root);
 				const work = beginJournalBindingWork(binding);
-				await closeJournalSession(principal.session);
+				const child = fixture.open();
+				await expect(
+					composeJournalSession({
+						cell: child,
+						root: fixture.open(),
+						binding,
+						execution: principal.execution,
+					}),
+				).rejects.toThrow();
+				expect(principal.execution.journalState).toBe("required-faulted");
 				handoff.resolve({ work, execution: principal.execution });
 			});
+			void operation?.catch(error => handoff.reject(error));
 			const { work, execution } = await handoff.promise;
-			await Promise.resolve();
+			outerWork = work;
 			expect(() => beginJournalExecutionWork(execution)).toThrow();
 			endJournalWork(work, { type: "fulfilled" });
-			await Promise.allSettled([operation]);
+			outerWork = undefined;
+			await operation;
 			expect(closedSessions(root)).toEqual([root.getSessionId()]);
 		} finally {
-			await Promise.allSettled([operation]);
+			if (outerWork !== undefined) endJournalWork(outerWork, { type: "fulfilled" });
+			const settlements = await Promise.allSettled(operation === undefined ? [] : [operation]);
+			expect(settlements.every(result => result.status !== "pending")).toBe(true);
 			await fixture.close();
 		}
 	});
@@ -443,23 +506,28 @@ mac("authority private binding lifetime with actual File principals", () => {
 		const hold = Promise.withResolvers<void>();
 		let operation: Promise<void> | undefined;
 		let binding!: ModelRequestJournalLeaseBinding;
-		let work!: JournalWorkHandle;
+		let outerWork: JournalWorkHandle | undefined;
 		try {
 			const root = fixture.open();
 			operation = fixture.withBinding(root, async verified => {
 				binding = verified;
-				work = beginJournalBindingWork(verified);
+				outerWork = beginJournalBindingWork(verified);
 				hold.resolve();
 			});
-			void operation.catch(() => {});
+			void hold.promise.catch(() => {});
+			void operation?.catch(error => hold.reject(error));
 			await hold.promise;
 			await Promise.resolve();
 			expect(() => beginJournalBindingWork(binding)).toThrow("Journal binding no longer accepts work");
-			endJournalWork(work, { type: "fulfilled" });
+			if (outerWork === undefined) throw new Error("Missing active outer work handle");
+			endJournalWork(outerWork, { type: "fulfilled" });
+			outerWork = undefined;
 			await operation;
 		} finally {
 			hold.resolve();
-			await Promise.allSettled([operation]);
+			if (outerWork !== undefined) endJournalWork(outerWork, { type: "fulfilled" });
+			const settlements = await Promise.allSettled(operation === undefined ? [] : [operation]);
+			expect(settlements.every(result => result.status !== "pending")).toBe(true);
 			await fixture.close();
 		}
 	});
