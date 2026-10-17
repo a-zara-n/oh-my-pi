@@ -2857,11 +2857,17 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 	flushSync(): void { this.#publishSync(this.#header, this.#entries); }
 	#publishSync(header: SessionHeader, entries: readonly SessionEntry[]): void {
 		this.#assertBindingAcceptsWork();
+		this.#publishAcceptedSync(header, entries);
+	}
+	#publishAcceptedSync(header: SessionHeader, entries: readonly SessionEntry[]): void {
 		this.#assertLive();
 		const body = serializeTitleSlot({ title: header.title, source: header.titleSource, updatedAt: this.#titleUpdatedAt ?? header.timestamp }) +
 			`${JSON.stringify(header)}\n${entries.map(entry => `${JSON.stringify(entry)}\n`).join("")}`;
-		principalWriteContext.run({ principal: this, body, generation: this.#generation, targetFile: this.#sessionFile }, () =>
-			this.#storage.writeTextSync(this.#sessionFile, body, { expectedSize: this.#expectedSize, requireAtomicReplace: true }));
+		const generation = this.#generation, filename = this.#sessionFile;
+		principalWriteContext.run({ principal: this, body, generation, targetFile: filename }, () =>
+			this.#storage.writeTextSync(filename, body, { expectedSize: this.#expectedSize, requireAtomicReplace: true }));
+		if (this.#generation !== generation || this.#sessionFile !== filename) unavailable();
+		if (JSON.stringify(strictFile(this.#storage.readTextSync(filename))) !== JSON.stringify(strictFile(body))) unavailable();
 	}
 	seal(): void { this.#sealed = true; this.#revoke("required-revoked"); }
 	releaseRetainedEntries(): void {
@@ -3264,7 +3270,11 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 			schemaVersion: 2, registryId: registry.registryId, registryEpoch: registry.registryEpoch, seq: ++seq, record,
 		}));
 		validateModelRequestRegistry(this.#header, [...this.#entries, ...entries]);
-		await this.#publish(this.#header, [...this.#entries, ...entries]);
+		// A live root's ordinary appendSync/flushSync cannot join an async queue.
+		// Keep its close publication in one synchronous File publish segment so
+		// those cooperating writes cannot interleave with staging and its CAS.
+		if (principalCloseContext.getStore() === this) this.#publishAcceptedSync(this.#header, [...this.#entries, ...entries]);
+		else await this.#publish(this.#header, [...this.#entries, ...entries]);
 		if (this.#readRegistry().throughSeq !== seq) unavailable();
 	}
 

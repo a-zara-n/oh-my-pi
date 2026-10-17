@@ -24,6 +24,7 @@ import { validateModelRequestRegistry } from "../src/model-request-registry";
 import { validateModelRequestJournal } from "../src/model-request-journal";
 import { parseSessionContent } from "../src/session-file-reader";
 import type {
+	CustomEntry,
 	ModelRequestJournalAck,
 	ModelRequestLifecycleRecord,
 	ModelRequestMetadataEntry,
@@ -433,6 +434,85 @@ mac("r11 actual File logical principal ownership", () => {
 			} finally { await fixture.close(); }
 		});
 	}
+
+	for (const publisher of ["appendSync", "flushSync"] as const) {
+		test(`sibling closes preserve ordinary root ${publisher} writes accepted while the root is live`, async () => {
+			const fixture = new R11JournalFixture();
+			try {
+				const rootCell = fixture.open();
+				await fixture.withBinding(rootCell, async binding => {
+					const root = await fixture.ready(binding, rootCell);
+					const siblings = [
+						await fixture.ready(binding, fixture.open(), root),
+						await fixture.ready(binding, fixture.open(), root),
+					];
+					const writer = rootCell.openWriter(rootCell.getSessionFile());
+					if (!writer.appendSync) throw new Error("Missing actual File appendSync");
+					const ordinary: CustomEntry[] = [];
+					const closes = siblings.map(sibling => closeJournalSession(sibling.session));
+					const writing = (async () => {
+						// Keep producing genuine synchronous File writes across the close
+						// queue's microtasks, without sealing or closing their live root.
+						for (let index = 0; index < 64; index++) {
+							const entry: CustomEntry = { type: "custom", id: randomUUID(), parentId: rootCell.getLeafId(),
+								timestamp: new Date().toISOString(), customType: "root-close-overlap", data: { index } };
+							ordinary.push(entry);
+							rootCell.appendEntry(entry);
+							if (publisher === "appendSync") writer.appendSync!(JSON.stringify(entry) + "\n");
+							else rootCell.flushSync();
+							await Promise.resolve();
+						}
+					})();
+					await Promise.all([writing, ...closes]);
+					assertJournalExecutionReady(root.execution);
+					await rootCell.flush();
+					for (const sibling of siblings) {
+						const closed = registry(rootCell).filter(entry => entry.record.sessionId === sibling.cell.getSessionId() &&
+							(entry.record.event === "member-closed" || entry.record.event === "owner-closed"));
+						expect(closed.map(entry => entry.record.event)).toEqual(["member-closed", "owner-closed"]);
+						for (const entry of closed) expect(entry.record).toMatchObject({ throughSeq: 0, outcome: "closed" });
+					}
+					rootCell.seal();
+					await rootCell.close();
+					const durable = parseSessionContent(fs.readFileSync(rootCell.getSessionFile(), "utf8")).entries;
+					for (const entry of ordinary) {
+						expect(durable.find(candidate => candidate.id === entry.id)).toEqual(entry);
+						expect(rootCell.getEntry(entry.id)).toEqual(entry);
+					}
+					validateModelRequestRegistry(rootCell.getHeader(), durable);
+					expect(durable.filter(entry => entry.type === "model_request_registry" &&
+						entry.record.event === "owner-closed")).toHaveLength(3);
+					assertReleasedNow(rootLock(fixture, rootCell));
+				});
+			} finally { await fixture.close(); }
+		});
+	}
+
+	test("foreign root bytes still reject sibling close without being overwritten", async () => {
+		const fixture = new R11JournalFixture();
+		try {
+			const rootCell = fixture.open();
+			let foreign = "";
+			const operation = fixture.withBinding(rootCell, async binding => {
+				const root = await fixture.ready(binding, rootCell);
+				const siblings = [
+					await fixture.ready(binding, fixture.open(), root),
+					await fixture.ready(binding, fixture.open(), root),
+				];
+				const entry: CustomEntry = { type: "custom", id: randomUUID(), parentId: rootCell.getLeafId(),
+					timestamp: new Date().toISOString(), customType: "foreign-root-write" };
+				fs.appendFileSync(rootCell.getSessionFile(), JSON.stringify(entry) + "\n");
+				foreign = fs.readFileSync(rootCell.getSessionFile(), "utf8");
+				const results = await Promise.allSettled(siblings.map(sibling => closeJournalSession(sibling.session)));
+				expect(results.every(result => result.status === "rejected")).toBe(true);
+				expect(registry(rootCell).filter(entry =>
+					entry.record.event === "member-closed" || entry.record.event === "owner-closed")).toHaveLength(0);
+			});
+			await expect(operation).rejects.toBeInstanceOf(AggregateError);
+			expect(foreign).not.toBe("");
+			expect(fs.readFileSync(rootCell.getSessionFile(), "utf8")).toBe(foreign);
+		} finally { await fixture.close(); }
+	});
 
 	for (const [depth, closeDepth] of [[2, 0], [4, 1]] as const) {
 		test(`depth ${depth} accepted append drains before ancestor ${closeDepth} closes`, async () => {
