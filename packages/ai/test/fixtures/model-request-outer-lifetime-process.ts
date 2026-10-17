@@ -78,8 +78,14 @@ const scenarios = [
 	"gate-authorize-throws-outer-end",
 ] as const;
 
+const LOOPBACK_API = "openai-completions" as const;
+
 function streamContext(): Context {
 	return { systemPrompt: [], messages: [{ role: "user", content: "hi", timestamp: 0 }] };
+}
+
+function openAiText(text: string) {
+	return textReplyFor(LOOPBACK_API, text);
 }
 
 function gatedSendLoopback(origin: string, model: ReturnType<typeof loopbackModel>, signal?: AbortSignal): Promise<Response> {
@@ -230,6 +236,7 @@ function recordingLease(): {
 	lease: ModelRequestLease;
 	settled: ModelRequestOutcome[];
 	firstSettle: Promise<ModelRequestOutcome>;
+	completeFirstSettle: (outcome: ModelRequestOutcome) => void;
 } {
 	const settled: ModelRequestOutcome[] = [];
 	const first = Promise.withResolvers<ModelRequestOutcome>();
@@ -242,7 +249,7 @@ function recordingLease(): {
 			first.resolve(outcome);
 		},
 	};
-	return { lease, settled, firstSettle: first.promise };
+	return { lease, settled, firstSettle: first.promise, completeFirstSettle: first.resolve };
 }
 
 async function expectRejects(promise: Promise<unknown>): Promise<void> {
@@ -258,15 +265,19 @@ async function runScenario(): Promise<Record<string, unknown>> {
 	switch (scenario) {
 		case "gate-late-allow-settle-pending": {
 			const decision = Promise.withResolvers<ModelRequestDecision>();
-			const { lease, settled, firstSettle } = recordingLease();
+			const { lease, settled, firstSettle, completeFirstSettle } = recordingLease();
 			const lateSettle = Promise.withResolvers<void>();
 			lease.settle = async outcome => {
 				settled.push(outcome);
 				await lateSettle.promise;
-				firstSettle.resolve(outcome);
+				completeFirstSettle(outcome);
 			};
-			registerModelRequestGate("outer-lifetime", { authorize: () => decision.promise }, 1);
-			const loopback = await startLoopbackProvider(scripted(textReplyFor("late")));
+			registerModelRequestGate(
+				"outer-lifetime",
+				{ authorize: () => decision.promise },
+				{ authorizeTimeoutMs: 1 },
+			);
+			const loopback = await startLoopbackProvider(scripted(openAiText("late")));
 			const model = loopbackModel("openai-completions", loopback.origin);
 			return withManagedHarness(async harness => {
 				const send = gatedSendLoopback(loopback.origin, model);
@@ -291,8 +302,12 @@ async function runScenario(): Promise<Record<string, unknown>> {
 			lease.settle = async () => {
 				throw reject;
 			};
-			registerModelRequestGate("outer-lifetime", { authorize: () => decision.promise }, 1);
-			const loopback = await startLoopbackProvider(scripted(textReplyFor("late")));
+			registerModelRequestGate(
+				"outer-lifetime",
+				{ authorize: () => decision.promise },
+				{ authorizeTimeoutMs: 1 },
+			);
+			const loopback = await startLoopbackProvider(scripted(openAiText("late")));
 			const model = loopbackModel("openai-completions", loopback.origin);
 			return withManagedHarness(async harness => {
 				const send = gatedSendLoopback(loopback.origin, model);
@@ -312,9 +327,13 @@ async function runScenario(): Promise<Record<string, unknown>> {
 		case "gate-abort-late-allow": {
 			const decision = Promise.withResolvers<ModelRequestDecision>();
 			const { lease, settled } = recordingLease();
-			registerModelRequestGate("outer-lifetime", { authorize: () => decision.promise }, 5_000);
+			registerModelRequestGate(
+				"outer-lifetime",
+				{ authorize: () => decision.promise },
+				{ authorizeTimeoutMs: 5_000 },
+			);
 			const controller = new AbortController();
-			const loopback = await startLoopbackProvider(scripted(textReplyFor("abort")));
+			const loopback = await startLoopbackProvider(scripted(openAiText("abort")));
 			const model = loopbackModel("openai-completions", loopback.origin);
 			return withManagedHarness(async harness => {
 				const send = gatedSendLoopback(loopback.origin, model, controller.signal);
@@ -328,7 +347,7 @@ async function runScenario(): Promise<Record<string, unknown>> {
 			});
 		}
 		case "pass-body-hold-until-read": {
-			registerModelRequestGate("outer-lifetime", { authorize: () => ({ type: "pass" }) }, undefined);
+			registerModelRequestGate("outer-lifetime", { authorize: async () => ({ type: "pass" }) }, undefined);
 			const hold = Promise.withResolvers<void>();
 			const loopback = await startLoopbackProvider(
 				scripted({ status: 200, chunks: ["hello"], holdUntil: hold.promise }),
@@ -356,8 +375,8 @@ async function runScenario(): Promise<Record<string, unknown>> {
 			});
 		}
 		case "pass-body-cancel-reject": {
-			registerModelRequestGate("outer-lifetime", { authorize: () => ({ type: "pass" }) }, undefined);
-			const loopback = await startLoopbackProvider(scripted(textReplyFor("abc")));
+			registerModelRequestGate("outer-lifetime", { authorize: async () => ({ type: "pass" }) }, undefined);
+			const loopback = await startLoopbackProvider(scripted(openAiText("abc")));
 			const model = loopbackModel("openai-completions", loopback.origin);
 			return withManagedHarness(async harness => {
 				const response = await gatedSend({
@@ -380,8 +399,8 @@ async function runScenario(): Promise<Record<string, unknown>> {
 			});
 		}
 		case "dispatch-sync-throw-joins-response": {
-			registerModelRequestGate("outer-lifetime", { authorize: () => ({ type: "pass" }) }, undefined);
-			const loopback = await startLoopbackProvider(scripted(textReplyFor("ok")));
+			registerModelRequestGate("outer-lifetime", { authorize: async () => ({ type: "pass" }) }, undefined);
+			const loopback = await startLoopbackProvider(scripted(openAiText("ok")));
 			const model = loopbackModel("openai-completions", loopback.origin);
 			return withManagedHarness(async harness => {
 				let observed = 0;
@@ -424,7 +443,7 @@ async function runScenario(): Promise<Record<string, unknown>> {
 			return withManagedHarness(async harness => {
 				const permit = await runtime.authorize({
 					requestId: randomUUID(),
-					reason: "user",
+					reason: "first",
 					kind: "chat",
 					model,
 					wire: undefined,
@@ -444,10 +463,13 @@ async function runScenario(): Promise<Record<string, unknown>> {
 		case "gate-decision-unrecognizable": {
 			registerModelRequestGate(
 				"outer-lifetime",
-				{ authorize: async () => ({ type: "not-a-decision" }) as ModelRequestDecision },
+				{
+					authorize: async () =>
+						({ type: "not-a-decision" } as unknown as ModelRequestDecision),
+				},
 				undefined,
 			);
-			const loopback = await startLoopbackProvider(scripted(textReplyFor("bad")));
+			const loopback = await startLoopbackProvider(scripted(openAiText("bad")));
 			const model = loopbackModel("openai-completions", loopback.origin);
 			return withManagedHarness(async harness => {
 				let failure: unknown;
@@ -470,7 +492,7 @@ async function runScenario(): Promise<Record<string, unknown>> {
 				{ authorize: async () => ({ type: "deny", code: "budget", message: "over budget" }) },
 				undefined,
 			);
-			const loopback = await startLoopbackProvider(scripted(textReplyFor("deny")));
+			const loopback = await startLoopbackProvider(scripted(openAiText("deny")));
 			const model = loopbackModel("openai-completions", loopback.origin);
 			return withManagedHarness(async harness => {
 				let code = "";
@@ -486,9 +508,9 @@ async function runScenario(): Promise<Record<string, unknown>> {
 		}
 		case "a01-tf-debug-holds-wire": {
 			Bun.env.PI_REQ_DEBUG = "1";
-			registerModelRequestGate("outer-lifetime", { authorize: () => ({ type: "pass" }) }, undefined);
+			registerModelRequestGate("outer-lifetime", { authorize: async () => ({ type: "pass" }) }, undefined);
 			const holdBody = Promise.withResolvers<void>();
-			const loopback = await startLoopbackProvider(scripted(textReplyFor("dbg")));
+			const loopback = await startLoopbackProvider(scripted(openAiText("dbg")));
 			const model = loopbackModel("openai-completions", loopback.origin);
 			const url = `${loopback.origin}/v1/chat/completions`;
 			return withManagedHarness(async harness => {
@@ -756,9 +778,9 @@ async function runScenario(): Promise<Record<string, unknown>> {
 			});
 		}
 		case "a03-header-resolver-pending": {
-			registerModelRequestGate("outer-lifetime", { authorize: () => ({ type: "pass" }) }, undefined);
+			registerModelRequestGate("outer-lifetime", { authorize: async () => ({ type: "pass" }) }, undefined);
 			const hold = Promise.withResolvers<void>();
-			const loopback = await startLoopbackProvider(scripted(textReplyFor("hdr")));
+			const loopback = await startLoopbackProvider(scripted(openAiText("hdr")));
 			const base = loopbackModel("openai-completions", loopback.origin);
 			const model = {
 				...base,
@@ -780,9 +802,9 @@ async function runScenario(): Promise<Record<string, unknown>> {
 			});
 		}
 		case "a03-header-resolver-reject": {
-			registerModelRequestGate("outer-lifetime", { authorize: () => ({ type: "pass" }) }, undefined);
+			registerModelRequestGate("outer-lifetime", { authorize: async () => ({ type: "pass" }) }, undefined);
 			const reject = new Error("header resolver failed");
-			const loopback = await startLoopbackProvider(scripted(textReplyFor("hdr")));
+			const loopback = await startLoopbackProvider(scripted(openAiText("hdr")));
 			const base = loopbackModel("openai-completions", loopback.origin);
 			const model = {
 				...base,
@@ -805,9 +827,9 @@ async function runScenario(): Promise<Record<string, unknown>> {
 			});
 		}
 		case "a04-auth-retry-recovered-fulfilled": {
-			registerModelRequestGate("outer-lifetime", { authorize: () => ({ type: "pass" }) }, undefined);
+			registerModelRequestGate("outer-lifetime", { authorize: async () => ({ type: "pass" }) }, undefined);
 			const loopback = await startLoopbackProvider((_req, i) =>
-				i === 0 ? errorReply(401, "bad key") : textReplyFor("recovered"),
+				i === 0 ? errorReply(401, "bad key") : openAiText("recovered"),
 			);
 			const model = loopbackModel("openai-completions", loopback.origin);
 			return withManagedHarness(async harness => {
@@ -821,7 +843,7 @@ async function runScenario(): Promise<Record<string, unknown>> {
 			});
 		}
 		case "a04-auth-retry-unrecovered-rejected": {
-			registerModelRequestGate("outer-lifetime", { authorize: () => ({ type: "pass" }) }, undefined);
+			registerModelRequestGate("outer-lifetime", { authorize: async () => ({ type: "pass" }) }, undefined);
 			const loopback = await startLoopbackProvider(scripted(errorReply(401, "bad key")));
 			const model = loopbackModel("openai-completions", loopback.origin);
 			return withManagedHarness(async harness => {
@@ -840,7 +862,7 @@ async function runScenario(): Promise<Record<string, unknown>> {
 			});
 		}
 		case "a05-uninstrumented-wrapper-pending": {
-			registerModelRequestGate("outer-lifetime", { authorize: () => ({ type: "pass" }) }, undefined);
+			registerModelRequestGate("outer-lifetime", { authorize: async () => ({ type: "pass" }) }, undefined);
 			const hold = Promise.withResolvers<void>();
 			const api = `ol-ext-${randomUUID()}`;
 			registerCustomApi(api, (model, context, options) => {
@@ -915,7 +937,7 @@ async function runScenario(): Promise<Record<string, unknown>> {
 				},
 				undefined,
 			);
-			const loopback = await startLoopbackProvider(scripted(textReplyFor("throw")));
+			const loopback = await startLoopbackProvider(scripted(openAiText("throw")));
 			const model = loopbackModel("openai-completions", loopback.origin);
 			return withManagedHarness(async harness => {
 				let sendFailed = false;
@@ -940,7 +962,7 @@ async function runScenario(): Promise<Record<string, unknown>> {
 				},
 			};
 			registerModelRequestGate("outer-lifetime", { authorize: async () => ({ type: "allow", lease }) }, undefined);
-			const loopback = await startLoopbackProvider(scripted(textReplyFor("settle-fail")));
+			const loopback = await startLoopbackProvider(scripted(openAiText("settle-fail")));
 			const model = loopbackModel("openai-completions", loopback.origin);
 			return withManagedHarness(async harness => {
 				const response = await gatedSendLoopback(loopback.origin, model);

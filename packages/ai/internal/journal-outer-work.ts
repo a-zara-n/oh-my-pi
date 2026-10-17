@@ -98,7 +98,8 @@ export function openJournalOuterWorkFromCurrent(): JournalOuterWork | undefined 
 
 export async function joinJournalOuterWork<T>(
 	work: JournalOuterWork | undefined,
-	promise: Promise<T>,
+	workOrPromise: Promise<T> | T,
 ): Promise<T> {
+	const promise = Promise.resolve(workOrPromise);
 	return work === undefined ? promise : work.join(promise);
 }
