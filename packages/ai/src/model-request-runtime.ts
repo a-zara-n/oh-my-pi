@@ -317,8 +317,7 @@ export class ModelRequestRuntime {
 		const inherited = root.kind === "inherited" ? root : undefined;
 		const parent = inherited?.parentExecution;
 		const rootSessionId = inherited?.rootSessionId;
-		const current = this.#als.getStore();
-		if (current !== undefined) assertJournalExecutionIdentity(current);
+		const current = this.#currentExecution();
 		if (parent !== undefined) assertJournalExecutionIdentity(parent);
 		let binding = root.modelRequestJournalLeaseBinding;
 		const currentRequired = current !== undefined && current.journalState !== "untracked";
@@ -375,6 +374,10 @@ export class ModelRequestRuntime {
 
 	/** Current execution, or undefined when none is active or the stored object was not minted by the core. */
 	currentExecution(): ModelRequestExecution | undefined {
+		return this.#currentExecution();
+	}
+
+	#currentExecution(): ModelRequestExecution | undefined {
 		const stored = this.#als.getStore();
 		if (stored === undefined) return undefined;
 		try {
@@ -393,7 +396,7 @@ export class ModelRequestRuntime {
 
 	/** Run `fn` with a different purpose when an execution is active; otherwise run it unchanged. */
 	withPurpose<T>(purpose: ModelRequestPurpose, fn: () => T): T {
-		const current = this.currentExecution();
+		const current = this.#currentExecution();
 		if (current === undefined) return fn();
 		return this.runWith(this.deriveExecution(current, { purpose }), fn);
 	}
@@ -404,13 +407,17 @@ export class ModelRequestRuntime {
 	 * pinned to "no execution" instead, so it never picks up whichever session happens to emit or fire it.
 	 */
 	bind<A extends unknown[], R>(fn: (...args: A) => R): (...args: A) => R {
-		const captured = this.currentExecution();
+		const captured = this.#currentExecution();
 		if (captured === undefined) return (...args: A) => this.#als.exit(() => fn(...args));
 		return (...args: A) => this.runWith(captured, () => fn(...args));
 	}
 
 	/** Required scopes are fixed by the leaf principal; only untracked scopes use legacy getters. */
 	scopeOf(execution: ModelRequestExecution): ModelRequestScope {
+		return this.#scopeOf(execution);
+	}
+
+	#scopeOf(execution: ModelRequestExecution): ModelRequestScope {
 		assertJournalExecutionReady(execution);
 		if (execution.journalState !== "untracked") {
 			const scope = execution.modelRequestScope;
@@ -446,7 +453,7 @@ export class ModelRequestRuntime {
 	 * admission. `deny` and every gate failure throw, and the caller MUST NOT start any I/O.
 	 */
 	async authorize(input: ModelRequestAuthorizationInput): Promise<ModelRequestPermit> {
-		const execution = this.currentExecution();
+		const execution = this.#currentExecution();
 		assertJournalExecutionReady(execution);
 		const registration = this.#registration;
 		const attemptId = this.#deps.newAttemptId();
@@ -455,7 +462,7 @@ export class ModelRequestRuntime {
 		const signal = input.signal;
 		if (signal?.aborted) throw signal.reason ?? new AbortError("model request aborted before authorization");
 
-		const attempt = this.#buildAttempt(attemptId, input);
+		const attempt = this.#buildAttempt(attemptId, input, execution);
 		const raced = await this.#raceGate(registration, attempt);
 
 		if (raced.kind === "aborted") {
@@ -484,14 +491,17 @@ export class ModelRequestRuntime {
 		return { attemptId, lease: new GuardedLease(decision.lease) };
 	}
 
-	#buildAttempt(attemptId: string, input: ModelRequestAuthorizationInput): ModelRequestAttempt {
-		const execution = this.currentExecution();
+	#buildAttempt(
+		attemptId: string,
+		input: ModelRequestAuthorizationInput,
+		execution: ModelRequestExecution | undefined,
+	): ModelRequestAttempt {
 		let origin: ModelRequestAttempt["origin"];
 		let scope: ModelRequestScope | undefined;
 		if (execution !== undefined) {
 			origin = "session";
 			try {
-				scope = this.scopeOf(execution);
+				scope = this.#scopeOf(execution);
 			} catch (error) {
 				throw new ModelRequestDeniedError("gate-error", "model request scope could not be resolved", { cause: error });
 			}

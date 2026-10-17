@@ -234,6 +234,11 @@ Only the canonical `gatedSend` module freezes and privately registers the exact
 permit returned by the captured authorizer bound to the canonical runtime.
 The captured current-execution method is also invoked directly: a mutable
 runtime property is never reacquired to call it after a reference check.
+The runtime's authorizer reads its private ALS context once and passes that exact
+execution into private attempt/scope construction. Its public `currentExecution`
+and `scopeOf` methods are facades, not callbacks that internal authorization
+reacquires. An alternating accessor cannot make the gate authorize one genuine
+context while the canonical dispatcher consumes another context's admission.
 The non-exported map binds the original runtime, exact execution, attempt id,
 lease, admission and `authorized/prepared/begun/ended` state; entries are never
 deleted or revived.
