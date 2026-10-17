@@ -56,6 +56,15 @@ root string or an implicitly substituted ALS parent is not a parent capability.
 The self-root variant does not accept this field. Ordinary untracked handovers
 without the optional parent retain their existing root/scope projection.
 
+When a required handover has an active ALS context, the runtime uses the existing
+identity checker's optional second argument to compare the leaf's exact private
+family. A derived parent may be a different object in that same family; matching
+root/agent IDs in another family is not sufficient. This pure check does not
+confer readiness: live parent/current readiness, root and binding are checked
+separately. The explicit parent is captured once and passed unchanged to the
+leaf, never replaced by the ALS context. Ordinary untracked handovers do not gain
+required/File checks or a new family registry.
+
 The execution module (`@oh-my-pi/pi-ai/model-request-execution`) is internal and deliberately absent from the
 `@oh-my-pi/pi-ai` barrel, and no public option or request argument accepts an origin, scope or root. That is the whole
 extent of the guarantee: pi-ai's package `./*` export map still makes `model-request-execution` and

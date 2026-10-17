@@ -311,18 +311,50 @@ export class ModelRequestRuntime {
 		if (this.#standalone) {
 			throw new ModelRequestProcessClassError("a process marked standalone cannot create a session");
 		}
-		const parent = this.currentExecution();
-		let binding = init.root.modelRequestJournalLeaseBinding;
-		if (parent !== undefined && parent.journalState !== "untracked") {
-			// A child gets its own pending principal, never its parent's fixed session scope.
-			// Reject a pending/faulted/revoked parent rather than clear its requirement.
-			assertJournalExecutionReady(parent);
-			if (binding !== undefined && binding !== parent.modelRequestJournalLeaseBinding) {
+		// Capture the handover once. A mutable DTO must not swap the parent
+		// between validation and the leaf's private family association.
+		const root = init.root;
+		const inherited = root.kind === "inherited" ? root : undefined;
+		const parent = inherited?.parentExecution;
+		const rootSessionId = inherited?.rootSessionId;
+		const current = this.#als.getStore();
+		if (current !== undefined) assertJournalExecutionIdentity(current);
+		if (parent !== undefined) assertJournalExecutionIdentity(parent);
+		let binding = root.modelRequestJournalLeaseBinding;
+		const currentRequired = current !== undefined && current.journalState !== "untracked";
+		const required = currentRequired || binding !== undefined || (parent !== undefined && parent.journalState !== "untracked");
+		if (inherited !== undefined) {
+			if (parent === undefined) {
+				if (required) throw new TypeError("required child model request execution needs an explicit genuine parent");
+				// This also rejects an otherwise missing context after the process
+				// latched required; it does not add File requirements to untracked use.
+				assertJournalExecutionReady(undefined);
+			} else if (required) {
+				if (current !== undefined) assertJournalExecutionIdentity(parent, current);
+				assertJournalExecutionReady(parent);
+				const parentScope = parent.modelRequestScope;
+				const parentBinding = parent.modelRequestJournalLeaseBinding;
+				if (parent.journalState !== "required-ready" || parentScope === undefined || parentBinding === undefined) {
+					throw new TypeError("required child model request execution needs a ready journal parent");
+				}
+				if (rootSessionId === undefined || rootSessionId !== parentScope.rootSessionId) {
+					throw new TypeError("a child model request execution cannot replace its required root");
+				}
+				if (binding !== undefined && binding !== parentBinding) {
+					throw new TypeError("a child model request execution cannot replace its required journal binding");
+				}
+				binding = parentBinding;
+			}
+		}
+		if (currentRequired) {
+			// Family identity is pure: live readiness/binding remain separate checks.
+			assertJournalExecutionReady(current);
+			if (binding !== undefined && binding !== current.modelRequestJournalLeaseBinding) {
 				throw new TypeError("a child model request execution cannot replace its required journal binding");
 			}
-			binding = parent.modelRequestJournalLeaseBinding;
+			binding = current.modelRequestJournalLeaseBinding;
 		}
-		const execution = this.#createExecution(init, binding);
+		const execution = this.#createExecution(init, binding, parent);
 		this.#sessionCreated = true;
 		return execution;
 	}
@@ -392,15 +424,14 @@ export class ModelRequestRuntime {
 
 	#createExecution(
 		init: ModelRequestExecutionInit,
-		binding: ModelRequestJournalLeaseBinding | undefined = init.root.modelRequestJournalLeaseBinding,
+		binding?: ModelRequestJournalLeaseBinding,
+		parentExecution?: ModelRequestExecution,
 	): ModelRequestExecution {
 		const execution = createJournalExecution({
 			binding,
 			agent: init.agent,
 			purpose: init.purpose,
-			...(init.root.kind === "inherited" && init.root.parentExecution !== undefined
-				? { parentExecution: init.root.parentExecution }
-				: {}),
+			...(parentExecution === undefined ? {} : { parentExecution }),
 		});
 		if (execution.journalState === "untracked") this.#untrackedProjections.set(execution, init);
 		return execution;
