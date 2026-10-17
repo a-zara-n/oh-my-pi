@@ -10,6 +10,7 @@ import type { AgentEvent, AgentIdentity, AgentTelemetryConfig } from "@oh-my-pi/
 import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import { AgentBusyError, EventLoopKeepalive, recordHandoff, resolveTelemetry } from "@oh-my-pi/pi-agent-core";
 import type { Model } from "@oh-my-pi/pi-ai";
+import { runWithModelRequestExecution } from "@oh-my-pi/pi-ai/model-request-execution";
 import type { Api, ServiceTierByFamily, Usage } from "@oh-my-pi/pi-utils/model-data";
 import { isRecord, logger, popLoopPhase, prompt, pushLoopPhase, sanitizeText, untilAborted } from "@oh-my-pi/pi-utils";
 import { ASYNC_JOB_MANAGER_SHUTDOWN_REASON, AsyncJobError, AsyncJobManager, type AsyncJobRunResult } from "../async";
@@ -3812,7 +3813,7 @@ function trackSubagentSettings(session: AgentSession, capture: WarmReviveCapture
  * function's `arguments` reachable from its arrow closures, so any extra parameter would be pinned.
  */
 function createWarmSubagentReviver(capture: WarmReviveCapture): AgentReviver {
-	return async expectedAgentRef => {
+	const revive: AgentReviver = async expectedAgentRef => {
 		// Reject a revoked captured parent before reopening its child. SDK/leaf recheck
 		// after the intervening awaits; neither a saved header nor current ALS replaces it.
 		resolveModelRequestRootSource(
@@ -3871,6 +3872,13 @@ function createWarmSubagentReviver(capture: WarmReviveCapture): AgentReviver {
 		attachIrcWakeTurnMonitor(revived, capture.wake);
 		return revived;
 	};
+	// A sibling's IRC turn may wake this parked child. Re-enter the saved
+	// spawner's genuine context for the checks and SDK reconstruction; sharing
+	// a root/binding does not put that sibling in the spawner's private family.
+	const parent = capture.spec.options.modelRequestRoot?.parentExecution;
+	return parent === undefined
+		? revive
+		: expectedAgentRef => runWithModelRequestExecution(parent, () => revive(expectedAgentRef));
 }
 
 /**

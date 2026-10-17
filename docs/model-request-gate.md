@@ -65,6 +65,15 @@ separately. The explicit parent is captured once and passed unchanged to the
 leaf, never replaced by the ALS context. Ordinary untracked handovers do not gain
 required/File checks or a new family registry.
 
+A parked task's in-memory warm reviver re-enters its saved genuine spawning
+execution through the existing runtime binding API before checking the handover
+and reopening/rebuilding its SDK session. Thus B's IRC turn can wake parked
+sibling A under their saved parent R without presenting R as if it belonged to
+B's private family. The resolver/runtime family guards are unchanged: a direct
+wrong-family call still fails, and a revoked saved parent still cannot revive
+its child. No-context revival uses that same explicit parent; legacy untracked
+handovers without a parent execution retain their original path.
+
 Parent verification for this handover uses
 `bun --preload ./scripts/audit-library-bootstrap.ts test packages/ai/test/model-request-runtime-family.test.ts`.
 Its native child reuses the real SQLite/File fixture to compose root, child and
