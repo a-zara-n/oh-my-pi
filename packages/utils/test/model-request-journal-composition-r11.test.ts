@@ -496,7 +496,7 @@ mac("r11 actual File logical principal ownership", () => {
 						expect(durable.find(candidate => candidate.id === entry.id)).toEqual(entry);
 						expect(rootCell.getEntry(entry.id)).toEqual(entry);
 					}
-					validateModelRequestRegistry(rootCell.getHeader(), durable);
+					validateModelRequestRegistry(rootCell.getHeader(), durable.filter(entry => entry.type !== "session"));
 					expect(durable.filter(entry => entry.type === "model_request_registry" &&
 						entry.record.event === "owner-closed")).toHaveLength(3);
 					expect(durable.find(entry => entry.type === "model_request_registry" &&
