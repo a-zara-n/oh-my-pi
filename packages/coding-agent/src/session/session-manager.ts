@@ -2323,11 +2323,6 @@ export class SessionManager {
 		const cell = fileJournalCells.get(this);
 		const leaf = this.#index.leafId();
 		if (!cell || cell.getLeafId() === leaf) return;
-		const header = cell.getHeader();
-		if (!header.modelRequestJournal && !header.modelRequestRegistry) {
-			this.#claimSession();
-			if (!this.#sessionClaim?.release) return;
-		}
 		// Lazy ordinary entries remain staged until the actual principal commits them.
 		if (leaf === null || cell.getEntry(leaf) !== undefined) cell.branch(leaf);
 	}
