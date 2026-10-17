@@ -102,8 +102,32 @@ async function waitForIdle(session: AgentSession): Promise<void> {
 	}
 }
 
+function describeFailure(error: unknown): unknown {
+	if (!(error instanceof Error)) return { thrown: String(error) };
+	return {
+		name: error.name,
+		message: error.message,
+		stack: error.stack,
+		...(error instanceof AggregateError ? { errors: error.errors.map(describeFailure) } : {}),
+		...(error.cause === undefined ? {} : { cause: describeFailure(error.cause) }),
+	};
+}
+
+async function diagnosePhase<T>(phase: string, run: () => Promise<T>): Promise<T> {
+	console.error(JSON.stringify({ diagnostic: "warm-parent-phase", phase, event: "begin", stage }));
+	try {
+		const result = await run();
+		console.error(JSON.stringify({ diagnostic: "warm-parent-phase", phase, event: "end", stage }));
+		return result;
+	} catch (error) {
+		console.error(JSON.stringify({ diagnostic: "warm-parent-phase", phase, event: "error", stage,
+			failure: describeFailure(error) }));
+		throw error;
+	}
+}
+
 try {
-	await fixture.withBinding(rootCell, async binding => {
+	await diagnosePhase("verified-binding-use-and-drain", () => fixture.withBinding(rootCell, async binding => {
 		try {
 		stage = "sdk-root";
 		const model = modelRegistry.find(PROVIDER, MODEL);
@@ -200,23 +224,23 @@ try {
 		console.log(JSON.stringify({ stage: "complete", writeStartedUnderB, writeFailed, wrongFamilyDirectRejected: true,
 			outsideAlsReady: true, wireRequests: server.requests.length }));
 		} finally {
-			await AgentLifecycleManager.global().dispose();
-			await rootSession?.dispose();
+			await diagnosePhase("inside-binding-lifecycle-dispose", () => AgentLifecycleManager.global().dispose());
+			await diagnosePhase("inside-binding-root-session-dispose", async () => { await rootSession?.dispose(); });
 			rootSession = undefined;
 		}
-	});
+	}));
 	console.log("model-request-warm-parent:ok");
 } catch (error) {
-	console.error(JSON.stringify({ stage, writeStartedUnderB, writeFailed, writeResult }));
+	console.error(JSON.stringify({ stage, writeStartedUnderB, writeFailed, writeResult, failure: describeFailure(error) }));
 	throw error;
 } finally {
-	await AgentLifecycleManager.global().dispose();
-	await rootSession?.dispose();
-	await manager.close();
+	await diagnosePhase("outer-lifecycle-dispose", () => AgentLifecycleManager.global().dispose());
+	await diagnosePhase("outer-root-session-dispose", async () => { await rootSession?.dispose(); });
+	await diagnosePhase("outer-manager-close", () => manager.close());
 	modelRegistry.clearSourceRegistrations("<inline-0>");
 	authStorage.close();
 	server.stop();
 	AgentStorage.close();
 	closeModelCache();
-	await fixture.close();
+	await diagnosePhase("native-fixture-close", () => fixture.close());
 }
