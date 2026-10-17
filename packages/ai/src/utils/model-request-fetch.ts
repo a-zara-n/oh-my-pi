@@ -35,6 +35,7 @@ import {
 } from "../model-request-runtime";
 import { copyResponseMetadata } from "./request-debug";
 import { assertModelRequestBuiltinFetch, modelRequestBuiltinFetch } from "./model-request-builtin-fetch";
+import { ExecutionOuterWorkScope } from "./journal-outer-work";
 
 /**
  * Ordinary untracked wrapping hint and auxiliary transport mapping. Public
@@ -227,14 +228,28 @@ function observeQuietly(operation: string, observe: () => void): void {
  * Pass `response` through to the caller unchanged while telling `lease` what flows by, and settle the lease exactly
  * once: when the body ends, when it fails, when the caller cancels it, or when the request's signal aborts.
  */
-function observeResponse(lease: ModelRequestLease, response: Response, signal: AbortSignal | undefined): Response {
+function observeResponse(
+	lease: ModelRequestLease,
+	response: Response,
+	signal: AbortSignal | undefined,
+	requestWork?: ExecutionOuterWorkScope,
+): { readonly response: Response; readonly settlement: Promise<void> } {
 	observeQuietly("observeResponse", () =>
 		lease.observeResponse({ status: response.status, headers: responseHeaders(response.headers) }),
 	);
+	const { promise: settlement, resolve: resolveSettlement } = Promise.withResolvers<void>();
 	const upstream = response.body;
 	if (upstream === null) {
-		void settleQuietly(lease, { type: "response-ended", status: response.status });
-		return response;
+		void (async () => {
+			try {
+				await settleQuietly(lease, { type: "response-ended", status: response.status });
+			} catch (error) {
+				requestWork?.noteFailure(error);
+			} finally {
+				resolveSettlement();
+			}
+		})();
+		return { response, settlement };
 	}
 	let settled = false;
 	const onAbort = () =>
@@ -243,7 +258,15 @@ function observeResponse(lease: ModelRequestLease, response: Response, signal: A
 		if (settled) return;
 		settled = true;
 		signal?.removeEventListener("abort", onAbort);
-		void settleQuietly(lease, outcome);
+		void (async () => {
+			try {
+				await settleQuietly(lease, outcome);
+			} catch (error) {
+				requestWork?.noteFailure(error);
+			} finally {
+				resolveSettlement();
+			}
+		})();
 	};
 	if (signal?.aborted) onAbort();
 	else signal?.addEventListener("abort", onAbort, { once: true });
@@ -296,7 +319,12 @@ function observeResponse(lease: ModelRequestLease, response: Response, signal: A
 		headers: response.headers,
 	});
 	copyResponseMetadata(wrapped, response);
-	return wrapped;
+	return { response: wrapped, settlement };
+}
+
+function retainResponseBodyOuterWork(requestWork: ExecutionOuterWorkScope, settlement: Promise<void>): void {
+	requestWork.track(settlement);
+	void settlement.finally(() => requestWork.end());
 }
 
 function registerRequiredPermit(
@@ -351,6 +379,7 @@ async function sendRequired(
 	execution: ModelRequestExecution,
 	permit: ModelRequestPermit,
 	signal: AbortSignal | undefined,
+	requestWork: ExecutionOuterWorkScope,
 ): Promise<Response> {
 	const { input, init, transport } = args;
 	const lease = permit.lease;
@@ -376,7 +405,7 @@ async function sendRequired(
 			record.state = "begun";
 			dispatched = true;
 			// No caller callback, await, or global fetch lookup between final begin and the actual builtin call.
-			responsePromise = modelRequestBuiltinFetch(input, init);
+			responsePromise = requestWork.track(modelRequestBuiltinFetch(input, init));
 		} catch (error) {
 			startFailure = { error };
 			throw error;
@@ -397,33 +426,47 @@ async function sendRequired(
 		}
 		responseAwaited = true;
 		const response = await responsePromise;
-		return lease === undefined ? response : observeResponse(lease, response, signal);
+		if (lease === undefined) {
+			await requestWork.end();
+			return response;
+		}
+		const observed = observeResponse(lease, response, signal, requestWork);
+		retainResponseBodyOuterWork(requestWork, observed.settlement);
+		return observed.response;
 	} catch (error) {
 		if (record !== undefined) record.state = "ended";
 		let failure = error;
+		requestWork.noteFailure(error);
 		// If synchronous release failed after dispatch, still consume the already-started Promise.
 		// Preserve both failures rather than leaving a detached rejection or claiming not-sent.
 		if (responsePromise !== undefined && !responseAwaited) {
 			try {
-				await responsePromise;
+				await requestWork.track(responsePromise);
 			} catch (transportError) {
 				if (transportError !== failure)
 					failure = new AggregateError([failure, transportError], "model request dispatch and release failed");
 			}
 		}
 		if (lease !== undefined) {
-			await settleQuietly(
-				lease,
-				dispatched
-					? {
-							type: "request-failed",
-							sent: "maybe",
-							aborted: signal?.aborted === true,
-							transportClosed: responseAwaited,
-						}
-					: { type: "not-sent", aborted: signal?.aborted === true },
-			);
+			try {
+				await requestWork.track(
+					settleQuietly(
+						lease,
+						dispatched
+							? {
+									type: "request-failed",
+									sent: "maybe",
+									aborted: signal?.aborted === true,
+									transportClosed: responseAwaited,
+								}
+							: { type: "not-sent", aborted: signal?.aborted === true },
+					),
+				);
+			} catch (settleError) {
+				requestWork.noteFailure(settleError);
+			}
 		}
+		await requestWork.end();
 		if (!dispatched && !signal?.aborted && !(failure instanceof ModelRequestDeniedError)) {
 			throw new ModelRequestDeniedError("gate-error", "model request journal admission failed before dispatch", {
 				cause: failure,
@@ -452,6 +495,7 @@ export async function gatedSend(args: GatedSendArgs): Promise<Response> {
 	const runtime = getModelRequestRuntime();
 	const execution = currentDispatchExecution(runtime);
 	assertJournalExecutionReady(execution);
+	const requestWork = ExecutionOuterWorkScope.begin(execution);
 	if (execution !== undefined && execution.journalState !== "untracked") {
 		if (
 			runtime !== canonicalRuntime ||
@@ -472,11 +516,18 @@ export async function gatedSend(args: GatedSendArgs): Promise<Response> {
 			);
 		}
 	}
-	if (!runtime.hasGate() && (execution === undefined || execution.journalState === "untracked")) return args.send();
+	if (!runtime.hasGate() && (execution === undefined || execution.journalState === "untracked")) {
+		try {
+			return await requestWork.track(args.send());
+		} finally {
+			await requestWork.end();
+		}
+	}
 	const { input, init } = args;
 	const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
 	const link = nextModelRequestAttemptLink();
-	const permit = await authorizeDispatch(runtime, {
+	const permit = await requestWork.track(
+		authorizeDispatch(runtime, {
 		requestId: link.requestId,
 		reason: link.reason,
 		...(link.retryOf === undefined ? {} : { retryOf: link.retryOf }),
@@ -484,23 +535,45 @@ export async function gatedSend(args: GatedSendArgs): Promise<Response> {
 		model: modelRef(currentModelRequestDestination() ?? args.model),
 		wire: buildModelRequestWire(input, init),
 		...(signal === undefined || signal === null ? {} : { signal }),
-	});
+		}),
+	);
 	link.record(permit.attemptId);
 	const lease = permit.lease;
 	try {
 		// Authorization can yield across a newly required or faulted execution family.
 		assertJournalExecutionReady(execution);
 	} catch (error) {
-		if (lease !== undefined) await settleQuietly(lease, { type: "not-sent", aborted: signal?.aborted === true });
+		requestWork.noteFailure(error);
+		if (lease !== undefined) {
+			try {
+				await requestWork.track(
+					settleQuietly(lease, { type: "not-sent", aborted: signal?.aborted === true }),
+				);
+			} catch (settleError) {
+				requestWork.noteFailure(settleError);
+			}
+		}
+		await requestWork.end();
 		throw error;
 	}
 	if (execution !== undefined && execution.journalState !== "untracked") {
-		return sendRequired(args, runtime, execution, permit, signal ?? undefined);
+		return sendRequired(args, runtime, execution, permit, signal ?? undefined, requestWork);
 	}
-	if (lease === undefined) return args.send();
+	if (lease === undefined) {
+		try {
+			return await requestWork.track(args.send());
+		} finally {
+			await requestWork.end();
+		}
+	}
 	const effectiveSignal = signal ?? undefined;
 	if (effectiveSignal?.aborted) {
-		await settleQuietly(lease, { type: "not-sent", aborted: true });
+		try {
+			await requestWork.track(settleQuietly(lease, { type: "not-sent", aborted: true }));
+		} catch (settleError) {
+			requestWork.noteFailure(settleError);
+		}
+		await requestWork.end();
 		throw effectiveSignal.reason ?? new Error("model request aborted before it was sent");
 	}
 	try {
@@ -508,24 +581,40 @@ export async function gatedSend(args: GatedSendArgs): Promise<Response> {
 	} catch (error) {
 		// Nothing was sent. A gate whose bookkeeping fails must not leak the lease, and the failure is the gate's:
 		// terminal, not a transport error a retry layer would replay.
-		await settleQuietly(lease, { type: "not-sent", aborted: false });
+		requestWork.noteFailure(error);
+		try {
+			await requestWork.track(settleQuietly(lease, { type: "not-sent", aborted: false }));
+		} catch (settleError) {
+			requestWork.noteFailure(settleError);
+		}
+		await requestWork.end();
 		throw new ModelRequestDeniedError("gate-error", "model request gate failed while starting to send", {
 			cause: error,
 		});
 	}
 	let response: Response;
 	try {
-		response = await args.send();
+		response = await requestWork.track(args.send());
 	} catch (error) {
-		await settleQuietly(lease, {
-			type: "request-failed",
-			sent: "maybe",
-			aborted: effectiveSignal?.aborted === true,
-			transportClosed: true,
-		});
+		requestWork.noteFailure(error);
+		try {
+			await requestWork.track(
+				settleQuietly(lease, {
+					type: "request-failed",
+					sent: "maybe",
+					aborted: effectiveSignal?.aborted === true,
+					transportClosed: true,
+				}),
+			);
+		} catch (settleError) {
+			requestWork.noteFailure(settleError);
+		}
+		await requestWork.end();
 		throw error;
 	}
-	return observeResponse(lease, response, effectiveSignal);
+	const observed = observeResponse(lease, response, effectiveSignal, requestWork);
+	retainResponseBodyOuterWork(requestWork, observed.settlement);
+	return observed.response;
 }
 
 /**

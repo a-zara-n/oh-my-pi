@@ -39,6 +39,7 @@ import type {
 	ModelRequestWire,
 } from "./model-request-gate";
 import { buildModelRequestCoverage } from "./model-request-coverage";
+import { ExecutionOuterWorkScope } from "./utils/journal-outer-work";
 
 export type { ModelRequestExecution } from "@oh-my-pi/pi-utils/model-request-journal-composition";
 
@@ -150,11 +151,14 @@ function resolveUntrackedScope(init: ModelRequestExecutionInit): ModelRequestSco
 /** Wraps a gate-issued lease so the core cannot violate the lease protocol (order, once-only settle). */
 class GuardedLease implements ModelRequestLease {
 	readonly #lease: ModelRequestLease;
+	readonly #gateWork: ExecutionOuterWorkScope | undefined;
 	#begun = false;
 	#settled: Promise<void> | undefined;
 
-	constructor(lease: ModelRequestLease) {
+	constructor(lease: ModelRequestLease, gateWork?: ExecutionOuterWorkScope) {
 		this.#lease = lease;
+		this.#gateWork = gateWork?.active ? gateWork : undefined;
+		if (this.#gateWork) this.#gateWork.transfer();
 	}
 
 	beginSend(): void {
@@ -175,7 +179,16 @@ class GuardedLease implements ModelRequestLease {
 	}
 
 	settle(outcome: ModelRequestOutcome): Promise<void> {
-		this.#settled ??= (async () => this.#lease.settle(outcome))();
+		this.#settled ??= (async () => {
+			try {
+				await this.#lease.settle(outcome);
+			} catch (error) {
+				this.#gateWork?.noteFailure(error);
+				throw error;
+			} finally {
+				await this.#gateWork?.endTransferred();
+			}
+		})();
 		return this.#settled;
 	}
 
@@ -469,36 +482,46 @@ export class ModelRequestRuntime {
 		const signal = input.signal;
 		if (signal?.aborted) throw signal.reason ?? new AbortError("model request aborted before authorization");
 
+		const gateWork = ExecutionOuterWorkScope.begin(execution);
 		const attempt = this.#buildAttempt(attemptId, input, execution);
-		const raced = await this.#raceGate(registration, attempt);
-
-		if (raced.kind === "aborted") {
-			throw signal?.reason ?? new AbortError("model request aborted while awaiting authorization");
-		}
-		if (raced.kind === "timeout") {
-			throw new ModelRequestDeniedError(
-				"gate-error",
-				"model request gate did not answer within the configured timeout",
-			);
-		}
-		const decision = parseDecision(raced.value);
-		if (decision === undefined) {
-			throw new ModelRequestDeniedError("gate-error", "model request gate returned an unrecognizable decision");
-		}
-		if (decision.type === "deny") throw new ModelRequestDeniedError(decision.code, decision.message);
-		if (signal?.aborted) {
-			if (decision.type === "allow") this.#releaseUnused(decision.lease, true);
-			throw signal.reason ?? new AbortError("model request aborted after authorization");
-		}
 		try {
-			// The process requirement or the execution family may change while the gate is awaited.
-			assertJournalExecutionReady(execution);
+			const raced = await this.#raceGate(registration, attempt, gateWork);
+
+			if (raced.kind === "aborted") {
+				throw signal?.reason ?? new AbortError("model request aborted while awaiting authorization");
+			}
+			if (raced.kind === "timeout") {
+				throw new ModelRequestDeniedError(
+					"gate-error",
+					"model request gate did not answer within the configured timeout",
+				);
+			}
+			const decision = parseDecision(raced.value);
+			if (decision === undefined) {
+				throw new ModelRequestDeniedError("gate-error", "model request gate returned an unrecognizable decision");
+			}
+			if (decision.type === "deny") throw new ModelRequestDeniedError(decision.code, decision.message);
+			if (signal?.aborted) {
+				if (decision.type === "allow") await gateWork.track(this.#releaseUnused(decision.lease, true));
+				throw signal.reason ?? new AbortError("model request aborted after authorization");
+			}
+			try {
+				// The process requirement or the execution family may change while the gate is awaited.
+				assertJournalExecutionReady(execution);
+			} catch (error) {
+				if (decision.type === "allow") await gateWork.track(this.#releaseUnused(decision.lease, false));
+				throw error;
+			}
+			if (decision.type === "pass") {
+				await gateWork.end();
+				return { attemptId, lease: undefined };
+			}
+			return { attemptId, lease: new GuardedLease(decision.lease, gateWork) };
 		} catch (error) {
-			if (decision.type === "allow") this.#releaseUnused(decision.lease, false);
+			gateWork.noteFailure(error);
+			await gateWork.end();
 			throw error;
 		}
-		if (decision.type === "pass") return { attemptId, lease: undefined };
-		return { attemptId, lease: new GuardedLease(decision.lease) };
 	}
 
 	#buildAttempt(
@@ -536,8 +559,13 @@ export class ModelRequestRuntime {
 		});
 	}
 
-	async #raceGate(registration: GateRegistration, attempt: ModelRequestAttempt): Promise<RaceResult> {
+	async #raceGate(
+		registration: GateRegistration,
+		attempt: ModelRequestAttempt,
+		gateWork?: ExecutionOuterWorkScope,
+	): Promise<RaceResult> {
 		const gateCall = (async () => registration.gate.authorize(attempt))();
+		if (gateWork?.active) gateWork.track(gateCall);
 		const { promise: interrupt, resolve: interruptWith } = Promise.withResolvers<RaceResult>();
 		// Set the moment the caller stops waiting, so an answer that lands afterwards is released, not used.
 		let raceOver = false;
@@ -556,10 +584,14 @@ export class ModelRequestRuntime {
 			value => {
 				if (raceOver) {
 					const late = parseDecision(value);
-					if (late?.type === "allow") this.#releaseUnused(late.lease, attempt.signal?.aborted === true);
+					if (late?.type === "allow") {
+						const release = this.#releaseUnused(late.lease, attempt.signal?.aborted === true);
+						if (gateWork?.active) gateWork.track(release);
+						else void release.catch(() => {});
+					}
 				}
 			},
-			() => {},
+			error => gateWork?.noteFailure(error),
 		);
 		try {
 			return await Promise.race([
@@ -577,8 +609,8 @@ export class ModelRequestRuntime {
 		}
 	}
 
-	#releaseUnused(lease: ModelRequestLease, aborted: boolean): void {
-		void (async () => lease.settle({ type: "not-sent", aborted }))().catch(() => {});
+	#releaseUnused(lease: ModelRequestLease, aborted: boolean): Promise<void> {
+		return lease.settle({ type: "not-sent", aborted });
 	}
 
 	// ---- self-check of the context mechanism ----

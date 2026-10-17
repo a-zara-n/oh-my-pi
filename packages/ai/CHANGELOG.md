@@ -4,6 +4,7 @@
 
 ### Added
 
+- DES-004 §6.7.2i / ADR-012 outer work lifetime on ai fetch/runtime/stream callers: `beginJournalExecutionWork` / `endJournalWork` via private `ExecutionOuterWorkScope` for E-01 (`gatedSend`/`sendRequired` body+lease join), E-02 (`gateCall`/`GuardedLease` transfer), and A-01–A-06 stream/transport wrappers. Subprocess regressions in `model-request-outer-lifetime.test.ts` (parent runtime).
 - Added a generic `ModelRequestGate` API (`registerModelRequestGate`, `getModelRequestGateInfo`, `ModelRequestDeniedError`) that lets one registered owner decide whether an outbound model request may be sent, with a core-owned execution context that identifies the requesting session, root and purpose; behavior is unchanged when no gate is registered.
 - Work in progress: execution contexts retain the exact opaque journal authority binding across derivation. Managed authorization remains closed until the manager's actual registry/header/owner receipt can be authenticated against the exact execution; caller-supplied promises cannot assert readiness. This does not complete managed sending. Ordinary sinkless contexts are unchanged.
 - Corrected the WIP managed-send boundary at three no-gate transport fast paths (`gatedSend`, `authorizeUninstrumentedAttempt`, and the uninstrumented stream wrapper). Runtime-only rejection had not prevented those paths from reaching I/O. Ordinary sinkless fast paths remain; permanent process regressions and a throwaway before/after loopback smoke are prepared, with actual wire measurements pending parent verification.

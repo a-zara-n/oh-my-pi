@@ -82,6 +82,7 @@ import {
 import { isModelRequestLocalStream } from "./model-request-execution";
 import { getModelRequestRuntime } from "./model-request-runtime";
 import { authorizeUninstrumentedAttempt } from "./utils/model-request-fetch";
+import { beginCurrentExecutionOuterWork } from "./utils/journal-outer-work";
 import { withTransportFetch } from "./utils/transport-fetch";
 
 function isGoogleVertexAuthenticatedModel(model: Model<Api>): boolean {
@@ -731,11 +732,12 @@ function withProviderInFlightLimit<TOptions extends Pick<StreamOptions, "signal"
 
 	const outer = new AssistantMessageEventStream();
 	void (async () => {
+		const slotWork = beginCurrentExecutionOuterWork();
 		let release: (() => Promise<void>) | undefined;
 		let releasePromise: Promise<void> | undefined;
 		const releaseOnce = () => {
 			if (!release) return Promise.resolve();
-			releasePromise ??= release();
+			releasePromise ??= slotWork.track(release());
 			return releasePromise;
 		};
 		const releaseBestEffort = async () => {
@@ -755,7 +757,7 @@ function withProviderInFlightLimit<TOptions extends Pick<StreamOptions, "signal"
 		};
 		try {
 			const startedWaitingAt = Date.now();
-			release = await acquireProviderInFlightSlot(model.provider, limit, options?.signal);
+			release = await slotWork.track(acquireProviderInFlightSlot(model.provider, limit, options?.signal));
 			if (Date.now() - startedWaitingAt >= PROVIDER_INFLIGHT_SIGNAL_FALLBACK_MS) {
 				logger.debug("Provider in-flight limit wait completed", { provider: model.provider, limit });
 			}
@@ -776,7 +778,7 @@ function withProviderInFlightLimit<TOptions extends Pick<StreamOptions, "signal"
 					return;
 				}
 			}
-			const result = await inner.result();
+			const result = await slotWork.track(inner.result());
 			// Releasing the permit is part of request completion. Publishing the
 			// result first lets an immediate follow-up turn contend with its own
 			// still-live lease, which is particularly costly on Windows.
@@ -786,8 +788,11 @@ function withProviderInFlightLimit<TOptions extends Pick<StreamOptions, "signal"
 				else outer.end(result);
 			}
 		} catch (error) {
+			slotWork.noteFailure(error);
 			await releaseBestEffort();
 			if (!outer.done) outer.fail(error);
+		} finally {
+			await slotWork.end();
 		}
 	})();
 	return outer;
@@ -885,17 +890,23 @@ function withResolvedModelHeaders<TApi extends Api>(
 
 	const outer = new AssistantMessageEventStream();
 	void (async () => {
+		const headerWork = beginCurrentExecutionOuterWork();
+		const rawResolver = resolveHeaders(signal);
+		headerWork.track(rawResolver);
 		try {
-			const headers = await untilAborted(signal, () => resolveHeaders(signal));
+			const headers = await headerWork.track(untilAborted(signal, () => rawResolver));
 			signal?.throwIfAborted();
 			const inner = run({ ...model, resolveHeaders: undefined, headers: headers ? { ...headers } : undefined });
 			for await (const event of inner) {
 				outer.push(event);
 				if (outer.done) return;
 			}
-			if (!outer.done) outer.end(await inner.result());
+			if (!outer.done) outer.end(await headerWork.track(inner.result()));
 		} catch (error) {
+			headerWork.noteFailure(error);
 			outer.fail(error);
+		} finally {
+			await headerWork.end();
 		}
 	})();
 	return outer;
@@ -966,17 +977,21 @@ function gateUninstrumentedTransport(
 	if (!runtime.hasGate() && (execution === undefined || execution.journalState === "untracked")) return create();
 	const outer = new AssistantMessageEventStream();
 	void (async () => {
+		const transportWork = beginCurrentExecutionOuterWork();
 		try {
-			await authorizeUninstrumentedAttempt(model, "chat", signal);
+			await transportWork.track(authorizeUninstrumentedAttempt(model, "chat", signal));
 			assertCurrentJournalExecutionReady();
 			const inner = create();
 			for await (const event of inner) {
 				outer.push(event);
 				if (outer.done) return;
 			}
-			if (!outer.done) outer.end(await inner.result());
+			if (!outer.done) outer.end(await transportWork.track(inner.result()));
 		} catch (error) {
+			transportWork.noteFailure(error);
 			outer.fail(error);
+		} finally {
+			await transportWork.end();
 		}
 	})();
 	return outer;
@@ -1500,60 +1515,70 @@ function streamSimpleRequest<TApi extends Api>(
 		};
 
 		void (async () => {
-			let lastKey: string | undefined;
-			let credentialId: number | undefined;
-			let oauthIdentity: OAuthRequestIdentity | undefined;
+			const resolverWork = beginCurrentExecutionOuterWork();
 			try {
-				const resolved = await apiKeyResolver({ lastChance: false, error: undefined, signal });
-				lastKey = resolvedApiKeyBearer(resolved);
-				credentialId = typeof resolved === "string" ? undefined : resolved?.credentialId;
-				oauthIdentity = typeof resolved === "string" ? undefined : resolved?.oauthIdentity;
-			} catch (error) {
-				// A thrown resolver is a broker/OAuth/network failure, not a missing
-				// key — surface the cause instead of masking it as "No API key".
-				outer.fail(
-					new AIError.ConfigurationError(
-						`Failed to resolve API key for provider ${model.provider}: ${error instanceof Error ? error.message : String(error)}`,
-						{ cause: error },
-					),
-				);
-				return;
-			}
-			if (lastKey === undefined) {
-				if (getProviderDefinition(model.provider)?.allowsMissingApiKey) {
-					const failure = await runAttempt();
-					if (failure) emitFailure(failure);
+				let lastKey: string | undefined;
+				let credentialId: number | undefined;
+				let oauthIdentity: OAuthRequestIdentity | undefined;
+				try {
+					const resolved = await resolverWork.track(
+						apiKeyResolver({ lastChance: false, error: undefined, signal }),
+					);
+					lastKey = resolvedApiKeyBearer(resolved);
+					credentialId = typeof resolved === "string" ? undefined : resolved?.credentialId;
+					oauthIdentity = typeof resolved === "string" ? undefined : resolved?.oauthIdentity;
+				} catch (error) {
+					// A thrown resolver is a broker/OAuth/network failure, not a missing
+					// key — surface the cause instead of masking it as "No API key".
+					resolverWork.noteFailure(error);
+					outer.fail(
+						new AIError.ConfigurationError(
+							`Failed to resolve API key for provider ${model.provider}: ${error instanceof Error ? error.message : String(error)}`,
+							{ cause: error },
+						),
+					);
 					return;
 				}
-				outer.fail(new AIError.MissingApiKeyError(model.provider));
-				return;
+				if (lastKey === undefined) {
+					if (getProviderDefinition(model.provider)?.allowsMissingApiKey) {
+						const failure = await resolverWork.track(runAttempt());
+						if (failure) emitFailure(failure);
+						return;
+					}
+					outer.fail(new AIError.MissingApiKeyError(model.provider));
+					return;
+				}
+				const retryState = createAuthRetryKeyState(lastKey);
+				let failure = await resolverWork.track(runAttempt(lastKey, credentialId, oauthIdentity));
+				if (!failure) return;
+				while (true) {
+					// Caller aborted between attempts: don't mint a fresh token or fire
+					// another doomed request — emit the captured failure instead.
+					if (signal?.aborted) break;
+					let nextCredentialId: number | undefined;
+					let nextOAuthIdentity: OAuthRequestIdentity | undefined;
+					const nextKey = await resolverWork.track(
+						resolveNextAuthRetryKey(
+							retryState,
+							apiKeyResolver,
+							failure.error,
+							signal,
+							resolved => {
+								nextCredentialId = typeof resolved === "string" ? undefined : resolved?.credentialId;
+								nextOAuthIdentity = typeof resolved === "string" ? undefined : resolved?.oauthIdentity;
+							},
+						),
+					);
+					if (nextKey === undefined) break;
+					markNextModelRequestAttempt("auth-rotation");
+					const next = await resolverWork.track(runAttempt(nextKey, nextCredentialId, nextOAuthIdentity));
+					if (!next) return;
+					failure = next;
+				}
+				emitFailure(failure);
+			} finally {
+				await resolverWork.end();
 			}
-			const retryState = createAuthRetryKeyState(lastKey);
-			let failure = await runAttempt(lastKey, credentialId, oauthIdentity);
-			if (!failure) return;
-			while (true) {
-				// Caller aborted between attempts: don't mint a fresh token or fire
-				// another doomed request — emit the captured failure instead.
-				if (signal?.aborted) break;
-				let nextCredentialId: number | undefined;
-				let nextOAuthIdentity: OAuthRequestIdentity | undefined;
-				const nextKey = await resolveNextAuthRetryKey(
-					retryState,
-					apiKeyResolver,
-					failure.error,
-					signal,
-					resolved => {
-						nextCredentialId = typeof resolved === "string" ? undefined : resolved?.credentialId;
-						nextOAuthIdentity = typeof resolved === "string" ? undefined : resolved?.oauthIdentity;
-					},
-				);
-				if (nextKey === undefined) break;
-				markNextModelRequestAttempt("auth-rotation");
-				const next = await runAttempt(nextKey, nextCredentialId, nextOAuthIdentity);
-				if (!next) return;
-				failure = next;
-			}
-			emitFailure(failure);
 		})();
 		return outer;
 	}

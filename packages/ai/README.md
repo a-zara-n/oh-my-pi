@@ -21,6 +21,11 @@ stream's uninstrumented-transport wrapper now retain that fast path only when th
 execution has no managed binding. The isolated transport regressions and before/after loopback
 smoke are prepared but unexecuted by this worker; actual wire measurements await parent verification.
 
+Outer producer lifetime (DES-004@13 §6.7.2i) is wired through the internal journal outer-work helper on managed
+`gatedSend`, runtime `gateCall`/`GuardedLease`, `transportFetch` debug preparation, and stream wrapper IIFEs.
+`test/model-request-outer-lifetime.test.ts` exercises managed subprocess cases; AC-OL runtime on the full fork is
+parent integration, not claimed here.
+
 ## Table of Contents
 
 - [Supported Providers](#supported-providers)

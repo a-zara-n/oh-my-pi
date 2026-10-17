@@ -10,6 +10,7 @@ import { getProxyForProvider, withProxyInit } from "./proxy";
 import { gatedSend, markFetchGated } from "./model-request-fetch";
 import { createFetchRequestDebugSession, isRequestDebugEnabled } from "./request-debug";
 import { assertModelRequestBuiltinFetch, modelRequestBuiltinFetch } from "./model-request-builtin-fetch";
+import { ExecutionOuterWorkScope } from "./journal-outer-work";
 
 /** Only functions created by this module qualify for an identity-preserving rewrap. */
 const transportFetches = new WeakSet<FetchImpl>();
@@ -72,8 +73,14 @@ export function transportFetch(model: Model<Api>, fetchImpl: FetchImpl | undefin
 	};
 	const send = async (input: string | URL | Request, init: RequestInit | undefined): Promise<Response> => {
 		if (!isRequestDebugEnabled()) return base(input, init);
-		const session = await createFetchRequestDebugSession(input, init);
-		return session.wrapResponse(await base(input, init));
+		const execution = getModelRequestRuntime().currentExecution();
+		const debugWork = ExecutionOuterWorkScope.begin(execution);
+		try {
+			const session = await debugWork.track(createFetchRequestDebugSession(input, init));
+			return session.wrapResponse(await debugWork.track(base(input, init)));
+		} finally {
+			await debugWork.end();
+		}
 	};
 	/** The same transport with no gate: what a provider's non-inference requests (token exchange, metadata) use. */
 	const ungated: FetchImpl = (input, init) => send(input, prepare(input, init));
@@ -86,16 +93,23 @@ export function transportFetch(model: Model<Api>, fetchImpl: FetchImpl | undefin
 			requireBuiltinTransport(base);
 			// All debug/body snapshot awaits finish before entering the journal admission path.
 			// The required sender never hides an async preparation step inside its I/O callback.
-			const session = isRequestDebugEnabled() ? await createFetchRequestDebugSession(input, sentInit) : undefined;
-			const response = await gatedSend({
-				model,
-				kind: "chat",
-				input,
-				init: sentInit,
-				transport: base,
-				send: () => base(input, sentInit),
-			});
-			return session === undefined ? response : session.wrapResponse(response);
+			const debugWork = ExecutionOuterWorkScope.begin(execution);
+			try {
+				const session = isRequestDebugEnabled()
+					? await debugWork.track(createFetchRequestDebugSession(input, sentInit))
+					: undefined;
+				const response = await gatedSend({
+					model,
+					kind: "chat",
+					input,
+					init: sentInit,
+					transport: base,
+					send: () => base(input, sentInit),
+				});
+				return session === undefined ? response : session.wrapResponse(response);
+			} finally {
+				await debugWork.end();
+			}
 		}
 		return gatedSend({
 			model,
