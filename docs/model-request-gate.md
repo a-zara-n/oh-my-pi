@@ -35,7 +35,7 @@ the caller already stopped waiting (timeout or abort) is released as `not-sent`,
 | `standalone` | No context, and the process was marked a session-less command at its entry (`markModelRequestProcessStandalone`). A marked process can never create a session, and a process that already has a session cannot be marked. |
 | `unclassified` | Neither. |
 
-`rootSessionId`:
+`rootSessionId` for ordinary untracked executions:
 
 - A session the user started or resumed is its own root, **re-evaluated on every request** from
   `sessionManager.getSessionId()`, so `/new` never bills the previous root.
@@ -48,6 +48,13 @@ the caller already stopped waiting (timeout or abort) is released as `not-sent`,
   visible to the gate and is not turned into a fresh root.
 - Required children must retain a live genuine parent and its exact binding/root. Missing, fake, revoked or mismatched
   handovers fail closed; a warm revive outside an active context uses its explicit parent, not a registry or header substitute.
+
+Required child creation instead carries the exact genuine `parentExecution`
+reference in the inherited root handover, through the runtime to the journal
+leaf. The leaf authenticates that object and its live principal; an agent DTO,
+root string or an implicitly substituted ALS parent is not a parent capability.
+The self-root variant does not accept this field. Ordinary untracked handovers
+without the optional parent retain their existing root/scope projection.
 
 The execution module (`@oh-my-pi/pi-ai/model-request-execution`) is internal and deliberately absent from the
 `@oh-my-pi/pi-ai` barrel, and no public option or request argument accepts an origin, scope or root. That is the whole

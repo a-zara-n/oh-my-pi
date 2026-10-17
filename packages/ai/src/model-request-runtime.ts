@@ -51,6 +51,8 @@ export type ModelRequestRootSource =
 			readonly kind: "inherited";
 			readonly rootSessionId: string | undefined;
 			readonly modelRequestJournalLeaseBinding?: ModelRequestJournalLeaseBinding;
+			/** Exact genuine parent capability supplied by the existing root handover. */
+			readonly parentExecution?: ModelRequestExecution;
 	  };
 
 export interface ModelRequestExecutionInit {
@@ -392,7 +394,14 @@ export class ModelRequestRuntime {
 		init: ModelRequestExecutionInit,
 		binding: ModelRequestJournalLeaseBinding | undefined = init.root.modelRequestJournalLeaseBinding,
 	): ModelRequestExecution {
-		const execution = createJournalExecution({ binding, agent: init.agent, purpose: init.purpose });
+		const execution = createJournalExecution({
+			binding,
+			agent: init.agent,
+			purpose: init.purpose,
+			...(init.root.kind === "inherited" && init.root.parentExecution !== undefined
+				? { parentExecution: init.root.parentExecution }
+				: {}),
+		});
 		if (execution.journalState === "untracked") this.#untrackedProjections.set(execution, init);
 		return execution;
 	}
