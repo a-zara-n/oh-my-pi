@@ -37,13 +37,15 @@
   general RO backup use, while `authority-control` requires explicit readonly/non-creating
   options and the fixed native authorizer. The verifier selects that purpose internally;
   callers cannot supply their connection/purpose as authentication proof. The native
-  three-command ABI is unchanged. Purpose/backup regressions await parent verification.
+  three-command ABI is unchanged. The parent's rebuilt-artifact authority/control/raw-lease
+  run (bg454) passed 33 tests/199 expectations, including the purpose/backup regressions.
 - Added genuine raw/verified retained-root scopes with their own nonblocking OS root handle and
   synchronous idempotent release. Assertions reject released/ended/foreign scope identities;
   binding cleanup invalidates/releases leftovers before its parent owner lease. Existing
   callback overloads retain their settlement lifetime. Verified scope `ownerId` now projects
-  the credential's actual raw writer-owner identity, not a journal-owner UUID. New regressions
-  and the real-scope/OS-lock smoke artifact are for parent execution, not worker verification.
+  the credential's actual raw writer-owner identity, not a journal-owner UUID. The native
+  authority/control/raw-lease target run passed 33 tests/199 expectations (parent bg454);
+  these results do not establish outer-producer lifetime or full principal acceptance.
 - Connected File composition to registry v2 writer-owner mappings, genuine parent execution
   families and one-use retained-root send admission. Registration/header readback and each
   source/lifecycle acknowledgement check the same verified writer mapping; historical v1
@@ -96,7 +98,11 @@
   DDL/late-enrollment refusal, special paths/BigInt/strict/RO, and the owned parent
   guard. The selected-library ordinary CREATE failure and lazy-enrollment candidate's
   missing initial-I/O guard remain historical failures, not accepted workarounds.
-  Parent fresh-build/runtime verification is still required for this correction.
+  Parent bg449 fresh build, bg452 ordinary/owned D37 controls and bg455 actual C fixture
+  passed. Native authority/control/raw-lease suites passed 33 tests/199 expectations;
+  eight suites including metadata/AuthStorage passed 148 tests/1,210 expectations,
+  resolving the old fresh-DDL authorization failure. These are parent observations,
+  not worker checks or full Store/SDK/outer-producer/principal C acceptance.
 
 - Keep every accepted canonical principal publication in one synchronous atomic CAS/rename
   commit body, so a legitimate same-principal synchronous append cannot interleave with
@@ -120,8 +126,9 @@
   Ordinary connections outside the fixed native registry retain Bun's existing close behavior.
   The parent reproduced a successful acknowledgment after a valid factory RO inspection followed
   by main-file rename and `close(true)`. This is rename-before-close evidence, not proof of an
-  xClose-only race or authority credential misissuance. Native close-status propagation and these
-  factory regressions require the parent's rebuilt-artifact verification; workers did not run them.
+  xClose-only race or authority credential misissuance. Parent bg454 passed the
+  rebuilt-artifact factory regressions and bg458 retained rename-close rejection while
+  ordinary AUTH denials kept native control live and allowed normal close. Workers ran no checks.
 - Reconcile the actual File snapshot when an append's starting byte count differs from
   the principal's committed count, retaining foreign committed rows and logical staging
   together before adopting the new size. Facades reindex recovered rows; uncontended
@@ -201,6 +208,14 @@
   The parent's separated native diagnostic then showed query-only denial leaving control live,
   but VACUUM's ordinary AUTH denial incorrectly faulting control before close; no output existed.
   This establishes denial-to-sticky-fault mixing, not success of the timed-out suites.
+- Parent named-VFS follow-through preserved the earlier guard results: bg456's first
+  contention returned SQLITE_PROTOCOL, not BUSY, then retry committed with live control;
+  reader-first SELECT and RW UPDATE succeeded. Bg457 cold/prior-read cached-fixture RO
+  recovery rejected with errno 264 while leaving main/WAL/full-shm/header bytes unchanged,
+  and legitimate RW recovery succeeded. Bg458 retained rename-before-close error propagation
+  and live control/normal close after SQL AUTH denials. Cached mapping is still inferred
+  from the prior same-connection read, not internal instrumentation. Power-loss durability,
+  actual authority misissuance, final Store/SDK smoke, outer drain and full C are not claimed.
 
 - Relocated the existing session JSONL content/stream readers and migrations to
   `@oh-my-pi/pi-utils/session-file-reader` and `@oh-my-pi/pi-utils/session-migrations`,
