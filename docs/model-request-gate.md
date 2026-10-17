@@ -201,9 +201,12 @@ a gate that answers `pass`, a required execution must have a genuine ready File
 principal and consume the journal leaf's one-use admission.
 
 Only the canonical `gatedSend` module freezes and privately registers the exact
-permit returned by its direct `runtime.authorize` call. The non-exported map binds
-the original runtime, exact execution, attempt id, lease, admission and
-`authorized/prepared/begun/ended` state; entries are never deleted or revived.
+permit returned by the captured authorizer bound to the canonical runtime.
+The captured current-execution method is also invoked directly: a mutable
+runtime property is never reacquired to call it after a reference check.
+The non-exported map binds the original runtime, exact execution, attempt id,
+lease, admission and `authorized/prepared/begun/ended` state; entries are never
+deleted or revived.
 Caller permits, copied objects, changed runtime methods and a different
 execution/lease cannot enter that dispatch path. The leaf's `ClosedCoreAttemptIdentity`
 projection is the same permit object, not an independently authenticated gate
@@ -259,6 +262,11 @@ Parent verification uses the real builtin, not a fake-fetch wiring test:
    with the actual retained-root and File-principal implementation. Its isolated
    native children use a fresh real authority database/File principal and only a
    credential-free loopback route, including no-gate and gate-`pass` attempts.
+   The `authorize-accessor` child installs an accessor that returns the original
+   method for the shape/reference checks, then offers a fake authorizer that
+   would restore the method before returning a forged permit. The actual denying
+   gate must run once, the fake authorizer must never run, and the loopback must
+   receive zero requests. This is distinct from simply replacing the method.
 3. For gate deny/abort, revoke while prepare awaits, revoke after admission but
    before consumption, and authority/epoch/family-generation changes, require
    zero builtin invocations and zero loopback requests. Replay the exact

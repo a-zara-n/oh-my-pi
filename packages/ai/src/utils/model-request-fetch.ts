@@ -31,7 +31,12 @@ import type {
 	ModelRequestWire,
 } from "../model-request-gate";
 import { currentModelRequestDestination, nextModelRequestAttemptLink } from "../model-request-lineage";
-import { getModelRequestRuntime, type ModelRequestPermit, type ModelRequestRuntime } from "../model-request-runtime";
+import {
+	getModelRequestRuntime,
+	type ModelRequestAuthorizationInput,
+	type ModelRequestPermit,
+	type ModelRequestRuntime,
+} from "../model-request-runtime";
 import { copyResponseMetadata } from "./request-debug";
 import { assertModelRequestBuiltinFetch, modelRequestBuiltinFetch } from "./model-request-builtin-fetch";
 
@@ -44,6 +49,8 @@ const ungatedTwins = new WeakMap<object, FetchImpl>();
 const canonicalRuntime = getModelRequestRuntime();
 const canonicalAuthorize = canonicalRuntime.authorize;
 const canonicalCurrentExecution = canonicalRuntime.currentExecution;
+const authorizeCanonical = canonicalAuthorize.bind(canonicalRuntime);
+const currentCanonicalExecution = canonicalCurrentExecution.bind(canonicalRuntime);
 type RequiredPermitState = "authorized" | "prepared" | "begun" | "ended";
 interface RequiredPermitRecord {
 	readonly runtime: ModelRequestRuntime;
@@ -55,6 +62,21 @@ interface RequiredPermitRecord {
 }
 // Only this module's direct authorize return path can register a permit. Entries are never deleted or revived.
 const requiredPermits = new WeakMap<ModelRequestPermit, RequiredPermitRecord>();
+
+function currentDispatchExecution(runtime: ModelRequestRuntime): ModelRequestExecution | undefined {
+	const execution = currentCanonicalExecution();
+	// A mutable facade cannot hide an active required context. Preserve other
+	// runtime instances' ordinary untracked behavior without trusting their calls
+	// for the canonical managed path.
+	if (runtime === canonicalRuntime || (execution !== undefined && execution.journalState !== "untracked")) return execution;
+	return runtime.currentExecution();
+}
+
+function authorizeDispatch(runtime: ModelRequestRuntime, input: ModelRequestAuthorizationInput): Promise<ModelRequestPermit> {
+	// Never reacquire the canonical method after checking its reference. This
+	// also covers an ordinary execution that becomes required across an await.
+	return runtime === canonicalRuntime ? authorizeCanonical(input) : runtime.authorize(input);
+}
 
 /** Header and query names whose values are credentials (or may carry one) and are never shown to a gate. */
 const CREDENTIAL_NAME = /auth|key|token|secret|cookie|credential|signature|password|passwd|bearer|^sig$/i;
@@ -306,7 +328,7 @@ function assertRequiredPermit(
 		record.runtime.authorize !== canonicalAuthorize ||
 		record.runtime.currentExecution !== canonicalCurrentExecution ||
 		getModelRequestRuntime() !== record.runtime ||
-		record.runtime.currentExecution() !== record.execution ||
+		currentCanonicalExecution() !== record.execution ||
 		permit.attemptId !== record.attemptId ||
 		permit.lease !== record.lease
 	) {
@@ -412,7 +434,7 @@ export interface GatedSendArgs {
  */
 export async function gatedSend(args: GatedSendArgs): Promise<Response> {
 	const runtime = getModelRequestRuntime();
-	const execution = runtime.currentExecution();
+	const execution = currentDispatchExecution(runtime);
 	assertJournalExecutionReady(execution);
 	if (execution !== undefined && execution.journalState !== "untracked") {
 		if (
@@ -434,7 +456,7 @@ export async function gatedSend(args: GatedSendArgs): Promise<Response> {
 	const { input, init } = args;
 	const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
 	const link = nextModelRequestAttemptLink();
-	const permit = await runtime.authorize({
+	const permit = await authorizeDispatch(runtime, {
 		requestId: link.requestId,
 		reason: link.reason,
 		...(link.retryOf === undefined ? {} : { retryOf: link.retryOf }),
@@ -530,14 +552,14 @@ export async function authorizeUninstrumentedAttempt(
 	signal: AbortSignal | undefined,
 ): Promise<void> {
 	const runtime = getModelRequestRuntime();
-	const execution = runtime.currentExecution();
+	const execution = currentDispatchExecution(runtime);
 	assertJournalExecutionReady(execution);
 	if (execution !== undefined && execution.journalState !== "untracked") {
 		throw new ModelRequestDeniedError("transport-unsupported", "required model request transport has no fixed builtin dispatch");
 	}
 	if (!runtime.hasGate() && (execution === undefined || execution.journalState === "untracked")) return;
 	const link = nextModelRequestAttemptLink();
-	const permit = await runtime.authorize({
+	const permit = await authorizeDispatch(runtime, {
 		requestId: link.requestId,
 		reason: link.reason,
 		...(link.retryOf === undefined ? {} : { retryOf: link.retryOf }),
