@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+- Fixed the retained-child regression's matcher dependency deadlock: resolve its work gate
+  before invoking Bun's rejection matcher. The real staged reproduction stopped inside the
+  matcher after parent-settlement/root-release assertions; the corrected native authority,
+  SQLite control and raw lease suites passed all 30 tests (178 assertions).
+  A freshly rebuilt native diagnostic also retained both SQL authorization refusals without
+  poisoning connection identity, and authority close succeeded. Earlier suite timeouts remain
+  historical failures; these results do not establish principal drain or managed-send acceptance.
+
 ### Added
 
 - Added schema 2 registry decoding and version-discriminated entry types. Current owner registrations

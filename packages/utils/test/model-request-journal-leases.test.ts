@@ -366,9 +366,8 @@ withRawModelRequestJournalLeases(${JSON.stringify({storeId, control: "shared", m
 			const root = tryAcquireRawModelRequestJournalFileLease(join(namespace, "accounting/registry-test.lock"), "exclusive", owner);
 			if (root === undefined) throw new Error("Parent settlement left child's root held");
 			root.release();
-			const rejected = expect(child).rejects.toThrow("ended");
 			gate.resolve();
-			await rejected;
+			await expect(child).rejects.toThrow("ended");
 		} finally {
 			gate.resolve();
 			if (child !== undefined) {
