@@ -2,45 +2,47 @@
  * Process-wide runtime behind the ModelRequestGate API (internal).
  *
  * One {@link ModelRequestRuntime} owns the gate registration latch, the core
- * execution context (`AsyncLocalStorage` + a `WeakSet` registry of the
- * executions the core minted) and the session-less-process mark. The default
- * instance is shared through `globalThis` so that two copies of this module in
- * one process (an extension that resolves its own copy of `@oh-my-pi/pi-ai`)
- * cannot hold different latches and leave the host's copy unguarded.
+ * execution context (`AsyncLocalStorage`) and the session-less-process mark.
+ * Execution identity, readiness and family belong exclusively to the utils
+ * journal composition. The default runtime is shared through `globalThis`
+ * so module copies cannot hold different latches and leave the host unguarded.
  *
  * Tests build isolated instances; production code only ever sees the default.
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 import { EventEmitter } from "node:events";
+import type {
+	ModelRequestAgent,
+	ModelRequestModelRef,
+	ModelRequestOutcome,
+	ModelRequestPurpose,
+	ModelRequestScope,
+} from "@oh-my-pi/pi-utils/model-request-data";
+import {
+	assertJournalExecutionIdentity,
+	assertJournalExecutionReady,
+	createJournalExecution,
+	deriveJournalExecution,
+	type ModelRequestExecution,
+} from "@oh-my-pi/pi-utils/model-request-journal-composition";
 import type { ModelRequestJournalLeaseBinding } from "@oh-my-pi/pi-utils/model-request-journal-authority";
 import { AbortError } from "./error/abort";
 import { ModelRequestDeniedError } from "./error/model-request-denied";
 import type {
-	ModelRequestAgent,
 	ModelRequestAttempt,
 	ModelRequestGate,
 	ModelRequestGateInfo,
 	ModelRequestGateOptions,
 	ModelRequestKind,
 	ModelRequestLease,
-	ModelRequestModelRef,
-	ModelRequestOutcome,
-	ModelRequestPurpose,
 	ModelRequestReason,
-	ModelRequestScope,
 	ModelRequestWire,
 } from "./model-request-gate";
 import { buildModelRequestCoverage } from "./model-request-coverage";
 
-declare const EXECUTION_BRAND: unique symbol;
+export type { ModelRequestExecution } from "@oh-my-pi/pi-utils/model-request-journal-composition";
 
-/** Opaque handle to a core-minted execution context. Cannot be constructed outside the runtime. */
-export interface ModelRequestExecution {
-	readonly [EXECUTION_BRAND]: true;
-	readonly modelRequestJournalLeaseBinding?: ModelRequestJournalLeaseBinding;
-}
-
-/** Where an execution's root session id comes from. */
+/** Legacy untracked root projection; a required execution takes its root only from its leaf principal. */
 export type ModelRequestRootSource =
 	/** A session the user started or resumed: its root is its own current session id. */
 	| { readonly kind: "self"; readonly modelRequestJournalLeaseBinding?: ModelRequestJournalLeaseBinding }
@@ -52,7 +54,7 @@ export type ModelRequestRootSource =
 	  };
 
 export interface ModelRequestExecutionInit {
-	/** Evaluated on every request, so `/new` and session switches are never billed to a stale id. */
+	/** Re-evaluated for ordinary untracked requests only; never evidence for a required principal's session id. */
 	readonly sessionId: () => string;
 	readonly root: ModelRequestRootSource;
 	readonly agent: ModelRequestAgent;
@@ -113,51 +115,30 @@ interface GateRegistration {
 	readonly authorizeTimeoutMs: number | undefined;
 }
 
-class ExecutionImpl implements ModelRequestExecution {
-	declare readonly [EXECUTION_BRAND]: true;
-	readonly #init: ModelRequestExecutionInit;
-
-	constructor(init: ModelRequestExecutionInit) {
-		this.#init = init;
+/** Legacy dynamic scope projection for ordinary, untracked executions only. */
+function resolveUntrackedScope(init: ModelRequestExecutionInit): ModelRequestScope {
+	const sessionId = init.sessionId();
+	if (typeof sessionId !== "string" || sessionId.length === 0) {
+		throw new TypeError("model request execution resolved an empty session id");
 	}
-
-	get modelRequestJournalLeaseBinding(): ModelRequestJournalLeaseBinding | undefined {
-		return this.#init.root.modelRequestJournalLeaseBinding;
+	const root = init.root;
+	const rootSessionId = root.kind === "self" ? sessionId : root.rootSessionId;
+	if (rootSessionId !== undefined && (typeof rootSessionId !== "string" || rootSessionId.length === 0)) {
+		throw new TypeError("model request execution resolved an empty root session id");
 	}
-
-	derive(patch: ModelRequestExecutionPatch): ExecutionImpl {
-		return new ExecutionImpl({
-			...this.#init,
-			purpose: patch.purpose ?? this.#init.purpose,
-			agent: patch.agent ?? this.#init.agent,
-		});
-	}
-
-	/** Builds a fresh, frozen scope. Throws if the session id cannot be resolved. */
-	resolveScope(): ModelRequestScope {
-		const sessionId = this.#init.sessionId();
-		if (typeof sessionId !== "string" || sessionId.length === 0) {
-			throw new TypeError("model request execution resolved an empty session id");
-		}
-		const root = this.#init.root;
-		const rootSessionId = root.kind === "self" ? sessionId : root.rootSessionId;
-		if (rootSessionId !== undefined && (typeof rootSessionId !== "string" || rootSessionId.length === 0)) {
-			throw new TypeError("model request execution resolved an empty root session id");
-		}
-		const agent = this.#init.agent;
-		return Object.freeze({
-			rootSessionId,
-			sessionId,
-			agent: Object.freeze({
-				id: agent.id,
-				kind: agent.kind,
-				name: agent.name,
-				depth: agent.depth,
-				...(agent.parentId === undefined ? {} : { parentId: agent.parentId }),
-			}),
-			purpose: this.#init.purpose,
-		});
-	}
+	const agent = init.agent;
+	return Object.freeze({
+		rootSessionId,
+		sessionId,
+		agent: Object.freeze({
+			id: agent.id,
+			kind: agent.kind,
+			name: agent.name,
+			depth: agent.depth,
+			...(agent.parentId === undefined ? {} : { parentId: agent.parentId }),
+		}),
+		purpose: init.purpose,
+	});
 }
 
 /** Wraps a gate-issued lease so the core cannot violate the lease protocol (order, once-only settle). */
@@ -241,7 +222,7 @@ function assertTimeout(timeoutMs: number | undefined): void {
 
 export class ModelRequestRuntime {
 	readonly #als = new AsyncLocalStorage<object>();
-	readonly #executions = new WeakSet<object>();
+	readonly #untrackedProjections = new WeakMap<ModelRequestExecution, ModelRequestExecutionInit>();
 	readonly #localStreams = new WeakSet<object>();
 	readonly #deps: ModelRequestRuntimeDeps;
 	#registration: GateRegistration | undefined;
@@ -327,24 +308,52 @@ export class ModelRequestRuntime {
 		if (this.#standalone) {
 			throw new ModelRequestProcessClassError("a process marked standalone cannot create a session");
 		}
+		const parent = this.currentExecution();
+		let binding = init.root.modelRequestJournalLeaseBinding;
+		if (parent !== undefined && parent.journalState !== "untracked") {
+			// A child gets its own pending principal, never its parent's fixed session scope.
+			// Reject a pending/faulted/revoked parent rather than clear its requirement.
+			assertJournalExecutionReady(parent);
+			if (binding !== undefined && binding !== parent.modelRequestJournalLeaseBinding) {
+				throw new TypeError("a child model request execution cannot replace its required journal binding");
+			}
+			binding = parent.modelRequestJournalLeaseBinding;
+		}
+		const execution = this.#createExecution(init, binding);
 		this.#sessionCreated = true;
-		return this.#register(new ExecutionImpl(init));
+		return execution;
 	}
 
 	/** Derive an execution from a core-minted one (same session identity, patched purpose). */
 	deriveExecution(parent: ModelRequestExecution, patch: ModelRequestExecutionPatch): ModelRequestExecution {
-		return this.#register(this.#require(parent).derive(patch));
+		const execution = deriveJournalExecution(parent, patch);
+		const init = this.#untrackedProjections.get(parent);
+		if (execution.journalState === "untracked" && init !== undefined) {
+			this.#untrackedProjections.set(execution, {
+				...init,
+				purpose: patch.purpose ?? init.purpose,
+				agent: patch.agent ?? init.agent,
+			});
+		}
+		return execution;
 	}
 
 	/** Current execution, or undefined when none is active or the stored object was not minted by the core. */
 	currentExecution(): ModelRequestExecution | undefined {
 		const stored = this.#als.getStore();
-		if (stored === undefined || !this.#executions.has(stored)) return undefined;
-		return stored instanceof ExecutionImpl ? stored : undefined;
+		if (stored === undefined) return undefined;
+		try {
+			assertJournalExecutionIdentity(stored);
+			return stored;
+		} catch {
+			return undefined;
+		}
 	}
 
 	runWith<T>(execution: ModelRequestExecution, fn: () => T): T {
-		return this.#als.run(this.#require(execution), fn);
+		// Pending executions must be installed before the manager composes their principal.
+		assertJournalExecutionIdentity(execution);
+		return this.#als.run(execution, fn);
 	}
 
 	/** Run `fn` with a different purpose when an execution is active; otherwise run it unchanged. */
@@ -365,20 +374,25 @@ export class ModelRequestRuntime {
 		return (...args: A) => this.runWith(captured, () => fn(...args));
 	}
 
-	/** Resolve the scope of a core-minted execution as of now. */
+	/** Required scopes are fixed by the leaf principal; only untracked scopes use legacy getters. */
 	scopeOf(execution: ModelRequestExecution): ModelRequestScope {
-		return this.#require(execution).resolveScope();
-	}
-
-	#register(execution: ExecutionImpl): ExecutionImpl {
-		this.#executions.add(execution);
-		return execution;
-	}
-
-	#require(execution: ModelRequestExecution): ExecutionImpl {
-		if (!(execution instanceof ExecutionImpl) || !this.#executions.has(execution)) {
-			throw new TypeError("not a core-minted model request execution");
+		assertJournalExecutionReady(execution);
+		if (execution.journalState !== "untracked") {
+			const scope = execution.modelRequestScope;
+			if (scope === undefined) throw new TypeError("ready model request execution has no principal scope");
+			return scope;
 		}
+		const init = this.#untrackedProjections.get(execution);
+		if (init === undefined) throw new TypeError("untracked model request execution has no scope projection");
+		return resolveUntrackedScope(init);
+	}
+
+	#createExecution(
+		init: ModelRequestExecutionInit,
+		binding: ModelRequestJournalLeaseBinding | undefined = init.root.modelRequestJournalLeaseBinding,
+	): ModelRequestExecution {
+		const execution = createJournalExecution({ binding, agent: init.agent, purpose: init.purpose });
+		if (execution.journalState === "untracked") this.#untrackedProjections.set(execution, init);
 		return execution;
 	}
 
@@ -391,12 +405,13 @@ export class ModelRequestRuntime {
 	 */
 	async authorize(input: ModelRequestAuthorizationInput): Promise<ModelRequestPermit> {
 		const execution = this.currentExecution();
-		if (execution?.modelRequestJournalLeaseBinding !== undefined) {
-			// WIP boundary: r8 has not yet supplied an authenticated bridge from the manager's actual
-			// registry/header/owner receipt to this exact execution. An init promise is not that proof.
+		if (execution !== undefined) assertJournalExecutionReady(execution);
+		if (execution !== undefined && execution.journalState !== "untracked") {
+			// D37: fetch invocation does not prove actual synchronous network start.
+			// Keep required external sends closed until that transport contract exists.
 			throw new ModelRequestDeniedError(
-				"gate-error",
-				"authenticated model request journal execution connection is unavailable",
+				"transport-unsupported",
+				"required model request transport cannot prove synchronous network start",
 			);
 		}
 		const registration = this.#registration;
@@ -535,8 +550,8 @@ export class ModelRequestRuntime {
 			agent: { id, kind: "main", name: id, depth: 0 },
 			purpose: "other",
 		});
-		const outer = this.#register(new ExecutionImpl(init("context-check-outer")));
-		const inner = this.#register(new ExecutionImpl(init("context-check-inner")));
+		const outer = this.#createExecution(init("context-check-outer"));
+		const inner = this.#createExecution(init("context-check-inner"));
 		const sameAs = (expected: ModelRequestExecution | undefined) => this.currentExecution() === expected;
 
 		if (!sameAs(undefined)) return false;

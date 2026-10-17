@@ -15,6 +15,8 @@ import {
 } from "@oh-my-pi/pi-catalog/model-thinking";
 import { CODEX_BASE_URL } from "@oh-my-pi/pi-catalog/wire/codex";
 import { $env, getProviderInFlightRoot, isEnoent, logger, untilAborted } from "@oh-my-pi/pi-utils";
+import type { Api, AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
+import { assertJournalExecutionReady } from "@oh-my-pi/pi-utils/model-request-journal-composition";
 import { getCustomApi, type RegisteredCustomApi } from "./api-registry";
 import { createAuthRetryKeyState, isApiKeyResolver, resolvedApiKeyBearer, resolveNextAuthRetryKey } from "./auth-retry";
 import type { OAuthRequestIdentity } from "./auth/types";
@@ -56,8 +58,6 @@ import {
 } from "./providers/register-builtins";
 import { getProviderDefinition } from "./registry";
 import type {
-	Api,
-	AssistantMessage,
 	AssistantMessageEvent,
 	Context,
 	FetchImpl,
@@ -899,11 +899,18 @@ function withResolvedModelHeaders<TApi extends Api>(
 	return outer;
 }
 
+/** Local/custom transports share the same leaf readiness precondition as external fetches. */
+function assertCurrentJournalExecutionReady(): void {
+	const execution = getModelRequestRuntime().currentExecution();
+	if (execution !== undefined) assertJournalExecutionReady(execution);
+}
+
 export function stream<TApi extends Api>(
 	model: Model<TApi>,
 	context: Context,
 	options?: OptionsForApi<TApi>,
 ): AssistantMessageEventStream {
+	assertCurrentJournalExecutionReady();
 	return runWithModelRequestLineage(() => streamInLineage(model, context, options));
 }
 
@@ -952,7 +959,9 @@ function gateUninstrumentedTransport(
 	create: () => AssistantMessageEventStream,
 ): AssistantMessageEventStream {
 	const runtime = getModelRequestRuntime();
-	if (!runtime.hasGate() && runtime.currentExecution()?.modelRequestJournalLeaseBinding === undefined) return create();
+	const execution = runtime.currentExecution();
+	if (execution !== undefined) assertJournalExecutionReady(execution);
+	if (!runtime.hasGate() && (execution === undefined || execution.journalState === "untracked")) return create();
 	const outer = new AssistantMessageEventStream();
 	void (async () => {
 		try {
@@ -1004,6 +1013,7 @@ function streamDispatchRequest<TApi extends Api>(
 	options: OptionsForApi<TApi> | undefined,
 	limited: boolean,
 ): AssistantMessageEventStream {
+	assertCurrentJournalExecutionReady();
 	const requestOptions = withSupportedSamplingParams(
 		model,
 		withTransportFetch(model, (options || {}) as StreamOptions),
@@ -1341,6 +1351,7 @@ export function streamSimple<TApi extends Api>(
 	context: Context,
 	options?: SimpleStreamOptions,
 ): AssistantMessageEventStream {
+	assertCurrentJournalExecutionReady();
 	return runWithModelRequestLineage(() => streamSimpleInLineage(model, context, options));
 }
 
@@ -1392,6 +1403,7 @@ function streamSimpleRequest<TApi extends Api>(
 	context: Context,
 	options?: SimpleStreamOptions,
 ): AssistantMessageEventStream {
+	assertCurrentJournalExecutionReady();
 	const requestOptions = withSupportedSamplingParams(
 		model,
 		withTransportFetch(model, (options || {}) as SimpleStreamOptions),
@@ -1585,7 +1597,10 @@ function streamSimpleRequest<TApi extends Api>(
 	if (customApiProvider) {
 		return withThinkingLoopGuard(model, requestOptions, opts =>
 			withProviderInFlightLimit(model, opts, limited => {
-				const create = () => customApiProvider.streamSimple(model, context, { ...opts, waitForTerminalDrain: limited });
+				const create = () => {
+					assertCurrentJournalExecutionReady();
+					return customApiProvider.streamSimple(model, context, { ...opts, waitForTerminalDrain: limited });
+				};
 				return isLocalCustomApi(customApiProvider, "streamSimple")
 					? create()
 					: gateUninstrumentedTransport(model, opts?.signal, create);

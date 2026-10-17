@@ -7,11 +7,11 @@
  * accepts `origin`, `scope` or a root from its caller, so nothing a caller passes can claim to be standalone,
  * detached, or another session's root.
  */
-import type { ModelRequestPurpose, ModelRequestScope } from "./model-request-gate";
+import type { ModelRequestPurpose, ModelRequestScope } from "@oh-my-pi/pi-utils/model-request-data";
+import type { ModelRequestExecution } from "@oh-my-pi/pi-utils/model-request-journal-composition";
 import {
 	getModelRequestRuntime,
 	type ModelRequestAuthorizationInput,
-	type ModelRequestExecution,
 	type ModelRequestExecutionInit,
 	type ModelRequestExecutionPatch,
 	type ModelRequestPermit,
@@ -24,11 +24,11 @@ export {
 	runInModelRequestRetryChain,
 	runWithModelRequestLineage,
 } from "./model-request-lineage";
+export type { ModelRequestExecution } from "@oh-my-pi/pi-utils/model-request-journal-composition";
 export { auxiliaryFetch, authorizeUninstrumentedAttempt, gateFetch } from "./utils/model-request-fetch";
 export {
 	ModelRequestProcessClassError,
 	type ModelRequestAuthorizationInput,
-	type ModelRequestExecution,
 	type ModelRequestExecutionInit,
 	type ModelRequestExecutionPatch,
 	type ModelRequestPermit,
@@ -70,7 +70,7 @@ export function bindModelRequestExecution<A extends unknown[], R>(fn: (...args: 
 	return getModelRequestRuntime().bind(fn);
 }
 
-/** The scope a context resolves to right now (root and session ids are re-evaluated on every call). */
+/** Required scope is fixed by the principal; ordinary untracked ids are re-evaluated on every call. */
 export function resolveModelRequestScope(execution: ModelRequestExecution): ModelRequestScope {
 	return getModelRequestRuntime().scopeOf(execution);
 }

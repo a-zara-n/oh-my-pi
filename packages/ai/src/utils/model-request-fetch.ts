@@ -2,9 +2,9 @@
  * The per-attempt hook for fetch-based model requests.
  *
  * Every call of a gated `fetch` is one wire attempt. It is authorized before I/O when a gate is registered or the
- * active execution requires a managed journal connection. A lease starts immediately before the first byte, sees
- * the response unaltered and is settled once. Ordinary sinkless calls with no gate use the underlying fetch:
- * nothing is built, read or wrapped.
+ * active execution requires a managed journal connection. Required transports remain fail-closed until their
+ * actual synchronous network-start boundary is supported. Ordinary gated calls retain their lease protocol.
+ * Ordinary untracked calls with no gate use the underlying fetch without building or wrapping the request.
  *
  * What the gate is given of the request is the core's own credential-free view ({@link ModelRequestWire}); the body
  * is only ever held in memory and only when the gate asks for it.
@@ -13,13 +13,13 @@
  */
 import { Buffer } from "node:buffer";
 import { logger } from "@oh-my-pi/pi-utils";
+import type { ModelRequestModelRef, ModelRequestOutcome } from "@oh-my-pi/pi-utils/model-request-data";
+import { assertJournalExecutionReady } from "@oh-my-pi/pi-utils/model-request-journal-composition";
 import { ModelRequestDeniedError } from "../error/model-request-denied";
 import type { FetchImpl } from "../types";
 import type {
 	ModelRequestKind,
 	ModelRequestLease,
-	ModelRequestModelRef,
-	ModelRequestOutcome,
 	ModelRequestWire,
 } from "../model-request-gate";
 import { currentModelRequestDestination, nextModelRequestAttemptLink } from "../model-request-lineage";
@@ -265,7 +265,9 @@ export interface GatedSendArgs {
  */
 export async function gatedSend(args: GatedSendArgs): Promise<Response> {
 	const runtime = getModelRequestRuntime();
-	if (!runtime.hasGate() && runtime.currentExecution()?.modelRequestJournalLeaseBinding === undefined) return args.send();
+	const execution = runtime.currentExecution();
+	if (execution !== undefined) assertJournalExecutionReady(execution);
+	if (!runtime.hasGate() && (execution === undefined || execution.journalState === "untracked")) return args.send();
 	const { input, init } = args;
 	const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
 	const link = nextModelRequestAttemptLink();
@@ -353,7 +355,9 @@ export async function authorizeUninstrumentedAttempt(
 	signal: AbortSignal | undefined,
 ): Promise<void> {
 	const runtime = getModelRequestRuntime();
-	if (!runtime.hasGate() && runtime.currentExecution()?.modelRequestJournalLeaseBinding === undefined) return;
+	const execution = runtime.currentExecution();
+	if (execution !== undefined) assertJournalExecutionReady(execution);
+	if (!runtime.hasGate() && (execution === undefined || execution.journalState === "untracked")) return;
 	const link = nextModelRequestAttemptLink();
 	const permit = await runtime.authorize({
 		requestId: link.requestId,
