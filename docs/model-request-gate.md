@@ -1,8 +1,9 @@
 # Model request gate
 
 A generic, additive hook that lets one registered owner decide whether an outbound model request may leave the
-process. The core does not know what the owner decides on. With no gate registered, or a gate that answers `pass`,
-every request path behaves exactly as it did before.
+process. The core does not know what the owner decides on. Ordinary untracked requests keep their previous
+behavior when no gate is registered or a gate answers `pass`. A required journal execution still needs genuine
+readiness and one-use canonical dispatch admission; neither case disables that boundary.
 
 This document covers the gate API, the core-owned execution context that identifies who is asking, the denial's
 non-retry contract, the per-attempt hook that asks the gate before each wire attempt, and the coverage inventory.
@@ -184,9 +185,38 @@ response. The ordinary untracked sender retains its existing debug/Cowork path.
 This requires trusted startup to run before extensions, configuration or other
 untrusted JavaScript. It is not an in-process JavaScript sandbox and does not
 prove that a builtin call starts DNS, TLS or socket writes synchronously.
-**The capture/identity check alone does not enable required sending.** Required
-sends remain `transport-unsupported` until the journal leaf supplies the approved
-one-use admission and actual synchronous short-root release contract.
+The capture/identity check alone is not permission to send. Even with no gate or
+a gate that answers `pass`, a required execution must have a genuine ready File
+principal and consume the journal leaf's one-use admission.
+
+Only the canonical `gatedSend` module freezes and privately registers the exact
+permit returned by its direct `runtime.authorize` call. The non-exported map binds
+the original runtime, exact execution, attempt id, lease, admission and
+`authorized/prepared/begun/ended` state; entries are never deleted or revived.
+Caller permits, copied objects, changed runtime methods and a different
+execution/lease cannot enter that dispatch path. The leaf's `ClosedCoreAttemptIdentity`
+projection is the same permit object, not an independently authenticated gate
+proof: its authority is the genuine execution/verified binding/family. Calling a
+public leaf operation with a fabricated permit cannot bypass the canonical
+gate/permit check.
+
+After all wire/debug/gate/producer awaits, the core calls
+`prepareJournalSend(execution, permit)`. When it returns, a synchronous
+`try/finally` owns the real retained root. The core validates the permit and signal,
+completes the gate's synchronous `lease.beginSend()` callback, validates again,
+then performs the final `beginJournalSend` check/one-use consumption and immediately
+invokes the captured builtin. There is no callback, await or global fetch lookup
+between final begin and that invocation. `endJournalSendStart` releases the real
+root synchronously in `finally`, including an unused admission and a throwing
+lease/begin/builtin; only afterwards is the returned fetch Promise awaited.
+Release/start failures are retained together, not converted to success.
+
+Before builtin invocation, failure settles the lease as `not-sent`. Once
+invocation has begun, even a synchronous throw or a failed release is
+`request-failed` with `sent: "maybe"`, never proof of zero charge. Existing
+response observation and reservation/unknown accounting remain in force.
+Uninstrumented SDK/native transports remain refused for required executions;
+they do not become supported merely because authorization returned `pass`.
 
 Parent verification uses the real builtin, not a fake-fetch wiring test:
 
@@ -201,17 +231,20 @@ Parent verification uses the real builtin, not a fake-fetch wiring test:
    builtin loopback I/O, queued custom-sender rejection and a physical module copy.
    Without the native preload the required-binding case is explicitly skipped;
    the other cases do not establish that boundary.
-2. With the completed journal admission implementation and native artifact,
-   launch the isolated integration fixture through `audit-library-bootstrap.ts`;
-   use a fresh real authority database/File principal and only a credential-free
-   loopback route. Exercise both no-gate and gate-`pass` required attempts.
+2. Run
+   `bun --preload ./scripts/audit-library-bootstrap.ts test packages/ai/test/model-request-trusted-dispatch.test.ts`
+   with the actual retained-root and File-principal implementation. Its isolated
+   native children use a fresh real authority database/File principal and only a
+   credential-free loopback route, including no-gate and gate-`pass` attempts.
 3. For gate deny/abort, revoke while prepare awaits, revoke after admission but
    before consumption, and authority/epoch/family-generation changes, require
    zero builtin invocations and zero loopback requests. Replay the exact
    consumed admission and require rejection, not a second dispatch.
-4. Observe `begin → lease.beginSend → actual captured builtin invocation →
+4. Observe `lease.beginSend → final begin → actual captured builtin invocation →
    finally end` in one stack; prove another root lease can be acquired before the
-   returned fetch Promise resolves. A synchronous builtin failure must also
+   returned fetch Promise resolves. A microtask queued by `lease.beginSend` must
+   acquire the real root while the loopback response is held: releasing in a later
+   microtask must not pass that probe. A synchronous builtin failure must also
    release the root and leave the admission unusable.
 5. Separately hold the real loopback response open after dispatch, revoke the
    family, then finish/drain it. Dispatch-before-revoke is inflight: later packet
@@ -220,8 +253,9 @@ Parent verification uses the real builtin, not a fake-fetch wiring test:
    outcome/drain contract resolves it. This is not the former zero-wire guarantee
    for revoke after invocation but before runtime-internal network work.
 
-Items 2–5 require the actual journal admission contract; the capture unit suite
-does not establish them, provider lifecycle producer coverage, or route approval.
+Items 2–5 require the actual journal admission contract; neither the capture unit
+suite nor an unexecuted regression establishes them. These checks do not complete
+provider lifecycle producers, the full coverage inventory, or route approval.
 
 
 ## Denial is terminal

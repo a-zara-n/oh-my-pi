@@ -1,10 +1,10 @@
 /**
  * The per-attempt hook for fetch-based model requests.
  *
- * Every call of a gated `fetch` is one wire attempt. It is authorized before I/O when a gate is registered or the
- * active execution requires a managed journal connection. Required transports remain fail-closed until their
- * actual synchronous network-start boundary is supported. Ordinary gated calls retain their lease protocol.
- * Ordinary untracked calls with no gate use the underlying fetch without building or wrapping the request.
+ * Every call of a gated `fetch` is one wire attempt. It is authorized before dispatch when a gate is registered or
+ * the active execution requires a managed journal connection. Required sends consume a one-use journal admission
+ * and directly invoke the startup builtin in the same stack, releasing the short root before awaiting its Promise.
+ * Ordinary untracked calls retain their existing fetch and lease protocol.
  *
  * What the gate is given of the request is the core's own credential-free view ({@link ModelRequestWire}); the body
  * is only ever held in memory and only when the gate asks for it.
@@ -14,7 +14,15 @@
 import { Buffer } from "node:buffer";
 import { logger } from "@oh-my-pi/pi-utils";
 import type { ModelRequestModelRef, ModelRequestOutcome } from "@oh-my-pi/pi-utils/model-request-data";
-import { assertJournalExecutionReady } from "@oh-my-pi/pi-utils/model-request-journal-composition";
+import {
+	assertJournalExecutionIdentity,
+	assertJournalExecutionReady,
+	beginJournalSend,
+	endJournalSendStart,
+	type ModelRequestExecution,
+	type OpaqueSendAdmission,
+	prepareJournalSend,
+} from "@oh-my-pi/pi-utils/model-request-journal-composition";
 import { ModelRequestDeniedError } from "../error/model-request-denied";
 import type { FetchImpl } from "../types";
 import type {
@@ -23,15 +31,30 @@ import type {
 	ModelRequestWire,
 } from "../model-request-gate";
 import { currentModelRequestDestination, nextModelRequestAttemptLink } from "../model-request-lineage";
-import { getModelRequestRuntime } from "../model-request-runtime";
+import { getModelRequestRuntime, type ModelRequestPermit, type ModelRequestRuntime } from "../model-request-runtime";
 import { copyResponseMetadata } from "./request-debug";
-import { assertModelRequestBuiltinFetch } from "./model-request-builtin-fetch";
+import { assertModelRequestBuiltinFetch, modelRequestBuiltinFetch } from "./model-request-builtin-fetch";
 
 /**
  * Every fetch that authorizes each of its calls, mapped to the same transport without the gate. Membership is how
  * wrapping layers avoid authorizing twice; the twin is for requests that are not model requests.
  */
 const ungatedTwins = new WeakMap<object, FetchImpl>();
+
+const canonicalRuntime = getModelRequestRuntime();
+const canonicalAuthorize = canonicalRuntime.authorize;
+const canonicalCurrentExecution = canonicalRuntime.currentExecution;
+type RequiredPermitState = "authorized" | "prepared" | "begun" | "ended";
+interface RequiredPermitRecord {
+	readonly runtime: ModelRequestRuntime;
+	readonly execution: ModelRequestExecution;
+	readonly attemptId: string;
+	readonly lease: ModelRequestLease | undefined;
+	state: RequiredPermitState;
+	admission?: OpaqueSendAdmission;
+}
+// Only this module's direct authorize return path can register a permit. Entries are never deleted or revived.
+const requiredPermits = new WeakMap<ModelRequestPermit, RequiredPermitRecord>();
 
 /** Header and query names whose values are credentials (or may carry one) and are never shown to a gate. */
 const CREDENTIAL_NAME = /auth|key|token|secret|cookie|credential|signature|password|passwd|bearer|^sig$/i;
@@ -251,6 +274,127 @@ function observeResponse(lease: ModelRequestLease, response: Response, signal: A
 	return wrapped;
 }
 
+function registerRequiredPermit(
+	runtime: ModelRequestRuntime,
+	execution: ModelRequestExecution,
+	permit: ModelRequestPermit,
+): RequiredPermitRecord {
+	if (requiredPermits.has(permit)) throw new ModelRequestDeniedError("gate-error", "model request permit was already used");
+	Object.freeze(permit);
+	const record: RequiredPermitRecord = {
+		runtime,
+		execution,
+		attemptId: permit.attemptId,
+		lease: permit.lease,
+		state: "authorized",
+	};
+	requiredPermits.set(permit, record);
+	return record;
+}
+
+function assertRequiredPermit(
+	permit: ModelRequestPermit,
+	record: RequiredPermitRecord,
+	state: "authorized" | "prepared",
+	transport: FetchImpl | undefined,
+	signal: AbortSignal | undefined,
+): void {
+	if (
+		requiredPermits.get(permit) !== record ||
+		record.state !== state ||
+		record.runtime !== canonicalRuntime ||
+		record.runtime.authorize !== canonicalAuthorize ||
+		record.runtime.currentExecution !== canonicalCurrentExecution ||
+		getModelRequestRuntime() !== record.runtime ||
+		record.runtime.currentExecution() !== record.execution ||
+		permit.attemptId !== record.attemptId ||
+		permit.lease !== record.lease
+	) {
+		throw new ModelRequestDeniedError("gate-error", "model request permit identity or state changed");
+	}
+	assertJournalExecutionIdentity(record.execution);
+	assertJournalExecutionReady(record.execution);
+	assertModelRequestBuiltinFetch(transport);
+	if (signal?.aborted) throw signal.reason ?? new Error("model request aborted before dispatch");
+}
+
+/** Only the direct authorize return below reaches this non-exported managed dispatch path. */
+async function sendRequired(
+	args: GatedSendArgs,
+	runtime: ModelRequestRuntime,
+	execution: ModelRequestExecution,
+	permit: ModelRequestPermit,
+	signal: AbortSignal | undefined,
+): Promise<Response> {
+	const { input, init, transport } = args;
+	const lease = permit.lease;
+	let record: RequiredPermitRecord | undefined;
+	let responsePromise: Promise<Response> | undefined;
+	let responseAwaited = false;
+	let dispatched = false;
+	try {
+		record = registerRequiredPermit(runtime, execution, permit);
+		assertRequiredPermit(permit, record, "authorized", transport, signal);
+		const admission = await prepareJournalSend(execution, permit);
+		record.admission = admission;
+		record.state = "prepared";
+		let startFailure: { readonly error: unknown } | undefined;
+		try {
+			assertRequiredPermit(permit, record, "prepared", transport, signal);
+			// A gate callback can revoke/abort/reenter. Run it BEFORE the final synchronous admission check.
+			lease?.beginSend();
+			assertRequiredPermit(permit, record, "prepared", transport, signal);
+			if (record.admission !== admission) throw new ModelRequestDeniedError("gate-error", "model request admission changed");
+			beginJournalSend(admission, execution, permit);
+			record.state = "begun";
+			dispatched = true;
+			// No caller callback, await, or global fetch lookup between final begin and the actual builtin call.
+			responsePromise = modelRequestBuiltinFetch(input, init);
+		} catch (error) {
+			startFailure = { error };
+			throw error;
+		} finally {
+			record.state = "ended";
+			// Real synchronous root release, including begin/lease/builtin throws and an unconsumed admission.
+			try {
+				endJournalSendStart(admission);
+			} catch (releaseError) {
+				if (startFailure !== undefined) {
+					throw new AggregateError([startFailure.error, releaseError], "model request start and root release failed");
+				}
+				throw releaseError;
+			}
+		}
+		responseAwaited = true;
+		const response = await responsePromise;
+		return lease === undefined ? response : observeResponse(lease, response, signal);
+	} catch (error) {
+		if (record !== undefined) record.state = "ended";
+		let failure = error;
+		// If synchronous release failed after dispatch, still consume the already-started Promise.
+		// Preserve both failures rather than leaving a detached rejection or claiming not-sent.
+		if (responsePromise !== undefined && !responseAwaited) {
+			try {
+				await responsePromise;
+			} catch (transportError) {
+				if (transportError !== failure) failure = new AggregateError([failure, transportError], "model request dispatch and release failed");
+			}
+		}
+		if (lease !== undefined) {
+			await settleQuietly(
+				lease,
+				dispatched
+					? { type: "request-failed", sent: "maybe", aborted: signal?.aborted === true, transportClosed: responseAwaited }
+					: { type: "not-sent", aborted: signal?.aborted === true },
+			);
+		}
+		if (!dispatched && !signal?.aborted && !(failure instanceof ModelRequestDeniedError)) {
+			throw new ModelRequestDeniedError("gate-error", "model request journal admission failed before dispatch", { cause: failure });
+		}
+		throw failure;
+	}
+}
+
 export interface GatedSendArgs {
 	readonly model: ModelRequestModelRef;
 	readonly kind: ModelRequestKind;
@@ -271,6 +415,13 @@ export async function gatedSend(args: GatedSendArgs): Promise<Response> {
 	const execution = runtime.currentExecution();
 	assertJournalExecutionReady(execution);
 	if (execution !== undefined && execution.journalState !== "untracked") {
+		if (
+			runtime !== canonicalRuntime ||
+			runtime.authorize !== canonicalAuthorize ||
+			runtime.currentExecution !== canonicalCurrentExecution
+		) {
+			throw new ModelRequestDeniedError("gate-error", "required model request runtime identity changed");
+		}
 		try {
 			assertModelRequestBuiltinFetch(args.transport);
 		} catch (error) {
@@ -300,6 +451,9 @@ export async function gatedSend(args: GatedSendArgs): Promise<Response> {
 	} catch (error) {
 		if (lease !== undefined) await settleQuietly(lease, { type: "not-sent", aborted: signal?.aborted === true });
 		throw error;
+	}
+	if (execution !== undefined && execution.journalState !== "untracked") {
+		return sendRequired(args, runtime, execution, permit, signal ?? undefined);
 	}
 	if (lease === undefined) return args.send();
 	const effectiveSignal = signal ?? undefined;
@@ -364,8 +518,9 @@ export function auxiliaryFetch(fetch: FetchImpl): FetchImpl {
 }
 
 /**
- * Authorize an attempt whose transport the core cannot instrument (it does not go through a fetch the core controls:
- * WebSocket, an SDK's own client, a provider-supplied stream function). The gate is shown `wire: undefined` and must
+ * Authorize an ordinary untracked attempt whose transport the core cannot instrument. Required executions refuse
+ * it outright: a WebSocket, an SDK's own client or a provider-supplied stream has no fixed builtin dispatch boundary.
+ * For an untracked attempt the gate is shown `wire: undefined` and must
  * answer `pass` (not its concern) or `deny`. Nothing could drive an `allow` lease (no `beginSend` point, no response
  * to observe), so an `allow` is released as not-sent and refused: a gate cannot permit what the core cannot account for.
  */
@@ -377,6 +532,9 @@ export async function authorizeUninstrumentedAttempt(
 	const runtime = getModelRequestRuntime();
 	const execution = runtime.currentExecution();
 	assertJournalExecutionReady(execution);
+	if (execution !== undefined && execution.journalState !== "untracked") {
+		throw new ModelRequestDeniedError("transport-unsupported", "required model request transport has no fixed builtin dispatch");
+	}
 	if (!runtime.hasGate() && (execution === undefined || execution.journalState === "untracked")) return;
 	const link = nextModelRequestAttemptLink();
 	const permit = await runtime.authorize({
@@ -390,6 +548,9 @@ export async function authorizeUninstrumentedAttempt(
 	});
 	try {
 		assertJournalExecutionReady(execution);
+		if (execution !== undefined && execution.journalState !== "untracked") {
+			throw new ModelRequestDeniedError("transport-unsupported", "required model request transport has no fixed builtin dispatch");
+		}
 	} catch (error) {
 		if (permit.lease !== undefined) {
 			await settleQuietly(permit.lease, { type: "not-sent", aborted: signal?.aborted === true });

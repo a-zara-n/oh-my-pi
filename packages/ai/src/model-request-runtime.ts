@@ -83,7 +83,8 @@ export interface ModelRequestAuthorizationInput {
 
 /**
  * Result of {@link ModelRequestRuntime.authorize}. `lease` is undefined when no gate is registered or the
- * gate answered `pass`; the caller then sends without lease bookkeeping.
+ * gate answered `pass`. It omits lease bookkeeping, not a required execution's journal admission.
+ * The canonical dispatch module alone freezes/registers the exact return object; caller DTOs are not permits.
  */
 export interface ModelRequestPermit {
 	readonly attemptId: string;
@@ -400,20 +401,13 @@ export class ModelRequestRuntime {
 
 	/**
 	 * Ask the registered gate whether one wire attempt may be sent. An ordinary sinkless execution with no gate
-	 * resolves to a permit without a lease. Managed executions require an authenticated journal connection;
-	 * `deny` and every gate failure throw, and the caller MUST NOT start any I/O.
+	 * resolves to a permit without a lease. Managed executions require an authenticated journal connection.
+	 * This permit is not a transport proof: canonical dispatch alone freezes/registers it and consumes journal
+	 * admission. `deny` and every gate failure throw, and the caller MUST NOT start any I/O.
 	 */
 	async authorize(input: ModelRequestAuthorizationInput): Promise<ModelRequestPermit> {
 		const execution = this.currentExecution();
 		assertJournalExecutionReady(execution);
-		if (execution !== undefined && execution.journalState !== "untracked") {
-			// D37: fetch invocation does not prove actual synchronous network start.
-			// Keep required external sends closed until that transport contract exists.
-			throw new ModelRequestDeniedError(
-				"transport-unsupported",
-				"required model request transport cannot prove synchronous network start",
-			);
-		}
 		const registration = this.#registration;
 		const attemptId = this.#deps.newAttemptId();
 		if (registration === undefined) return { attemptId, lease: undefined };
@@ -442,12 +436,6 @@ export class ModelRequestRuntime {
 		try {
 			// The process requirement or the execution family may change while the gate is awaited.
 			assertJournalExecutionReady(execution);
-			if (execution !== undefined && execution.journalState !== "untracked") {
-				throw new ModelRequestDeniedError(
-					"transport-unsupported",
-					"required model request transport cannot prove synchronous network start",
-				);
-			}
 		} catch (error) {
 			if (decision.type === "allow") this.#releaseUnused(decision.lease, false);
 			throw error;
