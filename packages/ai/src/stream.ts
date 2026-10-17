@@ -204,6 +204,7 @@ let providerInFlightHeartbeatWriterOverride:
 let providerInFlightWakeupWriterOverride:
 	| ((dir: string, writeWakeupFile: () => Promise<void>) => Promise<void>)
 	| undefined;
+let providerInFlightLeaseRemoverOverride: ((leasePath: string) => Promise<void>) | undefined;
 let providerInFlightWaitObserverOverride: ((provider: string) => void) | undefined;
 let providerInFlightLockCreatedObserverOverride: ((lockDir: string) => Promise<void>) | undefined;
 let providerInFlightLockIdentifiedObserverOverride: ((lockDir: string) => Promise<void>) | undefined;

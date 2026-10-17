@@ -9,23 +9,22 @@
  */
 import { isModelRequestDenied } from "@oh-my-pi/pi-ai/error";
 import { createModelRequestSessionExecution } from "@oh-my-pi/pi-ai/model-request-execution";
-import { runWithModelRequestExecution } from "@oh-my-pi/pi-ai/model-request-execution";
+import {
+	getModelRequestRuntime,
+	type ModelRequestAuthorizationInput,
+} from "../../src/model-request-runtime";
 import { registerModelRequestGate, type ModelRequestDecision } from "@oh-my-pi/pi-ai/model-request-gate";
-import { getModelRequestRuntime } from "../../src/model-request-runtime";
 import { gatedSend } from "../../src/utils/model-request-fetch";
 import type { ModelRequestJournalLeaseBinding } from "@oh-my-pi/pi-utils/model-request-journal-authority";
 
 const scenario = process.argv[2];
-const scenarios = ["authorize-refused", "derived-send-refused", "gate-pass-refused"] as const;
-
-const INPUT = {
+const INPUT: ModelRequestAuthorizationInput = {
 	requestId: "request-1",
-	reason: "new",
+	reason: "first",
 	kind: "chat",
-	model: { provider: "fixture", id: "fixture-1" },
+	model: { provider: "fixture", id: "fixture-1", api: "fixture-api" },
 	wire: undefined,
-} as const;
-
+};
 /** A gate that records what it was asked and answers pass. */
 function recordingPassGate(): { attempts: number } {
 	const state = { attempts: 0 };
@@ -46,8 +45,6 @@ function managedExecution() {
 		root: { kind: "self", modelRequestJournalLeaseBinding: invalidBinding },
 		agent: { kind: "main", id: "Main", name: "main", depth: 0 },
 		purpose: "main",
-		// A resolved extra field is never proof of a journal receipt.
-		journalConnection: Promise.resolve(),
 	});
 }
 
