@@ -7,8 +7,8 @@
 - Added the isolated audit SQLite preload, a fixed source-owned VFS control codec, exclusive
   STORE_ID/database creation and per-connection identity/generation registry. The authority reader
   now verifies actual owned main/WAL/shm and live writer generations in one real RO snapshot rather
-  than stopping at the historical unsupported descriptor boundary. Parent native build/runtime
-  acceptance is still required; this entry does not claim managed sending or completed A0/C.
+  than stopping at the historical unsupported descriptor boundary. Limited parent native/utility
+  evidence is recorded below; managed sending and completed A0/C are not claimed.
 - Added synchronous raw-lease callback support with genuine lexical-scope borrowing, strict
   identity/order checks, native-Promise lifetime handling and all-lease cleanup on failure.
 
@@ -35,10 +35,25 @@
   reaches the explicit unsupported actual-fd boundary; `HAS_MOVED` is not identity proof.
 - Integrated verification passed 116 tests across eight utils/ai/coding-agent files.
   Real loopback smoke observed zero unconnected managed requests and one ordinary request.
-  This is partial WIP evidence: actual SQLite descriptor verification and authenticated
-  registry-receipt-to-execution readiness remain unimplemented and are not acceptance passes.
+  That was partial WIP evidence: actual SQLite descriptor verification and authenticated
+  registry-receipt-to-execution readiness were unimplemented at that point, not acceptance passes.
 
 ### Changed
+
+- Corrected the native-suite launch instruction to `bun test --preload …`: placing `--preload`
+  before `test` at the repository root selected its package script, whose child lost the preload.
+  The integrating parent observed six utility failures in that launch; these remain recorded as
+  a launch error, not erased or classified as a native runtime acceptance/regression result.
+- Limited parent verification after correcting that launch: canonical source verification checked
+  2,287 records and the native build generated the signed dylib/manifest; correctly preloaded
+  authority-SQLite/raw-lease suites passed 12 tests with 46 expectations, and ordinary credential/
+  raw-lease suites without preload passed 14 tests with 71 expectations (both zero failures).
+  Real factory smoke observed STORE_ID consistency, actual WAL sidecars, cross-writer RO snapshot
+  preservation/refresh, transaction and close/reopen connection generations, and sticky SQL/control
+  rejection after rename. A late-bootstrap probe rejected selection after existing SQLite use,
+  preserved ordinary table contents and did not mint the required-library latch.
+  These are parent observations, not worker reruns; Store A0, principal C, trusted dispatch and
+  readonly backup remain unproved.
 
 - `fetchWithRetry` and `isRetryableError` no longer retry an error that declares `retryable: false`.
 

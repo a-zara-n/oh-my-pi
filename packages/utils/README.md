@@ -116,11 +116,34 @@ global install, normal OMP registration or Keychain operation. See `native/audit
 the explicit source acquisition/offline build and public-domain provenance. For native utility tests:
 
 ```sh
-bun --preload ./scripts/audit-library-bootstrap.ts test packages/utils/test/model-request-journal-authority-sqlite.test.ts packages/utils/test/model-request-journal-sqlite-control.test.ts packages/utils/test/model-request-journal-leases.test.ts
+bun test --preload ./scripts/audit-library-bootstrap.ts packages/utils/test/model-request-journal-authority-sqlite.test.ts packages/utils/test/model-request-journal-sqlite-control.test.ts packages/utils/test/model-request-journal-leases.test.ts
 ```
+
+Put the built-in `test` command before `--preload`. The integrating parent observed that
+`bun --preload … test …` at the repository root instead selected the root package's `test`
+script (`scripts/ci-test-ts.ts local`), whose child did not inherit the preload. That launch
+produced six utility failures, including unregistered-connection failures; it is retained as
+a failed launch, not erased or counted as evidence of a native runtime regression or acceptance.
 
 The two SQLite suites require that real built artifact; they do not mock or skip a missing native
 implementation. Run ordinary credential/raw-lease regressions without the preload separately.
+
+#### Limited parent verification (2026-10-17)
+
+These are the integrating parent's observations, not worker-executed checks:
+
+| Exercised scope | Observed result |
+| --- | --- |
+| Canonical source verification and corrected native build | 2,287 source records verified; signed dylib and artifact manifest generated |
+| `bun test --preload <absolute bootstrap> test/model-request-journal-authority-sqlite.test.ts test/model-request-journal-leases.test.ts`, from `packages/utils` | 12 passed, 0 failed, 46 expectations |
+| Credential-authority and raw-lease suites without preload | 14 passed, 0 failed, 71 expectations |
+| Real preload/factory smoke | STORE_ID content matched; actual WAL sidecars; RO snapshot retained old data through another writer's commit, next snapshot saw new data; transaction generations increased; close/reopen changed connection generation; rename caused sticky SQL/control rejection |
+| SQLite initialized before bootstrap import | Late bootstrap rejected, ordinary table content preserved, required-library latch not minted |
+
+The earlier wrong-order launch's six failures remain recorded above. The full three-suite command is
+an acceptance invocation, not a claim that all three suites passed: the readonly-backup purpose
+contract remains unresolved. Store A0, File-principal C, trusted dispatch and readonly backup remain
+unproved. These limited native/utility results do not authorize model sending, billing or deployment.
 
 ## Install
 
