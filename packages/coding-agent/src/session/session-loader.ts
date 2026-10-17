@@ -13,6 +13,7 @@ import {
 } from "./blob-store";
 import { buildSessionContext } from "./session-context";
 import { validateModelRequestJournal, type ModelRequestJournalValidation } from "@oh-my-pi/pi-utils/model-request-journal";
+import { validateModelRequestRegistry } from "@oh-my-pi/pi-utils/model-request-registry";
 import type { FileEntry, SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
 import { migrateToCurrentVersion } from "@oh-my-pi/pi-utils/session-migrations";
 import { isExternalizableImagePosition, isPersistenceTruncatedString } from "./session-persistence";
@@ -121,6 +122,13 @@ export async function loadSessionFile(
 	try {
 		const statSize = storage.statSync(filePath).size;
 		const { loaded, sourceSize } = await loadWithKnownSize(filePath, storage, statSize, options);
+		const header = loaded.entries.find(entry => entry.type === "session");
+		if (header?.modelRequestJournal || loaded.entries.some(entry => entry.type === "model_request_metadata")) {
+			validateModelRequestJournal(loaded.entries, loaded);
+		} else if (header?.modelRequestRegistry || loaded.entries.some(entry => entry.type === "model_request_registry")) {
+			if (!header || loaded.invalidHeader || loaded.malformedRecords > 0) throw new Error("Invalid model request registry");
+			validateModelRequestRegistry(header, loaded.entries.filter(entry => entry.type !== "session"));
+		}
 		return { ...loaded, sourceSize };
 	} catch (err) {
 		if (options?.throwIfMissing && (isEnoent(err) || isEnotdir(err))) {

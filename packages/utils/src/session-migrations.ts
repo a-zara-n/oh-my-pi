@@ -1,4 +1,5 @@
 import { validateModelRequestJournal } from "./model-request-journal";
+import { validateModelRequestRegistry } from "./model-request-registry";
 import { type CompactionEntry, CURRENT_SESSION_VERSION, type FileEntry, type SessionHeader } from "./session-entries";
 import { Snowflake } from "./snowflake";
 
@@ -66,8 +67,14 @@ export function migrateToCurrentVersion(entries: FileEntry[]): boolean {
 	const header = entries.find(e => e.type === "session") as SessionHeader | undefined;
 	const version = header?.version ?? 1;
 
-	if (header?.modelRequestJournal !== undefined || entries.some(entry => entry.type === "model_request_metadata")) {
-		validateModelRequestJournal(entries);
+	const journal = header?.modelRequestJournal !== undefined || entries.some(entry => entry.type === "model_request_metadata");
+	const registry = header?.modelRequestRegistry !== undefined || entries.some(entry => entry.type === "model_request_registry");
+	if (journal || registry) {
+		if (journal) validateModelRequestJournal(entries);
+		else {
+			if (!header) throw new Error("Invalid model request registry");
+			validateModelRequestRegistry(header, entries.filter(entry => entry.type !== "session"));
+		}
 		// Managed history must never acquire regenerated source IDs or inferred epochs.
 		if (version < CURRENT_SESSION_VERSION) throw new Error("Cannot migrate managed model request journal");
 		return false;

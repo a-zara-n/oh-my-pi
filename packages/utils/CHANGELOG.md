@@ -12,6 +12,11 @@
 - Added synchronous raw-lease callback support with genuine lexical-scope borrowing, strict
   identity/order checks, native-Promise lifetime handling and all-lease cleanup on failure.
 
+- Centralized File session identity, logical staging, committed projections, writer ownership,
+  registry reading and composition in a non-export principal. Existing raw writers converge
+  with the principal's writer, while closed metadata and managed source appends remain guarded.
+  Shared registry validation is pure and readonly. These changes have not been verified and
+  do not establish the outstanding owner/agent/dispatch acceptance conditions.
 - Added fixed macOS model-request journal raw leases and shared credential retain/retire/inspect
   operations, with alias retirement tombstones, single-read credential normalization, intrinsic
   token copy/zeroing, and real SQLite/OS rejection regressions.

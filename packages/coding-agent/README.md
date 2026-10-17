@@ -22,25 +22,32 @@ same object through root assignment, child sessions, and revival; it does not se
 Conflicting explicit and inherited bindings are rejected.
 
 Before publishing a managed execution, the SDK awaits
-`bindModelRequestJournalComposition(manager, { execution, rootManager, leases, acceptJournal })`.
-The root manager is the actual matching live manager, not one reopened from a caller-provided
-path. The manager owns the fixed authority verification and must obtain the real registry receipt,
-source header acknowledgement, and owner before returning success. Receiving a sink callback
-alone does not release the SDK's private sink-slot barrier.
+`bindModelRequestJournalComposition(manager, { execution, rootManager, leases })`.
+The manager resolves its actual File principal and delegates composition; the manager,
+its getters, a supplied storage object, and a promise are not provenance proofs.
+The same principal owns the File header, generation, queue, writer, registry, owner,
+and execution family. Manager transcript/header/leaf state is a revision-keyed
+projection of that principal; ordinary lazy staging and committed disk state remain
+distinct inside the principal.
 
-**Work in progress:** the actual registry receipt producer and an authenticated bridge from that
-receipt to the exact ai runtime execution are not yet available. The context's private promise
-only transports the sink; it is never trusted as runtime readiness. Managed runtime authorization
-therefore remains closed, even if a caller supplies a resolved promise or a gate would pass.
-This is an unresolved design/integration boundary, not a completed managed sending path.
+Composition writes and independently reads the actual root member/owner registrations,
+then writes and reads the source descriptor before creating the opaque owner/session.
+The two append operations preserve closed metadata and source identities. Normal
+storage instances and writers cannot create, strip, or rewrite closed metadata.
+Session replacement, movement, supersession, close, and release invalidate the affected
+execution families rather than replacing their identity with caller-supplied values.
 
-The prior WIP runtime-only refusal did not cover the wire: three no-gate shortcuts in pi-ai
-could bypass authorization. Their fast paths now apply only to executions without a managed
-binding (`gatedSend`, `authorizeUninstrumentedAttempt`, and the uninstrumented stream wrapper).
-Permanent regressions and a before/after loopback smoke are prepared, not run by this worker;
-actual wire measurements remain pending parent verification.
+Readiness checks cover gated and no-gate entries, including omitted executions after
+the irreversible journal-required latch, and run again after authorization/provider
+waits. Ordinary untracked, sinkless operation retains its existing path before that
+latch; omitting a binding or execution does not clear a required family.
 
-Normal SDK use without a binding, including sinkless custom providers, is unchanged.
+Managed wire dispatch remains unsupported in this checkout. The approved dispatch
+start boundary still needs a genuine, synchronously releasable short root scope.
+Durable journal-owner/lease correspondence and canonical core-agent identity also
+remain acceptance prerequisites: a locally reported ready state is not evidence that
+these integration conditions have been satisfied. No pass-loopback managed-send
+acceptance or runtime verification is claimed here.
 
 ## Memory backends
 

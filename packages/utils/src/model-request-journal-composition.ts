@@ -43,7 +43,6 @@ import type {
 } from "./session-entries";
 import {
 	assertModelRequestLifecycleRecord,
-	isCanonicalModelRequestId,
 	assertModelRequestSourceLinkInput,
 	isModelRequestJournalDescriptor,
 	isModelRequestMetadataEntry,
@@ -53,6 +52,7 @@ import { moveFileAcrossDevices } from "./atomic-file";
 import { getSessionsDir } from "./dirs";
 import { parseSessionContent } from "./session-file-reader";
 import { migrateToCurrentVersion } from "./session-migrations";
+import { validateModelRequestRegistry } from "./model-request-registry";
 
 interface FileMutationGuard {
 	body(content: string): void;
@@ -326,12 +326,13 @@ export interface SessionStorage {
 }
 
 // FinalizationRegistry to clean up leaked file descriptors
-const writerRegistry = new FinalizationRegistry<number>(fd => {
+const writerRegistry = new FinalizationRegistry<{ fd: number; filename: string }>(({ fd, filename }) => {
 	try {
 		fs.closeSync(fd);
 	} catch {
 		// Ignore - fd may already be closed or invalid
 	}
+	if (openFileWriters.get(filename)?.deref() === undefined) openFileWriters.delete(filename);
 });
 
 class FileSessionStorageWriter implements SessionStorageWriter {
@@ -367,7 +368,7 @@ class FileSessionStorageWriter implements SessionStorageWriter {
 			SESSION_WRITE_FLAGS | (flags === "w" ? fs.constants.O_TRUNC : fs.constants.O_APPEND),
 		);
 		// Register for cleanup if abandoned without close()
-		writerRegistry.register(this, this.#fd, this);
+		writerRegistry.register(this, { fd: this.#fd, filename: this.#fpath }, this);
 	}
 
 	#heldFile(): { ino: bigint; dev: bigint } {
@@ -407,7 +408,7 @@ class FileSessionStorageWriter implements SessionStorageWriter {
 		}
 		this.#fd = nextFd;
 		this.#heldIdentity = undefined;
-		writerRegistry.register(this, nextFd, this);
+		writerRegistry.register(this, { fd: nextFd, filename: this.#fpath }, this);
 		const next = fs.fstatSync(nextFd, { bigint: true });
 		this.#heldIdentity = { ino: next.ino, dev: next.dev };
 		return Number(next.size);
@@ -2055,7 +2056,7 @@ function strictFile(content: string): { header: SessionHeader; entries: SessionE
 	const entries = file.slice(1) as SessionEntry[];
 	if (header.modelRequestJournal) validateModelRequestJournal([header, ...entries]);
 	else if (entries.some(entry => entry.type === "model_request_metadata")) unavailable();
-	if (header.modelRequestRegistry) readRegistrySnapshot(header, entries);
+	if (header.modelRequestRegistry) validateModelRequestRegistry(header, entries);
 	else if (entries.some(entry => entry.type === "model_request_registry")) unavailable();
 	return { header, entries };
 }
@@ -2082,78 +2083,6 @@ function loadFileProjection(content: string, managedExpected = false): FileProje
 }
 
 
-function closedKeys(value: object, keys: readonly string[]): boolean {
-	return Reflect.ownKeys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
-}
-
-function readRegistrySnapshot(header: SessionHeader, entries: readonly SessionEntry[]): {
-	registryId: string; registryEpoch: string; rootSessionId: string; throughSeq: number;
-} {
-	const registry = header.modelRequestRegistry;
-	if (!registry || !closedKeys(registry, ["schemaVersion", "registryId", "registryEpoch", "rootSessionId"]) ||
-		registry.schemaVersion !== 1 || registry.rootSessionId !== header.id ||
-		!/^jr_[0-7][0-9A-HJKMNP-TV-Z]{25}$/.test(registry.registryId) ||
-		!isCanonicalModelRequestId(registry.registryEpoch)) unavailable();
-	type Member = { record: Extract<ModelRequestRegistryEntry["record"], { event: "member-registered" }>;
-		ownerRegistered: boolean; closed: boolean; ownerClosed: boolean; throughSeq?: number; outcome?: "closed" | "faulted" };
-	const members = new Map<string, Member>();
-	const owners = new Map<string, Member>();
-	const active = new Map<string, Member>();
-	let throughSeq = 0;
-	for (const entry of entries) {
-		if (entry.type !== "model_request_registry") continue;
-		if (!closedKeys(entry, ["type", "id", "parentId", "timestamp", "schemaVersion", "registryId", "registryEpoch", "seq", "record"]) ||
-			entry.parentId !== null || entry.schemaVersion !== 1 || entry.registryId !== registry.registryId ||
-			entry.registryEpoch !== registry.registryEpoch || entry.seq !== ++throughSeq ||
-			!Number.isSafeInteger(entry.seq) || typeof entry.timestamp !== "string" || !Number.isFinite(Date.parse(entry.timestamp))) unavailable();
-		const record = entry.record;
-		if (!record || typeof record !== "object" || !isCanonicalModelRequestId(record.journalEpoch) ||
-			typeof record.sessionId !== "string" || !/^[A-Za-z0-9_-]+$/.test(record.sessionId)) unavailable();
-		if (record.event === "member-registered") {
-			if (!closedKeys(record, ["event", "sessionId", "parentSessionId", "ownerId", "persistenceOwnerRef", "journalRef", "journalEpoch", "firstSeq"]) ||
-				!isCanonicalModelRequestId(record.ownerId) || !isCanonicalModelRequestId(record.persistenceOwnerRef) ||
-				record.firstSeq !== 1 || record.journalRef !== record.sessionId ||
-				members.has(record.journalEpoch) || owners.has(record.ownerId) || active.has(record.sessionId)) unavailable();
-			if (record.sessionId === header.id) {
-				if (record.parentSessionId !== null) unavailable();
-			} else {
-				const parent = record.parentSessionId === null ? undefined : active.get(record.parentSessionId);
-				if (!parent?.ownerRegistered || parent.closed) unavailable();
-			}
-			const member: Member = { record, ownerRegistered: false, closed: false, ownerClosed: false };
-			members.set(record.journalEpoch, member); owners.set(record.ownerId, member); active.set(record.sessionId, member);
-		} else if (record.event === "owner-registered") {
-			const member = owners.get(record.ownerId);
-			if (!closedKeys(record, ["event", "ownerId", "sessionId", "journalEpoch"]) || !member ||
-				member.record.sessionId !== record.sessionId || member.record.journalEpoch !== record.journalEpoch ||
-				member.ownerRegistered || member.closed) unavailable();
-			member.ownerRegistered = true;
-		} else if (record.event === "member-closed") {
-			const member = members.get(record.journalEpoch);
-			if (!closedKeys(record, ["event", "sessionId", "journalEpoch", "throughSeq", "outcome"]) || !member?.ownerRegistered ||
-				member.record.sessionId !== record.sessionId || member.closed ||
-				!Number.isSafeInteger(record.throughSeq) || record.throughSeq < 0 ||
-				(record.outcome !== "closed" && record.outcome !== "faulted")) unavailable();
-			member.closed = true; member.throughSeq = record.throughSeq; member.outcome = record.outcome;
-			active.delete(record.sessionId);
-		} else if (record.event === "owner-closed") {
-			const member = owners.get(record.ownerId);
-			if (!closedKeys(record, ["event", "ownerId", "sessionId", "journalEpoch", "throughSeq", "outcome"]) ||
-				!member?.closed || member.ownerClosed || member.record.sessionId !== record.sessionId ||
-				member.record.journalEpoch !== record.journalEpoch || member.throughSeq !== record.throughSeq ||
-				member.outcome !== record.outcome) unavailable();
-			member.ownerClosed = true;
-		} else unavailable();
-	}
-	if (header.modelRequestJournal) {
-		for (const epoch of header.modelRequestJournal.epochs) {
-			const member = members.get(epoch.journalEpoch);
-			if (!member?.ownerRegistered || member.record.sessionId !== header.id ||
-				member.record.ownerId !== epoch.journalOwnerId) unavailable();
-		}
-	}
-	return { ...registry, throughSeq };
-}
 function registryId(): string {
 	const alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 	let value = BigInt(Date.now()) << 80n;
@@ -2921,7 +2850,7 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 		const file = strictFile(this.#storage.readTextSync(this.#sessionFile));
 		if (file.header.id !== this.#header.id ||
 			JSON.stringify(file.header.modelRequestRegistry) !== JSON.stringify(this.#header.modelRequestRegistry)) unavailable();
-		return readRegistrySnapshot(file.header, file.entries);
+		return validateModelRequestRegistry(file.header, file.entries);
 	}
 
 	async #appendRegistry(records: readonly ModelRequestRegistryEntry["record"][]): Promise<void> {
@@ -2931,7 +2860,7 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 			type: "model_request_registry", id: randomUUID(), parentId: null, timestamp: new Date().toISOString(),
 			schemaVersion: 1, registryId: registry.registryId, registryEpoch: registry.registryEpoch, seq: ++seq, record,
 		}));
-		readRegistrySnapshot(this.#header, [...this.#entries, ...entries]);
+		validateModelRequestRegistry(this.#header, [...this.#entries, ...entries]);
 		await this.#publish(this.#header, [...this.#entries, ...entries]);
 		if (this.#readRegistry().throughSeq !== seq) unavailable();
 	}
