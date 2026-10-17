@@ -12,6 +12,12 @@
 
 ### Added
 
+- Claim each execution family and File cell privately before asynchronous composition.
+  Ready families can only recompose their exact canonical cell/root/session; rejected
+  rebinds do not register another owner or redirect root close/drain away from the
+  original cell. Session use checks the reciprocal family mapping. Actual native
+  consumer regressions cover ready and overlapping composition claims.
+
 - Extended the existing journal execution identity checker with an optional genuine execution
   to compare the leaf's exact private family. This is a pure identity check, not readiness,
   authority or an admission, and its original one-argument behavior is unchanged.

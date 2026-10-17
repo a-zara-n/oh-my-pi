@@ -1903,6 +1903,7 @@ interface ExecutionFamily {
 	cell?: FileSessionPrincipalImpl;
 	root?: FileSessionPrincipalImpl;
 	session?: JournalSession;
+	composition?: Readonly<{ cell: FileSessionPrincipalImpl; root: FileSessionPrincipalImpl }>;
 	readonly ancestors: ExecutionFamily[];
 }
 interface ExecutionState {
@@ -2210,6 +2211,7 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 	#writer: SessionStorageWriter | undefined;
 	#sealed = false;
 	readonly #families = new Set<ExecutionFamily>();
+	#composingFamily: ExecutionFamily | undefined;
 	#relocating: { source: string; dest: string } | undefined;
 	#leafId: string | null = null;
 	#projectionRevision = 0;
@@ -2965,10 +2967,14 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 		root.#assertLive();
 		if (family.binding !== binding || binding.rootSessionId !== root.getSessionId() ||
 			familyState(family) === "required-revoked" || familyState(family) === "required-faulted") unavailable();
+		if (family.composition || this.#composingFamily) unavailable();
+		if ((family.cell || family.root || family.session) &&
+			(!this.#session || family.cell !== this || family.root !== root || family.session !== this.#session)) unavailable();
 		if (this.#session) {
 			const session = this.#session;
 			const state = sessionStates.get(session);
 			if (!state || state.closed || state.family !== family || state.binding !== binding || state.root !== root) unavailable();
+			this.assertSession(session, execution);
 			await withVerifiedModelRequestJournalLeases(binding, state.registryId, async scope => {
 				this.#assertOwnerScope(state, scope); this.assertSession(session, execution);
 			});
@@ -2981,8 +2987,13 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 			if (!parentFamily?.cell || !root.#session) unavailable();
 		} else if (parentFamily) unavailable();
 		const id = root.#header.modelRequestRegistry?.registryId ?? registryId();
+		const claim = { cell: this, root };
+		family.composition = claim;
+		this.#composingFamily = family;
 		try {
 			const composed = await withVerifiedModelRequestJournalLeases(binding, id, async scope => {
+				if (family.composition !== claim || this.#composingFamily !== family ||
+					family.cell || family.root || family.session || this.#session) unavailable();
 				this.#assertLive(); root.#assertLive(); scope.assertActive(); this.#assertLineage(family, root);
 				this.#assertManagedPhysical(); root.#assertManagedPhysical();
 				const generation = this.#generation;
@@ -3039,6 +3050,9 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 			this.#fail(error);
 			if (family.state !== "required-faulted" && family.state !== "required-revoked") family.state = "required-faulted";
 			throw error;
+		} finally {
+			if (family.composition === claim) delete family.composition;
+			if (this.#composingFamily === family) this.#composingFamily = undefined;
 		}
 	}
 
@@ -3105,6 +3119,7 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 			familyState(state.family) !== "required-ready" ||
 			state.generation !== this.#generation || state.rootGeneration !== state.root.#generation ||
 			requireExecution(execution).family !== state.family || state.family.binding !== state.binding ||
+			state.family.cell !== this || state.family.root !== state.root || state.family.session !== session ||
 			this.#header.modelRequestJournal?.journalId !== state.journalId ||
 			this.#header.modelRequestJournal.epochs.at(-1)?.journalEpoch !== state.journalEpoch ||
 			this.#header.modelRequestJournal.epochs.at(-1)?.journalOwnerId !== state.ownerId) unavailable();
