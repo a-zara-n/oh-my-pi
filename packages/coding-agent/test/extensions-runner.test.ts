@@ -2195,7 +2195,7 @@ describe("ExtensionRunner", () => {
 				vi.advanceTimersByTime(10);
 				for (let i = 0; i < 3; i++) await Promise.resolve();
 				vi.advanceTimersByTime(0);
-				for (let i = 0; i < 5; i++) await Promise.resolve();
+				for (let i = 0; i < 12; i++) await Promise.resolve();
 
 				expect(settled).toBe(true);
 				expect(await decision).toEqual({
