@@ -181,6 +181,7 @@ function sessionHeaderForExport(header: SessionHeader | null): SessionHeader | n
 	const exported = { ...header };
 	delete exported.previousSessionFiles;
 	delete exported.modelRequestJournal;
+	delete exported.modelRequestRegistry;
 	return exported;
 }
 
@@ -188,7 +189,9 @@ function sessionHeaderForExport(header: SessionHeader | null): SessionHeader | n
 export function buildSessionData(sm: SessionManager, state?: AgentState): SessionData {
 	return {
 		header: sessionHeaderForExport(sm.getHeader()),
-		entries: sm.getEntries().filter(entry => entry.type !== "model_request_metadata"),
+		entries: sm
+			.getEntries()
+			.filter(entry => entry.type !== "model_request_metadata" && entry.type !== "model_request_registry"),
 		leafId: sm.getLeafId(),
 		systemPrompt: state?.systemPrompt.join("\n\n"),
 		tools: state?.tools?.map(t => ({ name: t.name, description: t.description })),
@@ -200,7 +203,9 @@ async function collectExportSubSessions(sessionFile: string): Promise<Record<str
 	const subSessions = await collectSubSessions(sessionFile);
 	for (const sub of Object.values(subSessions)) {
 		sub.header = sessionHeaderForExport(sub.header);
-		sub.entries = sub.entries.filter(entry => entry.type !== "model_request_metadata");
+		sub.entries = sub.entries.filter(
+			entry => entry.type !== "model_request_metadata" && entry.type !== "model_request_registry",
+		);
 	}
 	return subSessions;
 }
@@ -264,7 +269,9 @@ export async function exportFromFile(inputPath: string, options?: ExportOptions 
 
 	const sessionData: SessionData = {
 		header: sessionHeaderForExport(sm.getHeader()),
-		entries: sm.getEntries().filter(entry => entry.type !== "model_request_metadata"),
+		entries: sm
+			.getEntries()
+			.filter(entry => entry.type !== "model_request_metadata" && entry.type !== "model_request_registry"),
 		leafId: sm.getLeafId(),
 	};
 	if (opts.includeSubSessions !== false) {

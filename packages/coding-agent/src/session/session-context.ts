@@ -1,11 +1,8 @@
-import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import { customMessageEntryMessage, isUserRequestEntry } from "@oh-my-pi/pi-tui/chat/transcript-entry";
 import { getAnthropicCompactionPayload, isTurnStartEntry } from "@oh-my-pi/pi-agent-core/compaction";
-import {
-	coerceServiceTierByFamily,
-	type OpenAIResponsesHistoryPayload,
-	type ServiceTierByFamily,
-} from "@oh-my-pi/pi-ai";
+import { coerceServiceTierByFamily } from "@oh-my-pi/pi-ai";
+import type { OpenAIResponsesHistoryPayload, ServiceTierByFamily } from "@oh-my-pi/pi-utils/model-data";
 import * as snapcompact from "@oh-my-pi/snapcompact";
 import { isRecord } from "@oh-my-pi/pi-utils";
 import {
@@ -24,7 +21,7 @@ import {
 	EPHEMERAL_MODEL_CHANGE_ROLE,
 	type SessionEntry,
 	type SessionMessageEntry,
-} from "./session-entries";
+} from "@oh-my-pi/pi-utils/session-entries";
 
 // #4470 crash artifacts had legacy frames (no shape metadata) with 17 frames,
 // ~306k archive chars, and ~1.5M truncated chars. Current snapcompact frames
@@ -259,11 +256,13 @@ export function buildSessionContext(
 	}
 	if (leafId) {
 		const candidate = byId.get(leafId);
-		if (candidate?.type !== "model_request_metadata") leaf = candidate;
+		if (candidate?.type !== "model_request_metadata" && candidate?.type !== "model_request_registry") leaf = candidate;
 	}
 	if (!leaf) {
-		// Journal metadata is canonical history, not a branch or context leaf.
-		leaf = entries.findLast(entry => entry.type !== "model_request_metadata");
+		// Journal and registry metadata are canonical history, not branch or context leaves.
+		leaf = entries.findLast(
+			entry => entry.type !== "model_request_metadata" && entry.type !== "model_request_registry",
+		);
 	}
 
 	if (!leaf) {
@@ -284,7 +283,7 @@ export function buildSessionContext(
 	let current: SessionEntry | undefined = leaf;
 	while (current && !seenPathIds.has(current.id)) {
 		seenPathIds.add(current.id);
-		if (current.type !== "model_request_metadata") path.push(current);
+		if (current.type !== "model_request_metadata" && current.type !== "model_request_registry") path.push(current);
 		current = current.parentId ? byId.get(current.parentId) : undefined;
 	}
 	path.reverse();
