@@ -405,7 +405,7 @@ export class ModelRequestRuntime {
 	 */
 	async authorize(input: ModelRequestAuthorizationInput): Promise<ModelRequestPermit> {
 		const execution = this.currentExecution();
-		if (execution !== undefined) assertJournalExecutionReady(execution);
+		assertJournalExecutionReady(execution);
 		if (execution !== undefined && execution.journalState !== "untracked") {
 			// D37: fetch invocation does not prove actual synchronous network start.
 			// Keep required external sends closed until that transport contract exists.
@@ -438,6 +438,19 @@ export class ModelRequestRuntime {
 		if (signal?.aborted) {
 			if (decision.type === "allow") this.#releaseUnused(decision.lease, true);
 			throw signal.reason ?? new AbortError("model request aborted after authorization");
+		}
+		try {
+			// The process requirement or the execution family may change while the gate is awaited.
+			assertJournalExecutionReady(execution);
+			if (execution !== undefined && execution.journalState !== "untracked") {
+				throw new ModelRequestDeniedError(
+					"transport-unsupported",
+					"required model request transport cannot prove synchronous network start",
+				);
+			}
+		} catch (error) {
+			if (decision.type === "allow") this.#releaseUnused(decision.lease, false);
+			throw error;
 		}
 		if (decision.type === "pass") return { attemptId, lease: undefined };
 		return { attemptId, lease: new GuardedLease(decision.lease) };

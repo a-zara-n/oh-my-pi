@@ -266,7 +266,7 @@ export interface GatedSendArgs {
 export async function gatedSend(args: GatedSendArgs): Promise<Response> {
 	const runtime = getModelRequestRuntime();
 	const execution = runtime.currentExecution();
-	if (execution !== undefined) assertJournalExecutionReady(execution);
+	assertJournalExecutionReady(execution);
 	if (!runtime.hasGate() && (execution === undefined || execution.journalState === "untracked")) return args.send();
 	const { input, init } = args;
 	const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
@@ -282,6 +282,13 @@ export async function gatedSend(args: GatedSendArgs): Promise<Response> {
 	});
 	link.record(permit.attemptId);
 	const lease = permit.lease;
+	try {
+		// Authorization can yield across a newly required or faulted execution family.
+		assertJournalExecutionReady(execution);
+	} catch (error) {
+		if (lease !== undefined) await settleQuietly(lease, { type: "not-sent", aborted: signal?.aborted === true });
+		throw error;
+	}
 	if (lease === undefined) return args.send();
 	const effectiveSignal = signal ?? undefined;
 	if (effectiveSignal?.aborted) {
@@ -356,7 +363,7 @@ export async function authorizeUninstrumentedAttempt(
 ): Promise<void> {
 	const runtime = getModelRequestRuntime();
 	const execution = runtime.currentExecution();
-	if (execution !== undefined) assertJournalExecutionReady(execution);
+	assertJournalExecutionReady(execution);
 	if (!runtime.hasGate() && (execution === undefined || execution.journalState === "untracked")) return;
 	const link = nextModelRequestAttemptLink();
 	const permit = await runtime.authorize({
@@ -368,6 +375,14 @@ export async function authorizeUninstrumentedAttempt(
 		wire: undefined,
 		...(signal === undefined ? {} : { signal }),
 	});
+	try {
+		assertJournalExecutionReady(execution);
+	} catch (error) {
+		if (permit.lease !== undefined) {
+			await settleQuietly(permit.lease, { type: "not-sent", aborted: signal?.aborted === true });
+		}
+		throw error;
+	}
 	link.record(permit.attemptId);
 	if (permit.lease === undefined) return;
 	await settleQuietly(permit.lease, { type: "not-sent", aborted: false });

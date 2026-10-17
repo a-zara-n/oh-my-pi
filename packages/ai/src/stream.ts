@@ -726,6 +726,7 @@ function withProviderInFlightLimit<TOptions extends Pick<StreamOptions, "signal"
 	// provider exits are covered by one wrap. Official first-party providers are
 	// exempt (see `healLeakedThinking`); healing is otherwise idempotent.
 	const limit = resolveProviderInFlightLimit(model.provider, options);
+	assertCurrentJournalExecutionReady();
 	if (limit === undefined) return healLeakedThinking(model, dispatch(false));
 
 	const outer = new AssistantMessageEventStream();
@@ -761,6 +762,7 @@ function withProviderInFlightLimit<TOptions extends Pick<StreamOptions, "signal"
 			if (options?.signal?.aborted) {
 				throw options.signal.reason ?? new AIError.AbortError("Provider request aborted before dispatch");
 			}
+			assertCurrentJournalExecutionReady();
 			const inner = healLeakedThinking(model, dispatch(true));
 			let terminalEvent: AssistantMessageEvent | undefined;
 			for await (const event of inner) {
@@ -902,7 +904,7 @@ function withResolvedModelHeaders<TApi extends Api>(
 /** Local/custom transports share the same leaf readiness precondition as external fetches. */
 function assertCurrentJournalExecutionReady(): void {
 	const execution = getModelRequestRuntime().currentExecution();
-	if (execution !== undefined) assertJournalExecutionReady(execution);
+	assertJournalExecutionReady(execution);
 }
 
 export function stream<TApi extends Api>(
@@ -960,12 +962,13 @@ function gateUninstrumentedTransport(
 ): AssistantMessageEventStream {
 	const runtime = getModelRequestRuntime();
 	const execution = runtime.currentExecution();
-	if (execution !== undefined) assertJournalExecutionReady(execution);
+	assertJournalExecutionReady(execution);
 	if (!runtime.hasGate() && (execution === undefined || execution.journalState === "untracked")) return create();
 	const outer = new AssistantMessageEventStream();
 	void (async () => {
 		try {
 			await authorizeUninstrumentedAttempt(model, "chat", signal);
+			assertCurrentJournalExecutionReady();
 			const inner = create();
 			for await (const event of inner) {
 				outer.push(event);
