@@ -51,7 +51,7 @@ export type { SessionTreeNode } from "./session/session-entries";
 export * from "./session/session-listing";
 export * from "./session/session-loader";
 export * from "./session/session-manager";
-export * from "./session/session-migrations";
+export * from "@oh-my-pi/pi-utils/session-migrations";
 export * from "@oh-my-pi/pi-utils/model-request-journal-composition";
 export * from "./session/sql-session-storage";
 export * from "./task/executor";

@@ -9,7 +9,7 @@ import {
 	type SessionStorageWriteOptions,
 	type WriteTextAtomicOptions,
 } from "@oh-my-pi/pi-utils/model-request-journal-composition";
-import { isAssistantMessageLine } from "./session-entries";
+import { isAssistantMessageLine } from "@oh-my-pi/pi-utils/session-entries";
 import { enoent } from "./session-storage-errors";
 import {
 	overlayTitleSlotContent,
@@ -17,7 +17,7 @@ import {
 	parseTitleSlotFromContent,
 	type SessionTitleUpdate,
 	titleUpdateFromSlot,
-} from "./session-title-slot";
+} from "@oh-my-pi/pi-utils/session-title-slot";
 
 export interface SessionStorageIndexEntry {
 	path: string;

@@ -5,7 +5,7 @@ import {
 } from "./indexed-session-storage";
 import { SessionWriteConflictError } from "@oh-my-pi/pi-utils/model-request-journal-composition";
 import { enoent } from "./session-storage-errors";
-import type { SessionTitleUpdate } from "./session-title-slot";
+import type { SessionTitleUpdate } from "@oh-my-pi/pi-utils/session-title-slot";
 
 /**
  * Supported `bun:sql` adapter dialects. `Bun.SQL` reports this string on

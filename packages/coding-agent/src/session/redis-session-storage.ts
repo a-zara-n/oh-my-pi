@@ -5,7 +5,7 @@ import {
 	type SessionStorageIndexEntry,
 } from "./indexed-session-storage";
 import { SessionWriteConflictError } from "@oh-my-pi/pi-utils/model-request-journal-composition";
-import type { SessionTitleUpdate } from "./session-title-slot";
+import type { SessionTitleUpdate } from "@oh-my-pi/pi-utils/session-title-slot";
 
 /**
  * Minimal subset of the `bun:redis` `RedisClient` surface used by

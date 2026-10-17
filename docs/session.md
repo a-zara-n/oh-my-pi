@@ -27,8 +27,8 @@ Does not cover `/tree` UI rendering behavior beyond semantics that affect sessio
 - [`src/session/session-listing.ts`](../packages/coding-agent/src/session/session-listing.ts) — discovery (list/recent/resolve)
 - [`src/session/session-index.ts`](../packages/coding-agent/src/session/session-index.ts) — indexed titles and idle recap journal in `history.db`
 - [`src/session/exit-diagnostics.ts`](../packages/coding-agent/src/session/exit-diagnostics.ts) — pending tools and interrupted-turn diagnostics
-- [`src/session/session-storage.ts`](../packages/coding-agent/src/session/session-storage.ts) — storage abstractions
-- [`src/session/session-title-slot.ts`](../packages/coding-agent/src/session/session-title-slot.ts) — fixed-width current-title slot
+- [`utils/src/model-request-journal-composition.ts`](../packages/utils/src/model-request-journal-composition.ts) — storage abstractions and the sole File session principal
+- [`utils/src/session-title-slot.ts`](../packages/utils/src/session-title-slot.ts) — fixed-width current-title slot
 - [`src/session/indexed-session-storage.ts`](../packages/coding-agent/src/session/indexed-session-storage.ts) — local index + ordered remote-backed storage adapter
 - [`src/session/messages.ts`](../packages/coding-agent/src/session/messages.ts) — custom-message transformers
 - [`src/session/blob-store.ts`](../packages/coding-agent/src/session/blob-store.ts) — content-addressed blob store
