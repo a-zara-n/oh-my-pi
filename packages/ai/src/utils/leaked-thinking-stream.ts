@@ -50,7 +50,7 @@ import {
 	type StreamingPartialJsonCarrier,
 } from "@oh-my-pi/pi-utils/model-data";
 import { AssistantMessageEventStream } from "./event-stream";
-import { beginCurrentExecutionOuterWork } from "./journal-outer-work";
+import { beginManagedOuterWorkFromCurrent } from "../model-request-journal-outer-work";
 
 type StreamingToolCall = ToolCall & StreamingPartialJsonCarrier;
 
@@ -78,7 +78,7 @@ function syncToolCall(target: StreamingToolCall, source: StreamingToolCall): voi
 export function wrapLeakedThinkingStream(inner: AssistantMessageEventStream): AssistantMessageEventStream {
 	const out = new AssistantMessageEventStream();
 	void (async () => {
-		const transferWork = beginCurrentExecutionOuterWork();
+		const transferWork = beginManagedOuterWorkFromCurrent();
 		try {
 			let projector: LeakedThinkingProjector | undefined;
 			for await (const event of inner) {
