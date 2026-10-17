@@ -32,6 +32,8 @@
 - Aligned session-tree registry types and hid registry bookkeeping in every selector mode; kept File-principal snapshot assertions readonly-compatible with Bun's existing equality semantics and adapted checkpoint regression tools through schema-validated execution wrappers. The clone regression now refreshes the real File snapshot before rewind instead of assuming hot-append facade entries are cloned. Verification of these integration corrections is pending.
 - DES-004 S-06/S-07/S-10 review corrections: Mnemopi dispose and the Hindsight mental-model bootstrap now begin their detached journal work handle before the producer starts (a closing binding no longer demotes the raw future to unaccounted observation), Mnemopi keeps both the consolidate and handle-close failures instead of logging them into a fulfilled dispose, `JournalOuterWorkScope.complete` reads accumulated failures only after draining tracked futures (late activation/registration rejections survive), extension handler/flush failures are noted at raw settlement instead of frozen into the timeout snapshot, and an auto-learn capture prompt failure is aggregated with provider close failures in the terminal error.
 
+- An aborted subagent spawn returns without draining pending SDK startup on the consumer path; the original work handle retains late startup and dispose failures until they settle.
+
 ## [18.8.8] - 2026-10-10
 
 ### Added

@@ -508,8 +508,13 @@ export class ModelRequestRuntime {
 			}
 			if (decision.type === "deny") throw new ModelRequestDeniedError(decision.code, decision.message);
 			if (signal?.aborted) {
-				if (decision.type === "allow")
-					await joinJournalOuterWork(gateWork, this.#releaseUnused(decision.lease, true));
+				if (decision.type === "allow") {
+					const release = Promise.resolve().then(() => this.#releaseUnused(decision.lease, true));
+					if (gateWork) {
+						gateWork.join(release);
+						void release.catch(error => gateWork.noteFailure(error));
+					} else void release.catch(() => {});
+				}
 				throw signal.reason ?? new AbortError("model request aborted after authorization");
 			}
 			try {
@@ -538,11 +543,9 @@ export class ModelRequestRuntime {
 		} catch (error) {
 			gateWork?.abortTransfer();
 			gateWork?.noteFailure(error);
-			// Timeout/abort must not end the gate work on the race result alone:
-			// the real gate call and a late allow's unused-lease settle/cleanup
-			// settle first, so their failures are accounted (E-02, AC-OL-03).
-			await joinJournalOuterWork(gateWork, afterGate);
-			await gateWork?.end();
+			// The consumer receives timeout/abort immediately. The original handle
+			// stays open until its joined gate and late cleanup futures settle.
+			if (gateWork) void gateWork.end().catch(() => {});
 			throw error;
 		}
 	}
@@ -602,37 +605,25 @@ export class ModelRequestRuntime {
 				? undefined
 				: setTimeout(() => interruptBy({ kind: "timeout" }), registration.authorizeTimeoutMs);
 		attempt.signal?.addEventListener("abort", onAbort, { once: true });
-		// The gate work may not end while the real gate call — and any release of
-		// an answer that lost the race — is still settling (E-02): a late allow's
-		// unused-lease settle/cleanup failure is accounted, never dropped by an
-		// end that already happened.
-		const lateSettled = Promise.withResolvers<void>();
-		// An answer that arrives after the race was lost still holds a reservation: release it.
-		gateCall.then(
-			value => {
-				if (raceOver) {
+		// The original work handle joins both the gate call and this observer, so
+		// a timeout/abort can return while accounting still waits for late cleanup.
+		const lateWork = gateCall
+			.then(
+				async value => {
+					if (!raceOver) return;
 					const late = parseDecision(value);
 					if (late?.type === "allow") {
-						const release = this.#releaseUnused(late.lease, attempt.signal?.aborted === true);
-						if (gateWork) {
-							void release.catch(error => gateWork.noteFailure(error));
-							gateWork.join(release);
-						} else void release.catch(() => {});
-						void release.then(
-							() => lateSettled.resolve(),
-							() => lateSettled.resolve(),
+						await joinJournalOuterWork(
+							gateWork,
+							this.#releaseUnused(late.lease, attempt.signal?.aborted === true),
 						);
-						return;
 					}
-				}
-				lateSettled.resolve();
-			},
-			error => {
-				gateWork?.noteFailure(error);
-				lateSettled.resolve();
-			},
-		);
-		const afterGate = Promise.allSettled([gateCall, lateSettled.promise]).then(() => undefined);
+				},
+				error => gateWork?.noteFailure(error),
+			)
+			.catch(error => gateWork?.noteFailure(error));
+		const afterGate = Promise.allSettled([gateCall, lateWork]).then(() => undefined);
+		if (gateWork) gateWork.join(afterGate);
 		try {
 			const raced = await Promise.race([
 				gateCall.then((value): RaceResult => ({ kind: "decision", value })),

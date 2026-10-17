@@ -42,6 +42,10 @@
 - Remote and native compaction requests, and the native judge's requests when the caller injects a gated fetch, go through the same per-attempt gate.
 - A gate denial is now terminal: provider backoff, credential rotation, oneshot and thinking-loop retries, and judge retries stop on it instead of retrying, whatever the denial text says.
 
+### Fixed
+
+- Gate outer-work accounting now waits for the actual gate call and any late unused-lease release/cleanup before ending, preserving late settlement failures after timeout or abort.
+
 ## [18.8.8] - 2026-10-10
 
 ### Fixed
