@@ -41,10 +41,12 @@ import { copyResponseMetadata } from "./request-debug";
 import { assertModelRequestBuiltinFetch, modelRequestBuiltinFetch } from "./model-request-builtin-fetch";
 
 /**
- * Every fetch that authorizes each of its calls, mapped to the same transport without the gate. Membership is how
- * wrapping layers avoid authorizing twice; the twin is for requests that are not model requests.
+ * Ordinary untracked wrapping hint and auxiliary transport mapping. Public
+ * registration is not evidence that a function enforces required admission.
  */
 const ungatedTwins = new WeakMap<object, FetchImpl>();
+// Only closures actually created below qualify for identity-preserving rewrap.
+const canonicalGatedFetches = new WeakSet<FetchImpl>();
 
 const canonicalRuntime = getModelRequestRuntime();
 const canonicalAuthorize = canonicalRuntime.authorize;
@@ -507,21 +509,42 @@ export async function gatedSend(args: GatedSendArgs): Promise<Response> {
 }
 
 /**
- * `base` with every call authorized as one wire attempt of `kind`. Returns `base` itself when it already authorizes its
- * calls. With no gate registered, an ordinary sinkless call goes straight to `base`.
+ * `base` with every call authorized as one wire attempt of `kind`. Only this
+ * factory's own closures are returned unchanged. Public wrapping hints retain
+ * ordinary delegation but cannot skip a later required invocation boundary.
  */
 export function gateFetch(model: ModelRequestModelRef, kind: ModelRequestKind, base: FetchImpl): FetchImpl {
-	if (ungatedTwins.has(base)) return base;
-	const gated: FetchImpl = (input, init) =>
-		gatedSend({ model, kind, input, init, transport: base, send: () => base(input, init) });
+	const execution = currentDispatchExecution(getModelRequestRuntime());
+	assertJournalExecutionReady(execution);
+	const ownWrapper = canonicalGatedFetches.has(base);
+	if (execution !== undefined && execution.journalState !== "untracked") {
+		try {
+			assertModelRequestBuiltinFetch(ownWrapper ? modelRequestBuiltinFetch : base);
+		} catch (error) {
+			throw new ModelRequestDeniedError("transport-unsupported", "required model request needs the startup builtin fetch", {
+				cause: error,
+			});
+		}
+	}
+	if (ownWrapper) return base;
+	const alreadyWrapped = ungatedTwins.has(base);
+	const gated: FetchImpl = (input, init) => {
+		if (alreadyWrapped) {
+			const current = currentDispatchExecution(getModelRequestRuntime());
+			assertJournalExecutionReady(current);
+			if (current === undefined || current.journalState === "untracked") return base(input, init);
+		}
+		return gatedSend({ model, kind, input, init, transport: base, send: () => base(input, init) });
+	};
 	if (base.preconnect) gated.preconnect = base.preconnect;
-	return markFetchGated(gated, base);
+	canonicalGatedFetches.add(gated);
+	return markFetchGated(gated, ungatedTwins.get(base) ?? base);
 }
 
 /**
- * Mark a fetch the caller has already built around {@link gatedSend}, so {@link gateFetch} leaves it alone, and record
- * `ungated`: the same transport without the gate, which {@link auxiliaryFetch} hands to requests that are not model
- * requests.
+ * Record an ordinary wrapping hint and `ungated`: the auxiliary transport.
+ * Public registration preserves untracked delegation, not a required proof or
+ * an identity-preserving {@link gateFetch} return for arbitrary functions.
  */
 export function markFetchGated<T extends FetchImpl>(fetch: T, ungated: FetchImpl): T {
 	ungatedTwins.set(fetch, ungated);

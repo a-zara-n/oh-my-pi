@@ -189,6 +189,16 @@ Untracked construction retains the normal global/Cowork selection. Every wrapper
 still rechecks its current execution at invocation, including one constructed
 before the process acquired a journal requirement.
 
+`gateFetch` returns an existing function unchanged only when its private set
+records a closure that this canonical factory actually created. Public
+`markFetchGated` registration remains an ordinary wrapping/auxiliary hint:
+other marked functions receive a guarded closure, not a permanent raw-function
+escape. If that closure was constructed while untracked and later invoked
+under a requirement, it enters the required dispatcher and the actual gate.
+Ordinary untracked delegation still avoids double authorization and retains
+the same ungated auxiliary transport. External marker registration no longer
+promises reference-identical `gateFetch` results.
+
 For a required transport, request-debug snapshot/file preparation is awaited
 before entering `gatedSend`, and response-debug wrapping stays after the returned
 response. The ordinary untracked sender retains its existing debug/Cowork path.
@@ -267,6 +277,11 @@ Parent verification uses the real builtin, not a fake-fetch wiring test:
    would restore the method before returning a forged permit. The actual denying
    gate must run once, the fake authorizer must never run, and the loopback must
    receive zero requests. This is distinct from simply replacing the method.
+   The `marked-before-required` child publicly marks the actual builtin with an
+   arbitrary auxiliary twin before constructing an untracked wrapper, then
+   invokes that same wrapper under a genuine ready principal and actual denying
+   gate. Require one gate call, zero received requests and zero auxiliary-twin
+   calls; a marker must not permanently bypass future admission.
 3. For gate deny/abort, revoke while prepare awaits, revoke after admission but
    before consumption, and authority/epoch/family-generation changes, require
    zero builtin invocations and zero loopback requests. Replay the exact
