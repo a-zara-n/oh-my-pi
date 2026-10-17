@@ -494,8 +494,8 @@ function orderedByTimestamp(a: SessionTreeNode, b: SessionTreeNode): number {
 /**
  * Maintains the derived views over a session's entry list: id lookup, the
  * parent→children adjacency, the resolved label map, the active leaf, and the
- * running usage totals. Kept in lockstep with the manager's `#entries` so reads
- * stay O(1)/O(children) instead of rescanning the whole journal.
+ * running usage totals. Memory journals update it incrementally; File facades
+ * rebuild this disposable projection when the principal revision changes.
  */
 class SessionEntryIndex {
 	#entriesById = new Map<string, SessionEntry>();
@@ -743,6 +743,7 @@ interface SessionManagerStateSnapshot {
 	fallbackRuntimeOnly: boolean;
 	header: SessionHeader;
 	entries: SessionEntry[];
+	leafId?: string | null;
 }
 
 interface DiskQueueOptions {
@@ -756,6 +757,7 @@ interface AtomicEntryBatch {
 	entryIds: Set<string>;
 	deferredNotifications: SessionEntry[];
 	preBatchLeafId: string | null;
+	stagedLeafId: string | null;
 	externalLeafChanged: boolean;
 	externalLeafId: string | null;
 }
@@ -918,8 +920,22 @@ export class SessionManager {
 		}
 		this.#nonFileSessionId = value;
 	}
-	#sessionName: string | undefined;
-	#titleSource: SessionTitleSource | undefined;
+	#nonFileSessionName: string | undefined;
+	get #sessionName(): string | undefined {
+		return fileJournalCells.has(this) ? this.#header.title : this.#nonFileSessionName;
+	}
+	set #sessionName(value: string | undefined) {
+		if (fileJournalCells.has(this)) this.#updateHeader({ title: value });
+		else this.#nonFileSessionName = value;
+	}
+	#nonFileTitleSource: SessionTitleSource | undefined;
+	get #titleSource(): SessionTitleSource | undefined {
+		return fileJournalCells.has(this) ? this.#header.titleSource : this.#nonFileTitleSource;
+	}
+	set #titleSource(value: SessionTitleSource | undefined) {
+		if (fileJournalCells.has(this)) this.#updateHeader({ titleSource: value });
+		else this.#nonFileTitleSource = value;
+	}
 	#titleRevision = 0;
 	/** Bumped by in-place entry updates, which a {@link SessionBodyStamp} cannot otherwise see. */
 	#bodyRevision = 0;
@@ -935,11 +951,71 @@ export class SessionManager {
 		}
 		this.#nonFileSessionFile = value;
 	}
-	#header!: SessionHeader;
-	#titleUpdatedAt = "";
+	#nonFileHeader!: SessionHeader;
+	#logicalStateInitialized = false;
+	#projectionRevision = -1;
+	#projectionExpectedDiskSize: number | null | undefined;
+	#projectionHeader!: SessionHeader;
+	#projectionEntries: SessionEntry[] = [];
+	#entryIndex = new SessionEntryIndex();
+	get #header(): SessionHeader {
+		this.#refreshLogicalProjection();
+		return fileJournalCells.has(this) ? this.#projectionHeader : this.#nonFileHeader;
+	}
+	set #header(header: SessionHeader) {
+		const cell = fileJournalCells.get(this);
+		if (cell) cell.applyEntries(header, cell.getEntries(), cell.getLeafId());
+		else this.#nonFileHeader = header;
+		this.#logicalStateInitialized = true;
+	}
+	#nonFileTitleUpdatedAt = "";
+	get #titleUpdatedAt(): string {
+		const cell = fileJournalCells.get(this);
+		return cell ? cell.getTitleUpdatedAt() ?? "" : this.#nonFileTitleUpdatedAt;
+	}
+	set #titleUpdatedAt(value: string) {
+		const cell = fileJournalCells.get(this);
+		if (cell) cell.applyEntries(cell.getHeader(), cell.getEntries(), cell.getLeafId(), value);
+		else this.#nonFileTitleUpdatedAt = value;
+	}
 	#hasTitleSlot = true;
-	#entries: SessionEntry[] = [];
-	#index = new SessionEntryIndex();
+	#nonFileEntries: SessionEntry[] = [];
+	get #entries(): SessionEntry[] {
+		this.#refreshLogicalProjection();
+		return fileJournalCells.has(this) ? this.#projectionEntries : this.#nonFileEntries;
+	}
+	get #index(): SessionEntryIndex {
+		this.#refreshLogicalProjection();
+		return this.#entryIndex;
+	}
+
+	/** File views are disposable caches, invalidated by every principal mutation. */
+	#refreshLogicalProjection(): void {
+		const cell = fileJournalCells.get(this);
+		if (!cell || this.#entriesReleased || this.#projectionRevision === cell.getProjectionRevision()) return;
+		this.#projectionHeader = cell.getHeader();
+		this.#projectionEntries = [...cell.getEntries()];
+		resolveBlobRefsInEntriesSync(this.#projectionEntries, this.#blobs);
+		this.#entryIndex.rebuild(this.#projectionEntries);
+		this.#entryIndex.setLeaf(cell.getLeafId());
+		const committedSize = cell.getExpectedDiskSize();
+		if (committedSize !== this.#projectionExpectedDiskSize) this.#expectedDiskSize = committedSize;
+		this.#projectionExpectedDiskSize = committedSize;
+		this.#projectionRevision = cell.getProjectionRevision();
+	}
+
+	#updateHeader(update: Partial<SessionHeader>): void {
+		this.#header = { ...this.#header, ...update };
+	}
+
+	#appendLogicalEntry(entry: SessionEntry): void {
+		const cell = fileJournalCells.get(this);
+		if (cell) cell.appendEntry(entry);
+		else {
+			this.#nonFileEntries.push(entry);
+			this.#entryIndex.insert(entry);
+		}
+	}
 
 	/** File reflects all current entries; appends can go incrementally. */
 	#fileIsCurrent = false;
@@ -947,7 +1023,7 @@ export class SessionManager {
 	#rewriteRequired = false;
 	/** Malformed records the loader skipped for the current session file; reported by `/dump anon`. */
 	#loadedMalformedRecords = 0;
-	/** Immutable managed-history baseline; ordinary rewrites cannot truncate its prefix. */
+	/** Non-File compatibility baseline; File history is protected only by its principal. */
 	#modelRequestJournalHistory:
 		| { descriptor: string; metadata: ReadonlyMap<string, string>; sources: ReadonlySet<string> }
 		| undefined;
@@ -1081,6 +1157,8 @@ export class SessionManager {
 			void this.#releaseFilePrincipal().catch(error => this.#noteDiskFailure(error));
 		}
 		fileJournalCells.set(this, cell);
+		this.#projectionRevision = -1;
+		this.#projectionExpectedDiskSize = undefined;
 		filePrincipalReferences.set(cell, (filePrincipalReferences.get(cell) ?? 0) + 1);
 		this.#filePrincipalRetained = true;
 		this.#storage = cell;
@@ -1250,12 +1328,10 @@ export class SessionManager {
 		for (const entry of foreign) {
 			// A recovery that raced this one may already have kept it.
 			if (this.#index.has(entry.id)) continue;
-			this.#entries.push(entry);
-			this.#index.insert(entry);
+			this.#appendLogicalEntry(entry);
 			adopted++;
 		}
-		this.#index.setLeaf(leaf);
-		this.#synchronizePrincipalLeaf();
+		this.#setLeaf(leaf, false);
 		this.#expectedDiskSize = diskSize;
 		if (adopted > 0)
 			logger.warn("Kept session entries another writer added", { sessionFile: this.#sessionFile, adopted });
@@ -1338,6 +1414,10 @@ export class SessionManager {
 		this.#refuseManagedJournalMutation();
 		const from = this.#sessionFile as string;
 		const previousSessionId = this.#sessionId;
+		const previousHeader = this.#header;
+		const previousEntries = this.#entries;
+		const previousLeaf = this.#index.leafId();
+		const previousTitleUpdatedAt = this.#titleUpdatedAt;
 		let cell = fileJournalCells.get(this);
 		let to: string;
 		let timestamp: string;
@@ -1355,13 +1435,14 @@ export class SessionManager {
 			this.#sessionId = mintSessionId();
 			to = path.join(path.dirname(from), `${fileSafeTimestamp(timestamp)}_${this.#sessionId}.jsonl`);
 		}
-		this.#header = {
-			...this.#header,
+		this.#applyEntries({
+			...previousHeader,
 			id: this.#sessionId,
 			timestamp,
 			parentSession: previousSessionId,
-			providerPromptCacheKey: this.#header.providerPromptCacheKey ?? previousSessionId,
-		};
+			providerPromptCacheKey: previousHeader.providerPromptCacheKey ?? previousSessionId,
+		}, previousEntries, previousLeaf);
+		this.#titleUpdatedAt = previousTitleUpdatedAt;
 		this.#closeWriterEventually();
 		this.#sessionFile = to;
 		this.#expectedDiskSize = null;
@@ -1614,7 +1695,6 @@ export class SessionManager {
 			this.#assertModelRequestJournalHistory(this.#header, this.#entries);
 			this.#protectModelRequestJournalHistory();
 		}
-		this.#synchronizePrincipalLeaf();
 	}
 
 	#recordFullRewrite(bytes: number): void {
@@ -1623,7 +1703,6 @@ export class SessionManager {
 			this.#assertModelRequestJournalHistory(this.#header, this.#entries);
 			this.#protectModelRequestJournalHistory();
 		}
-		this.#synchronizePrincipalLeaf();
 	}
 
 	/**
@@ -2107,7 +2186,7 @@ export class SessionManager {
 		}
 		let cell = fileJournalCells.get(this);
 		if (cell) {
-			if (this.#header !== undefined) {
+			if (this.#logicalStateInitialized) {
 				cell = openFileJournalCell({ cwd: this.#cwd, sessionDir: this.#sessionDir });
 				this.#adoptFilePrincipal(cell);
 			}
@@ -2136,12 +2215,11 @@ export class SessionManager {
 		});
 		this.#additionalDirectories = additionalWorkspaceDirectories(workspace);
 		if (this.#additionalDirectories.length > 0) {
-			this.#header.additionalDirectories = [...this.#additionalDirectories];
+			this.#updateHeader({ additionalDirectories: [...this.#additionalDirectories] });
 		}
 		this.#titleUpdatedAt = timestamp;
 
-		this.#entries = [];
-		this.#index.clear();
+		this.#applyEntries(this.#header, [], null);
 		this.#fileIsCurrent = false;
 		this.#rewriteRequired = false;
 		this.#loadedMalformedRecords = 0;
@@ -2185,8 +2263,6 @@ export class SessionManager {
 		if (!cell || !root) journalUnavailable();
 		await this.ensureOnDisk();
 		if (handoff.rootManager !== this) await handoff.rootManager.ensureOnDisk();
-		this.#synchronizePrincipalLeaf();
-		if (handoff.rootManager !== this) handoff.rootManager.#synchronizePrincipalLeaf();
 		this.#journalSession = await composeJournalSession({
 			cell,
 			root,
@@ -2201,14 +2277,8 @@ export class SessionManager {
 	#refreshPrincipalEntries(): void {
 		const cell = fileJournalCells.get(this);
 		if (!cell) return;
-		const leaf = cell.getLeafId();
-		const entries = [...cell.getEntries()];
-		resolveBlobRefsInEntriesSync(entries, this.#blobs);
-		this.#applyEntries(cell.getHeader(), entries);
-		if (leaf === null || this.#index.has(leaf)) this.#index.setLeaf(leaf);
-		this.#synchronizePrincipalLeaf();
-		const sessionFile = cell.getSessionFile();
-		this.#expectedDiskSize = this.#storage.statSync(sessionFile).size;
+		this.#refreshLogicalProjection();
+		this.#expectedDiskSize = cell.getExpectedDiskSize();
 		this.#fileIsCurrent = true;
 		this.#rewriteRequired = false;
 	}
@@ -2253,6 +2323,8 @@ export class SessionManager {
 	}
 
 	#assertModelRequestJournalHistory(header: SessionHeader, entries: readonly SessionEntry[]): void {
+		// File history protection belongs exclusively to the principal mutation boundary.
+		if (fileJournalCells.has(this)) return;
 		const protectedHistory = this.#modelRequestJournalHistory;
 		if (!protectedHistory && !header.modelRequestJournal && !entries.some(entry => entry.type === "model_request_metadata")) {
 			return;
@@ -2277,6 +2349,7 @@ export class SessionManager {
 	}
 
 	#protectModelRequestJournalHistory(): void {
+		if (fileJournalCells.has(this)) return;
 		if (!this.#header.modelRequestJournal) {
 			this.#modelRequestJournalHistory = undefined;
 			return;
@@ -2294,21 +2367,32 @@ export class SessionManager {
 		};
 	}
 
-	#applyEntries(header: SessionHeader, entries: SessionEntry[]): void {
-		if (header.modelRequestJournal || entries.some(entry => entry.type === "model_request_metadata")) {
-			validateModelRequestJournal([header, ...entries]);
-		}
-		this.#header = header;
-		this.#entries = entries;
-		this.#sessionId = header.id;
-		this.#sessionName = header.title;
-		this.#titleSource = header.titleSource;
-		this.#titleUpdatedAt = header.timestamp;
+	#applyEntries(
+		header: SessionHeader,
+		entries: SessionEntry[],
+		leafId: string | null = entries.findLast(entry =>
+			entry.type !== "model_request_metadata" && entry.type !== "model_request_registry")?.id ?? null,
+	): void {
 		const repairedUsage = normalizeLoadedUsage(entries);
 		if (repairedUsage > 0) logger.warn("Loaded assistant messages with incomplete usage", { count: repairedUsage });
-		this.#index.rebuild(entries);
-		this.#protectModelRequestJournalHistory();
-		this.#synchronizePrincipalLeaf();
+		const cell = fileJournalCells.get(this);
+		if (cell) {
+			cell.applyEntries(header, entries, leafId);
+		} else {
+			if (header.modelRequestJournal || entries.some(entry => entry.type === "model_request_metadata")) {
+				validateModelRequestJournal([header, ...entries]);
+			}
+			this.#nonFileHeader = header;
+			this.#nonFileEntries = entries;
+			this.#nonFileSessionId = header.id;
+			this.#nonFileSessionName = header.title;
+			this.#nonFileTitleSource = header.titleSource;
+			this.#nonFileTitleUpdatedAt = header.timestamp;
+			this.#entryIndex.rebuild(entries);
+			this.#entryIndex.setLeaf(leafId);
+			this.#protectModelRequestJournalHistory();
+		}
+		this.#logicalStateInitialized = true;
 	}
 
 	#freshEntryFields(): { id: string; parentId: string | null; timestamp: string } {
@@ -2319,19 +2403,12 @@ export class SessionManager {
 		};
 	}
 
-	#synchronizePrincipalLeaf(): void {
+	#setLeaf(id: string | null, trackExternal = true): void {
 		const cell = fileJournalCells.get(this);
-		const leaf = this.#index.leafId();
-		if (!cell || cell.getLeafId() === leaf) return;
-		// Lazy ordinary entries remain staged until the actual principal commits them.
-		if (leaf === null || cell.getEntry(leaf) !== undefined) cell.branch(leaf);
-	}
-
-	#setLeaf(id: string | null): void {
-		this.#index.setLeaf(id);
-		this.#synchronizePrincipalLeaf();
+		if (cell) cell.branch(id);
+		else this.#entryIndex.setLeaf(id);
 		const batch = this.#atomicEntryBatch;
-		if (batch && !batch.collecting) {
+		if (trackExternal && batch && !batch.collecting) {
 			batch.externalLeafChanged = true;
 			batch.externalLeafId = id;
 		}
@@ -2348,8 +2425,7 @@ export class SessionManager {
 		if (entry.type === "message" && entry.message.role === "assistant" && normalizeAssistantUsage(entry.message)) {
 			logger.warn("Assistant message recorded with incomplete usage", { id: entry.id });
 		}
-		this.#entries.push(entry);
-		this.#index.insert(entry);
+		this.#appendLogicalEntry(entry);
 		const batch = this.#atomicEntryBatch;
 		if (batch?.collecting) batch.entryIds.add(entry.id);
 		if (batch && !batch.collecting && entry.type !== "model_request_metadata" && entry.type !== "model_request_registry") {
@@ -2376,11 +2452,16 @@ export class SessionManager {
 				entry.parentId = retainedAncestor(entry.parentId);
 			}
 		}
-		const restoredLeaf = retainedAncestor(batch.externalLeafChanged ? batch.externalLeafId : batch.preBatchLeafId);
-		this.#entries = retained;
-		this.#index.rebuild(retained);
-		this.#index.setLeaf(restoredLeaf && this.#index.has(restoredLeaf) ? restoredLeaf : null);
-		this.#synchronizePrincipalLeaf();
+		const currentLeaf = this.#index.leafId();
+		const externalLeaf = fileJournalCells.has(this) && currentLeaf !== batch.stagedLeafId
+			? currentLeaf
+			: batch.externalLeafChanged ? batch.externalLeafId : batch.preBatchLeafId;
+		const restoredLeaf = retainedAncestor(externalLeaf);
+		this.#applyEntries(
+			this.#header,
+			retained,
+			restoredLeaf && retained.some(entry => entry.id === restoredLeaf) ? restoredLeaf : null,
+		);
 	}
 
 	#draftPath(): string | null {
@@ -2477,12 +2558,9 @@ export class SessionManager {
 			needsRewrite: this.#rewriteRequired,
 			draftOnlySessionCleanupArmed: this.#draftOnlySessionCleanupArmed,
 			fallbackRuntimeOnly: this.#fallbackRuntimeOnly,
-			// Entries are snapshotted by reference (switch/reload replaces the
-			// array wholesale). The header is cloned: moveTo mutates it in place
-			// (cwd, additionalDirectories), so a by-reference capture would let
-			// a rollback observe the move it is undoing.
 			header: structuredClone(this.#header),
-			entries: [...this.#entries],
+			entries: fileJournalCells.has(this) ? structuredClone(this.#entries) : [...this.#entries],
+			leafId: this.#index.leafId(),
 		};
 		const canonical = fileJournalCells.get(this)?.getHeader();
 		if (this.#modelRequestJournalHistory || canonical?.modelRequestJournal || canonical?.modelRequestRegistry) {
@@ -2498,8 +2576,8 @@ export class SessionManager {
 
 	/**
 	 * Create an independent manager for the current logical session and branch.
-	 * A File clone shares the existing principal and its writer, retaining its own
-	 * tree projection so work can finish after this manager switches elsewhere.
+	 * A File clone shares the existing principal, logical state, and writer so
+	 * work can finish after this manager switches elsewhere.
 	 * Set `persist` false when the original session is intentionally being dropped.
 	 */
 	cloneCurrentSession(options?: { persist?: boolean }): SessionManager {
@@ -2562,7 +2640,7 @@ export class SessionManager {
 		this.#forceFileCreation = snapshot.onDisk;
 		this.#draftOnlySessionCleanupArmed = snapshot.draftOnlySessionCleanupArmed;
 		this.#fallbackRuntimeOnly = snapshot.fallbackRuntimeOnly;
-		this.#applyEntries(snapshot.header, [...snapshot.entries]);
+		this.#applyEntries(snapshot.header, [...snapshot.entries], snapshot.leafId);
 		this.#additionalDirectories = snapshot.header.additionalDirectories ?? [];
 		this.#sessionName = snapshot.sessionName;
 
@@ -2772,6 +2850,9 @@ export class SessionManager {
 		await this.#drainAndCloseWriter();
 		this.#clearDiskError();
 		this.#reconcileSessionDirForFallback();
+		const previousHeader = this.#header;
+		const previousEntries = this.#entries;
+		const previousLeaf = this.#index.leafId();
 
 		let cell = fileJournalCells.get(this);
 		let timestamp: string;
@@ -2785,18 +2866,18 @@ export class SessionManager {
 			this.#sessionFile = path.join(this.#sessionDir, `${fileSafeTimestamp(timestamp)}_${this.#sessionId}.jsonl`);
 		}
 		this.#expectedDiskSize = null;
-		this.#header = {
+		this.#applyEntries({
 			type: "session",
 			version: CURRENT_SESSION_VERSION,
 			id: this.#sessionId,
-			title: this.#header.title ?? this.#sessionName,
-			titleSource: this.#header.titleSource ?? this.#titleSource,
+			title: previousHeader.title,
+			titleSource: previousHeader.titleSource,
 			timestamp,
 			cwd: this.#cwd,
 			additionalDirectories: this.#additionalDirectories.length > 0 ? [...this.#additionalDirectories] : undefined,
 			parentSession: parentSessionId,
-			providerPromptCacheKey: this.#header.providerPromptCacheKey ?? parentSessionId,
-		};
+			providerPromptCacheKey: previousHeader.providerPromptCacheKey ?? parentSessionId,
+		}, previousEntries, previousLeaf);
 		this.#sessionName = this.#header.title;
 		this.#titleSource = this.#header.titleSource;
 		this.#titleUpdatedAt = timestamp;
@@ -2983,9 +3064,9 @@ export class SessionManager {
 				}
 
 				if (sessionFileExisted && sessionPathChanged) {
-					this.#header.previousSessionFiles = [
+					this.#updateHeader({ previousSessionFiles: [
 						...new Set([...(this.#header.previousSessionFiles ?? []), path.resolve(oldSessionFile)]),
-					];
+					] });
 				}
 
 				this.#sessionFile = newSessionFile;
@@ -3003,18 +3084,18 @@ export class SessionManager {
 
 			this.#cwd = resolvedCwd;
 			this.#sessionDir = nextSessionDir;
-			this.#header.cwd = resolvedCwd;
+			this.#updateHeader({ cwd: resolvedCwd });
 			// Clear only after the rename has landed. If the move threw,
 			// keep the flag so the next relocation retries.
 			this.#fallbackRuntimeOnly = false;
 			if (this.#additionalDirectories.length === 0) {
-				this.#header.additionalDirectories = undefined;
+				this.#updateHeader({ additionalDirectories: undefined });
 			} else {
 				// Re-filter additional roots: the new cwd may have been an
 				// additional root, or it may now contain one.
 				this.#additionalDirectories = this.#additionalDirectories.filter(d => d !== resolvedCwd);
-				this.#header.additionalDirectories =
-					this.#additionalDirectories.length > 0 ? this.#additionalDirectories : undefined;
+				this.#updateHeader({ additionalDirectories:
+					this.#additionalDirectories.length > 0 ? this.#additionalDirectories : undefined });
 			}
 
 			// Rewrite at the new location when the file already existed (update cwd) or
@@ -3054,16 +3135,14 @@ export class SessionManager {
 		const manager = new SessionManager(this.#cwd, sessionDir, true, storage);
 		manager.#suppressBreadcrumb = options?.suppressBreadcrumb === true;
 		manager.#resetToNewSession();
-		manager.#sessionName = this.#sessionName;
-		manager.#titleSource = this.#titleSource;
-		manager.#titleUpdatedAt = this.#titleUpdatedAt;
-		manager.#header.title = this.#sessionName;
-		manager.#header.titleSource = this.#titleSource;
 		manager.#additionalDirectories = [...this.#additionalDirectories];
-		manager.#header.additionalDirectories =
-			manager.#additionalDirectories.length > 0 ? [...manager.#additionalDirectories] : undefined;
-		manager.#entries = structuredClone(this.#entries);
-		manager.#index.rebuild(manager.#entries);
+		manager.#applyEntries({
+			...manager.#header,
+			title: this.#sessionName,
+			titleSource: this.#titleSource,
+			additionalDirectories: manager.#additionalDirectories.length > 0 ? [...manager.#additionalDirectories] : undefined,
+		}, structuredClone(this.#entries), this.#index.leafId());
+		manager.#titleUpdatedAt = this.#titleUpdatedAt;
 		manager.#forceFileCreation = true;
 		await manager.#rewriteAtomically();
 		return manager;
@@ -3099,6 +3178,7 @@ export class SessionManager {
 			entryIds: new Set(),
 			deferredNotifications: [],
 			preBatchLeafId: this.#index.leafId(),
+			stagedLeafId: this.#index.leafId(),
 			externalLeafChanged: false,
 			externalLeafId: null,
 		};
@@ -3109,6 +3189,7 @@ export class SessionManager {
 				result = append();
 			} finally {
 				batch.collecting = false;
+				batch.stagedLeafId = this.#index.leafId();
 			}
 			await this.#rewriteAtomically();
 			if (!this.#fileIsCurrent || this.#rewriteRequired) {
@@ -3342,8 +3423,9 @@ export class SessionManager {
 		const cell = fileJournalCells.get(this);
 		if (cell && ((filePrincipalReferences.get(cell) ?? 0) <= (this.#filePrincipalRetained ? 1 : 0) ||
 			cell.getHeader().modelRequestJournal || cell.getHeader().modelRequestRegistry)) cell.releaseRetainedEntries();
-		this.#entries = [];
-		this.#index.clear();
+		this.#nonFileEntries = [];
+		this.#projectionEntries = [];
+		this.#entryIndex.clear();
 		this.#inMemoryArtifacts = null;
 		this.#closeWriterEventually();
 		this.#entriesReleased = true;
@@ -3428,7 +3510,7 @@ export class SessionManager {
 		if (this.#fallbackRuntimeOnly) {
 			return resolved;
 		}
-		this.#header.additionalDirectories = this.#additionalDirectories;
+		this.#updateHeader({ additionalDirectories: this.#additionalDirectories });
 		await this.#persistWorkspaceDirectoriesChange();
 		return resolved;
 	}
@@ -3448,9 +3530,9 @@ export class SessionManager {
 			return resolved;
 		}
 		if (this.#additionalDirectories.length === 0) {
-			this.#header.additionalDirectories = undefined;
+			this.#updateHeader({ additionalDirectories: undefined });
 		} else {
-			this.#header.additionalDirectories = this.#additionalDirectories;
+			this.#updateHeader({ additionalDirectories: this.#additionalDirectories });
 		}
 		await this.#persistWorkspaceDirectoriesChange();
 		return resolved;
@@ -3473,9 +3555,9 @@ export class SessionManager {
 		}
 		this.#additionalDirectories = next;
 		if (this.#additionalDirectories.length > 0) {
-			this.#header.additionalDirectories = this.#additionalDirectories;
+			this.#updateHeader({ additionalDirectories: this.#additionalDirectories });
 		} else {
-			this.#header.additionalDirectories = undefined;
+			this.#updateHeader({ additionalDirectories: undefined });
 		}
 		await this.#persistWorkspaceDirectoriesChange();
 	}
@@ -3696,8 +3778,7 @@ export class SessionManager {
 		this.#titleSource = source;
 		if (source === "user") this.#titleRevision++;
 		this.#titleUpdatedAt = timestamp;
-		this.#header.title = title;
-		this.#header.titleSource = source;
+		this.#updateHeader({ title, titleSource: source });
 
 		const entry: TitleChangeEntry = {
 			type: TITLE_CHANGE_ENTRY_TYPE,
@@ -3708,8 +3789,7 @@ export class SessionManager {
 		};
 		if (previousTitle) entry.previousTitle = previousTitle;
 		if (trigger) entry.trigger = trigger;
-		this.#entries.push(entry);
-		this.#index.insert(entry);
+		this.#appendLogicalEntry(entry);
 		this.#notifyEntryAppended(entry);
 		await this.#persistTitleChangeEntry(entry, { title, source, updatedAt: timestamp });
 		// Keep the recent-sessions title index current so welcome-screen lookups
@@ -3806,8 +3886,7 @@ export class SessionManager {
 		// keep it out of any branch view already handed out.
 		this.#index.detachBranchView();
 		this.#recordEntry(entry);
-		this.#index.setLeaf(activeLeafId);
-		this.#synchronizePrincipalLeaf();
+		this.#setLeaf(activeLeafId);
 		return entry.id;
 	}
 
@@ -3831,8 +3910,7 @@ export class SessionManager {
 			...usage,
 		};
 		this.#recordEntry(entry);
-		if (activeLeafId !== owner.parentId) this.#index.setLeaf(activeLeafId);
-		this.#synchronizePrincipalLeaf();
+		if (activeLeafId !== owner.parentId) this.#setLeaf(activeLeafId);
 		return entry.id;
 	}
 
@@ -3958,8 +4036,29 @@ export class SessionManager {
 	 */
 	async rewriteEntries(): Promise<void> {
 		this.#bodyRevision++;
-		if (!this.#persist || !this.#sessionFile) return;
-		await this.#rewriteAtomically();
+		const cell = fileJournalCells.get(this);
+		if (!cell) {
+			if (!this.#persist || !this.#sessionFile) return;
+			await this.#rewriteAtomically();
+			return;
+		}
+		const before = cell.getEntries();
+		const projected = new Map(this.#projectionEntries.map(entry => [entry.id, entry]));
+		// A direct owner append may have advanced the principal since callers
+		// obtained their writable projection. Never drop that canonical history.
+		const entries = before.map(entry => projected.get(entry.id) ?? entry);
+		cell.applyEntries(cell.getHeader(), entries, cell.getLeafId());
+		try {
+			await this.#rewriteAtomically();
+		} catch (error) {
+			const previous = new Map(before.map(entry => [entry.id, entry]));
+			cell.applyEntries(
+				cell.getHeader(),
+				cell.getEntries().map(entry => previous.get(entry.id) ?? entry),
+				cell.getLeafId(),
+			);
+			throw error;
+		}
 	}
 
 	/**
@@ -4143,7 +4242,11 @@ export class SessionManager {
 			entry.message = sanitized;
 			changed = true;
 		}
-		if (changed) this.#bodyRevision++;
+		if (changed) {
+			this.#bodyRevision++;
+			const cell = fileJournalCells.get(this);
+			if (cell) cell.applyEntries(this.#header, this.#entries, this.#index.leafId());
+		}
 		return changed;
 	}
 
@@ -4200,8 +4303,7 @@ export class SessionManager {
 				child.parentId = leafId;
 				leafId = child.id;
 			}
-			this.#entries = this.#entries.filter(candidate => candidate.id !== entryId);
-			this.#index.rebuild(this.#entries);
+			this.#applyEntries(this.#header, this.#entries.filter(candidate => candidate.id !== entryId), leafId);
 		}
 		this.branchWithSummary(leafId, "", {
 			kind: DISCARDED_ENTRY_BRANCH_MARKER,
@@ -4250,6 +4352,8 @@ export class SessionManager {
 			if (keptIds.has(targetId)) labelsToCarry.push({ targetId, label });
 		}
 
+		const title = this.#sessionName;
+		const titleSource = this.#titleSource;
 		let cell = fileJournalCells.get(this);
 		if (cell) {
 			this.#reconcileSessionDirForFallback();
@@ -4267,8 +4371,8 @@ export class SessionManager {
 			id: newSessionId,
 			timestamp,
 			cwd: this.#cwd,
-			title: this.#sessionName,
-			titleSource: this.#titleSource,
+			title,
+			titleSource,
 			parentSession: this.#persist ? sourceSessionFile : undefined,
 			additionalDirectories: this.#additionalDirectories.length > 0 ? [...this.#additionalDirectories] : undefined,
 		};
@@ -4288,14 +4392,9 @@ export class SessionManager {
 			parentId = labelEntry.id;
 		}
 
-		this.#header = header;
-		this.#entries = [...entriesToKeep, ...labels];
-		this.#sessionId = newSessionId;
-		this.#sessionName = header.title;
-		this.#titleSource = header.titleSource;
+		this.#applyEntries(header, [...entriesToKeep, ...labels]);
 		this.#titleUpdatedAt = timestamp;
 		this.#hasTitleSlot = true;
-		this.#index.rebuild(this.#entries);
 		this.#artifactManager = null;
 		this.#artifactManagerSessionFile = null;
 		this.#forceFileCreation = this.#persist;
@@ -4423,21 +4522,20 @@ export class SessionManager {
 			},
 			options?.sessionFile,
 		);
-		manager.#header.title = sourceHeader?.title;
-		manager.#header.titleSource = sourceHeader?.titleSource;
 		manager.#additionalDirectories = (sourceHeader?.additionalDirectories ?? []).filter(d => d !== path.resolve(cwd));
-		manager.#header.additionalDirectories =
-			manager.#additionalDirectories.length > 0 ? manager.#additionalDirectories : undefined;
-		manager.#sessionName = manager.#header.title;
-		manager.#titleSource = manager.#header.titleSource;
+		manager.#applyEntries({
+			...manager.#header,
+			title: sourceHeader?.title,
+			titleSource: sourceHeader?.titleSource,
+			additionalDirectories: manager.#additionalDirectories.length > 0 ? manager.#additionalDirectories : undefined,
+		}, history);
 		manager.#titleUpdatedAt = nowIso();
 		manager.#hasTitleSlot = true;
-		manager.#entries = history;
-		manager.#index.rebuild(history);
 		manager.sanitizeLoadedOpenAIResponsesReplayMetadata();
 		if (options?.repairInterruptedTail) {
-			SessionManager.#repairForkedInterruptedTail(history, manager.#index.pathTo());
-			manager.#index.rebuild(history);
+			const entries = manager.#entries;
+			SessionManager.#repairForkedInterruptedTail(entries, manager.#index.pathTo());
+			manager.#applyEntries(manager.#header, entries);
 		}
 		manager.#forceFileCreation = true;
 		await manager.#rewriteAtomically();
