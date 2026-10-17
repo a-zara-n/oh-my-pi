@@ -477,10 +477,13 @@ static int ompSqliteVacuumSourceCheck(sqlite3_file *id, int result){
   p=(unixFile*)id; s=p->ompState;
   sqlite3_mutex_enter(s->mutex);
   rc=ompSqliteCheck(p);
-  if( result!=SQLITE_OK || !s->armed || s->backupOutput )
+  /* A SQL refusal (for example the fixed authorizer rejecting ATTACH) is
+  ** not an owned-file lifetime failure. Preserve its result, without poisoning
+  ** a valid source. Actual I/O failures and ownership violations stay sticky. */
+  if( (result&0xff)==SQLITE_IOERR || !s->armed || s->backupOutput )
     rc=ompSqliteFault(s);
   sqlite3_mutex_leave(s->mutex);
-  return rc;
+  return rc==SQLITE_OK ? result : rc;
 }
 static int ompSqliteVacuumBind(sqlite3_file *source, sqlite3_file *destination){
   unixFile *from, *to;
@@ -531,9 +534,9 @@ static int ompSqliteVacuumFinish(sqlite3_file *source, sqlite3_file *destination
   to=(unixFile*)destination; s=to->ompState;
   sqlite3_mutex_enter(s->mutex);
   rc=ompSqliteCheck(to);
-  if( result!=SQLITE_OK || !s->backupOutput || !s->backupSource )
+  if( (result&0xff)==SQLITE_IOERR || !s->backupOutput || !s->backupSource )
     rc=ompSqliteFault(s);
   sqlite3_mutex_leave(s->mutex);
   if( rc!=SQLITE_OK ) return ompSqliteVacuumSourceCheck(source,rc);
-  return ompSqliteVacuumSourceCheck(source,SQLITE_OK);
+  return ompSqliteVacuumSourceCheck(source,result);
 }

@@ -254,6 +254,24 @@ propagate sticky failure to source state. A core finish guard runs before
 output close, close errors propagate, and a final source guard runs after
 close and before SQL success. Existing SQL error does not become success.
 
+The finish/source guards keep the ordinary SQL result separate from an owned
+lifetime failure. For example, fixed-authority VACUUM INTO can enter the core
+routine before its internal ATTACH is rejected by the authorizer
+(`src/vacuum.c:225–228`), then reach the final source guard with SQLITE_AUTH and
+no output Btree. That refusal must remain a SQL error without poisoning a
+still-valid source or causing its later strict close to fail. A non-OK result
+alone is not an identity violation. Primary SQLITE_IOERR results (including
+extended I/O/guard errors), actual source/output guard failures, invalid output
+ownership, and underlying output I/O/close faults still propagate sticky failure.
+The source's real owned-file checks always run; no error is changed to success.
+An unsuccessful or partial copy never acquires authority/bootstrap eligibility.
+
+Parent acceptance should inspect native state immediately after separate
+query_only-OFF and VACUUM-INTO refusals, then close the authority reader:
+SQLITE_AUTH stays rejected, the forbidden output stays absent, and valid owned
+state/strict close remain successful. Keep the independent true-namespace-swap
+close-failure regression; do not hide either result behind a finally exception.
+
 The source may be an actual read-only fd: ordinary Store backup readers can
 use their existing query-only-OFF/copy/query-only-ON sequence, and only the
 new output owns write permission. Source mutations still fail the native RO
