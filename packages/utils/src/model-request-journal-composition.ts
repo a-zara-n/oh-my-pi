@@ -2736,11 +2736,16 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 	#trackBindingWork<T>(work: Promise<T>): Promise<T> {
 		const pending = this.#bindingWork ??= new Set();
 		const settled = work.then(
-			() => { pending.delete(settled); this.#bindingRoot?.#bindingChanged?.resolve(); },
+			() => {
+				pending.delete(settled);
+				const root = this.#bindingRoot;
+				if (root) root.#bindingChanged?.resolve();
+			},
 			error => {
 				pending.delete(settled);
 				(this.#bindingFailures ??= []).push(error);
-				this.#bindingRoot?.#bindingChanged?.resolve();
+				const root = this.#bindingRoot;
+				if (root) root.#bindingChanged?.resolve();
 			},
 		);
 		pending.add(settled);
@@ -3306,13 +3311,15 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 			const admission: OpaqueSendAdmission = Object.freeze({ [JOURNAL_SEND_ADMISSION]: true });
 			const admissions = this.#bindingAdmissions ??= new Set();
 			admissions.add(admission);
-			this.#bindingRoot?.#bindingChanged?.resolve();
+			const root = this.#bindingRoot;
+			if (root) root.#bindingChanged?.resolve();
 			sendAdmissionStates.set(admission, {
 				execution, attempt, attemptId, session, sessionState: state, scope, phase: "prepared",
 				complete: failure => {
 					admissions.delete(admission);
 					if (failure) (this.#bindingFailures ??= []).push(failure.error);
-					this.#bindingRoot?.#bindingChanged?.resolve();
+					const root = this.#bindingRoot;
+					if (root) root.#bindingChanged?.resolve();
 				},
 			});
 			return admission;
