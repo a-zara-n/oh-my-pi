@@ -51,9 +51,9 @@ export function fileEntries(cwd: string, managed: boolean): FileEntry[] {
 	return [header, metadata, assistant, linked, userEntry("first", assistant.id)];
 }
 
-if (process.argv[2] === "--foreign-append") {
-	const [, , , file, sessionId, line] = process.argv;
-	if (!file || !sessionId || !line) throw new Error("Missing foreign append fixture arguments");
+if (process.argv[2] === "--foreign-append" || process.argv[2] === "--foreign-replace") {
+	const [, , operation, file, sessionId, body] = process.argv;
+	if (!file || !sessionId || !body) throw new Error("Missing foreign mutation fixture arguments");
 	// The ordinary principal already owns the actual OS lease. The old/raw
 	// writer deliberately bypasses that lease, exactly like a foreign binary.
 	const unexpectedLease = tryAcquireSessionLease(sessionId);
@@ -61,6 +61,10 @@ if (process.argv[2] === "--foreign-append") {
 		unexpectedLease.release();
 		throw new Error("Expected actual parent-held session lease contention");
 	}
-	fs.appendFileSync(file, line);
+	if (operation === "--foreign-replace") {
+		const replacement = `${file}.replacement`;
+		fs.writeFileSync(replacement, body);
+		fs.renameSync(replacement, file);
+	} else fs.appendFileSync(file, body);
 	console.log("FOREIGN_COMMITTED");
 }

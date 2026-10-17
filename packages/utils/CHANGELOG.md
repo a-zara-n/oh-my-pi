@@ -70,6 +70,12 @@
   the principal's committed count, retaining foreign committed rows and logical staging
   together before adopting the new size. Facades reindex recovered rows; uncontended
   appends keep their incremental path without rereading retained history.
+- Canonicalize ordinary File histories missing their final LF before the first append,
+  preserving a valid unterminated record instead of concatenating two JSON values.
+  After a foreign replacement removes the old committed tail, retain the pre-refresh
+  tail-following decision so a raw append selects its new row; explicit branches and
+  staged leaf selections remain unchanged. Added consumer regressions for both paths;
+  verification remains delegated to integration.
 - Validate raw File appends as exactly one physical JSON record before title-slot
   folding, sharing private closed entry-kind and canonical-ID checks with strict File
   rewrites. Reject folded title-slot injections, multirow input and invalid row shapes

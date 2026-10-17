@@ -2174,7 +2174,7 @@ function loadFileProjection(content: string, managedExpected = false): FileProje
 	const header = parsed.entries[0];
 	if (header.type !== "session") unavailable();
 	return { header, entries: parsed.entries.filter(entry => entry.type !== "session"), titleUpdatedAt: parsed.titleSlot?.updatedAt,
-		rewriteRequired: migrated || parsed.malformedRecords > 0 };
+		rewriteRequired: migrated || parsed.malformedRecords > 0 || !content.endsWith("\n") };
 }
 
 
@@ -2646,12 +2646,13 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 		const entry = pending.entry;
 		this.#pendingAppend = undefined;
 		const previousCommittedLeaf = this.#committedEntries.at(-1)?.id ?? null;
+		const followsCommittedLeaf = this.#leafId === previousCommittedLeaf;
 		// A foreign writer may have committed rows since our last observation.
 		// Advance the size only with the matching physical projection, retaining
 		// logical staging through the normal committed-snapshot merge.
 		if (size - Buffer.byteLength(line) !== this.#expectedSize) {
 			this.#refreshCommitted();
-			if (this.#leafId === previousCommittedLeaf && !this.#removedEntryIds.has(entry.id)) this.#leafId = entry.id;
+			if (followsCommittedLeaf && !this.#removedEntryIds.has(entry.id)) this.#leafId = entry.id;
 			// Facades recognize a single revision step as only their own append.
 			// A recovered snapshot also contains foreign rows and needs reindexing.
 			this.#projectionRevision++;

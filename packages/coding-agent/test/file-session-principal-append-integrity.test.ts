@@ -31,15 +31,17 @@ function physicalEntries(content: string): unknown[] {
 	});
 }
 
-async function foreignAppend(file: string, sessionId: string, entry: FileEntry): Promise<void> {
+async function foreignCommit(
+	file: string, sessionId: string, entries: readonly FileEntry[], operation: "append" | "replace",
+): Promise<void> {
 	const child = Bun.spawn([
 		process.execPath, path.join(import.meta.dir, "fixtures/file-principal-append-integrity.ts"),
-		"--foreign-append", file, sessionId, `${JSON.stringify(entry)}\n`,
+		`--foreign-${operation}`, file, sessionId, serialize(entries),
 	], { stdout: "pipe", stderr: "pipe", env: process.env });
 	const [exit, stdout, stderr] = await Promise.all([
 		child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
 	]);
-	if (exit !== 0) throw new Error(`Foreign append fixture failed (${exit}): ${stderr}`);
+	if (exit !== 0) throw new Error(`Foreign mutation fixture failed (${exit}): ${stderr}`);
 	expect(stdout.trim()).toBe("FOREIGN_COMMITTED");
 }
 
@@ -80,7 +82,7 @@ describe("File principal physical append integrity", () => {
 			const staged = userEntry("staged", warm);
 			cell.appendEntry(staged);
 			const foreign = userEntry("foreign", warm);
-			await foreignAppend(file, cell.getSessionId(), foreign);
+			await foreignCommit(file, cell.getSessionId(), [foreign], "append");
 			expect(physicalEntries(await Bun.file(file).text())).toContainEqual(foreign);
 			const own = manager.appendMessage({ role: "user", content: "own", timestamp: 2 });
 			await manager.flush();
@@ -156,6 +158,82 @@ describe("File principal physical append integrity", () => {
 			expect((await loadModelRequestJournalFromFile(file)).throughSeqByEpoch.get(EPOCH)).toBe(2);
 		} finally { await closeCell(cell); }
 	});
+
+	it.each([false, true])("repairs a valid final record's missing LF before append (preexisting writer=%s)", async preexistingWriter => {
+		using dir = TempDir.createSync("@principal-append-final-lf-");
+		const file = dir.join("session.jsonl");
+		const initial = fileEntries(dir.path(), false);
+		const bytes = serialize(initial).slice(0, -1);
+		await Bun.write(file, bytes);
+		const rawWriter = preexistingWriter ? new FileSessionStorage().openWriter(file) : undefined;
+		const cell = openFileJournalCell({ cwd: dir.path(), sessionFile: file });
+		try {
+			expect(await Bun.file(file).text()).toBe(bytes);
+			const prefix = cell.getEntries();
+			const own = userEntry("own", cell.getLeafId());
+			const writer = cell.openWriter(file);
+			if (rawWriter) expect(writer).toBe(rawWriter);
+			await writer.append(serialize([own]));
+			await writer.flush();
+			const physical = await Bun.file(file).text();
+			expect(physicalEntries(physical)).toContainEqual(prefix[0]);
+			expect(physicalEntries(physical)).toContainEqual(own);
+			const loaded = await loadSessionFile(file);
+			expect(loaded.malformedRecords).toBe(0);
+			expect(loaded.entries.slice(1)).toEqual([...prefix, own]);
+			expect(cell.getEntries()).toEqual([...prefix, own]);
+			expect(cell.getLeafId()).toBe(own.id);
+			expect(cell.getExpectedDiskSize()).toBe(Buffer.byteLength(physical));
+			await cell.ensureOnDisk();
+			expect((await loadSessionFile(file)).entries.slice(1)).toEqual([...prefix, own]);
+		} finally { await closeCell(cell); }
+	});
+
+	it.each(["tail", "branch", "staged"] as const)(
+		"preserves %s selection semantics when a child replaces the committed tail before raw append",
+		async selection => {
+			using dir = TempDir.createSync("@principal-replacement-leaf-");
+			const file = dir.join("session.jsonl");
+			const initial = fileEntries(dir.path(), false);
+			const first = initial[1]!;
+			const oldTail = userEntry("old-tail", first.id);
+			await Bun.write(file, serialize([...initial, oldTail]));
+			const manager = await SessionManager.open(file, dir.path(), new FileSessionStorage(), { suppressBreadcrumb: true });
+			const cell = openFileJournalCell({ cwd: dir.path(), sessionFile: file });
+			try {
+				const writer = cell.openWriter(file);
+				const staged = userEntry("staged", first.id);
+				if (selection === "branch") cell.branch(first.id);
+				else if (selection === "staged") cell.appendEntry(staged);
+				else expect(cell.getLeafId()).toBe(oldTail.id);
+				const replacement = userEntry("replacement-with-different-size", first.id);
+				await foreignCommit(file, cell.getSessionId(), [...initial, replacement], "replace");
+				const own = userEntry("own", replacement.id);
+				await writer.append(serialize([own]));
+				await writer.flush();
+				const leaf = selection === "tail" ? own.id : selection === "branch" ? first.id : staged.id;
+				expect(cell.getLeafId()).toBe(leaf);
+				expect(manager.getLeafId()).toBe(leaf);
+				expect(manager.buildSessionContext().messages.length).toBeGreaterThan(0);
+				expect(cell.getEntry(oldTail.id)).toBeUndefined();
+				expect(cell.getEntry(replacement.id)).toEqual(replacement);
+				expect(cell.getEntry(own.id)).toEqual(own);
+				if (selection === "staged") expect(cell.getEntry(staged.id)).toEqual(staged);
+				const bytes = await Bun.file(file).text();
+				expect(physicalEntries(bytes)).toContainEqual(replacement);
+				expect(physicalEntries(bytes)).toContainEqual(own);
+				expect(cell.getExpectedDiskSize()).toBe(Buffer.byteLength(bytes));
+				await manager.rewriteEntries();
+				const loaded = await loadSessionFile(file);
+				expect(loaded.malformedRecords).toBe(0);
+				expect(loaded.entries.slice(1)).toEqual(cell.getEntries());
+				expect(manager.getLeafId()).toBe(leaf);
+				expect(cell.getExpectedDiskSize()).toBe(fs.statSync(file).size);
+			} finally {
+				try { await manager.close(); } finally { cell.releaseRetainedEntries(); }
+			}
+		}, 30_000,
+	);
 
 	it.each(["unknown", "title", "invalid id"])("shares the strict rewrite boundary for %s rows", async kind => {
 		using dir = TempDir.createSync("@principal-closed-row-");
