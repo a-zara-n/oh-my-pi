@@ -10,8 +10,8 @@ import type { Api, AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import {
 	getModelRequestExecution,
 	resolveModelRequestScope,
-	runWithModelRequestExecution,
 } from "@oh-my-pi/pi-ai/model-request-execution";
+
 import type { ModelRequestAgent, ModelRequestPurpose } from "@oh-my-pi/pi-utils/model-request-data";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
@@ -27,18 +27,9 @@ import { BUILTIN_LIFECYCLE_SLASH_COMMANDS } from "@oh-my-pi/pi-coding-agent/slas
 import type { SlashCommandRuntime } from "@oh-my-pi/pi-coding-agent/slash-commands/types";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import type { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
-import {
-	childModelRequestRootOf,
-	createSessionModelRequestExecution,
-	type ModelRequestRootAssignment,
-	resolveModelRequestRootSource,
-} from "@oh-my-pi/pi-coding-agent/session/model-request-context";
-import { type ModelRequestJournal, SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import type { ModelRequestRootAssignment } from "@oh-my-pi/pi-coding-agent/session/model-request-context";
+import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
-import {
-	type ModelRequestJournalLeaseBinding,
-	modelRequestJournalAuthorityRuntimeIdentity,
-} from "@oh-my-pi/pi-utils/model-request-journal-authority";
 import { createAssistantMessage, createInMemoryAuthStorage } from "./helpers/agent-session-setup";
 import { assistantMsg, userMsg } from "./utilities";
 
@@ -76,6 +67,51 @@ function observeRequestContext(): ObservedRequest {
 function sessionIdOf(session: AgentSession): string {
 	return session.sessionManager.getSessionId();
 }
+
+// Binding candidates permanently latch journal-required mode. Each case therefore gets a real process,
+// never a reset or mocked authority, leaving the ordinary SDK context cases below untracked.
+describe("managed model request context isolation", () => {
+	const cases = [
+		["foreign-runtime", "refuses a foreign-runtime binding before a session or provider request is published"],
+		["fake-authority", "does not grant readiness to a copied authority-shaped object with the correct runtime and root"],
+		["binding-propagation", "retains the same candidate and rejects a distinct binding without publishing a pending child root"],
+		["rejected-promise", "keeps a managed child root unavailable before and after a caller promise rejects"],
+		["resolved-promise", "does not grant readiness when a caller promise resolves to a readiness-shaped DTO"],
+		["fake-execution", "does not accept a readiness-shaped execution DTO as canonical identity"],
+	] as const;
+
+	for (const [scenario, title] of cases) {
+		it(title, async () => {
+			const child = Bun.spawn(
+				[process.execPath, path.join(import.meta.dir, "fixtures/model-request-context-journal-probe.ts"), scenario],
+				{
+					cwd: path.resolve(import.meta.dir, "../../.."),
+					stdin: "ignore",
+					stdout: "pipe",
+					stderr: "pipe",
+				},
+			);
+			const watchdog = setTimeout(() => child.kill("SIGKILL"), 30_000);
+			try {
+				const [exitCode, stdout, stderr] = await Promise.all([
+					child.exited,
+					new Response(child.stdout).text(),
+					new Response(child.stderr).text(),
+				]);
+				if (exitCode !== 0) {
+					throw new Error(`Model request context probe ${scenario} exited ${exitCode}:\n${stdout}\n${stderr}`);
+				}
+				expect(stdout.trim().split("\n")).toContain(`model-request-context:${scenario}:ok`);
+			} finally {
+				clearTimeout(watchdog);
+				if (child.exitCode === null) {
+					child.kill("SIGKILL");
+					await child.exited;
+				}
+			}
+		}, 35_000);
+	}
+});
 
 describe("model request context of an AgentSession", () => {
 	let tempDir: TempDir;
@@ -141,7 +177,6 @@ describe("model request context of an AgentSession", () => {
 		agentId: string;
 		taskDepth?: number;
 		modelRequestRoot?: ModelRequestRootAssignment;
-		modelRequestJournalLeaseBinding?: ModelRequestJournalLeaseBinding;
 		sessionManager?: SessionManager;
 		settings?: Settings;
 		model?: Model<Api>;
@@ -169,7 +204,6 @@ describe("model request context of an AgentSession", () => {
 			agentId: init.agentId,
 			taskDepth: init.taskDepth,
 			modelRequestRoot: init.modelRequestRoot,
-			modelRequestJournalLeaseBinding: init.modelRequestJournalLeaseBinding,
 		});
 		sessions.push(session);
 		return session;
@@ -188,78 +222,6 @@ describe("model request context of an AgentSession", () => {
 			session.sessionManager.appendMessage(assistant);
 		}
 	}
-
-	it("refuses a foreign-runtime binding before a session or provider request is published", async () => {
-		const manager = SessionManager.create(tempDir.path(), path.join(tempDir.path(), "sessions"));
-		const malformed: unknown = { runtimeIdentity: {}, rootSessionId: manager.getSessionId() };
-		await expect(
-			createSession({
-				agentId: ROOT_AGENT_ID,
-				sessionManager: manager,
-				modelRequestJournalLeaseBinding: malformed as ModelRequestJournalLeaseBinding,
-			}),
-		).rejects.toThrow(/different authority runtime/);
-		expect(observed).toEqual([]);
-	});
-
-	it("does not grant readiness to a copied authority-shaped object with the correct runtime and root", async () => {
-		const manager = SessionManager.create(tempDir.path(), path.join(tempDir.path(), "sessions"));
-		const malformed: unknown = Object.freeze({
-			runtimeIdentity: modelRequestJournalAuthorityRuntimeIdentity,
-			rootSessionId: manager.getSessionId(),
-		});
-		await expect(
-			createSession({
-				agentId: ROOT_AGENT_ID,
-				sessionManager: manager,
-				modelRequestJournalLeaseBinding: malformed as ModelRequestJournalLeaseBinding,
-			}),
-		).rejects.toThrow();
-		expect(observed).toEqual([]);
-	});
-
-	it("retains the same opaque object through root assignment and rejects a different explicit binding", () => {
-		// Invalid input objects test identity propagation only; neither is accepted as verified authority.
-		const malformed: unknown = { runtimeIdentity: modelRequestJournalAuthorityRuntimeIdentity, rootSessionId: "root" };
-		const binding = malformed as ModelRequestJournalLeaseBinding;
-		const root = resolveModelRequestRootSource({
-			kind: "child",
-			rootSessionId: "root",
-			modelRequestJournalLeaseBinding: binding,
-		});
-		const execution = createSessionModelRequestExecution({
-			getSessionId: () => "child",
-			root,
-			agent: { kind: "sub", id: "Child", name: "child", depth: 1, parentId: ROOT_AGENT_ID },
-		});
-		const childRoot = childModelRequestRootOf(execution);
-		expect(childRoot.modelRequestJournalLeaseBinding).toBe(binding);
-		expect(resolveModelRequestRootSource(childRoot).modelRequestJournalLeaseBinding).toBe(binding);
-		const copied: unknown = { ...binding };
-		expect(() => resolveModelRequestRootSource(childRoot, copied as ModelRequestJournalLeaseBinding)).toThrow(
-			/differs from the inherited root binding/,
-		);
-		expect(() => runWithModelRequestExecution(execution, () => resolveModelRequestRootSource(undefined))).toThrow(
-			/must explicitly retain/,
-		);
-	});
-
-	it("does not publish a managed child root while the journal connection is still pending", async () => {
-		const malformed: unknown = { runtimeIdentity: modelRequestJournalAuthorityRuntimeIdentity, rootSessionId: "root" };
-		const binding = malformed as ModelRequestJournalLeaseBinding;
-		const connection = Promise.withResolvers<ModelRequestJournal>();
-		const execution = createSessionModelRequestExecution({
-			getSessionId: () => "root",
-			root: resolveModelRequestRootSource(undefined, binding),
-			agent: { kind: "main", id: ROOT_AGENT_ID, name: "main", depth: 0 },
-			journalConnection: connection.promise,
-		});
-		expect(() => childModelRequestRootOf(execution)).toThrow(/not connected/);
-		const failure = new Error("registry receipt unavailable");
-		connection.reject(failure);
-		await expect(connection.promise).rejects.toBe(failure);
-		expect(() => childModelRequestRootOf(execution)).toThrow(/not connected/);
-	});
 
 	it("attributes a user-started session's prompt to the session as its own root", async () => {
 		const session = await createSession({ agentId: ROOT_AGENT_ID });
