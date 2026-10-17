@@ -54,6 +54,7 @@ import { formatModelStringWithRouting, resolveRoleChain, type RoleChainCandidate
 import { roleCandidatePool } from "../config/model-roles";
 import type { Settings } from "../config/settings";
 import type { SessionManager } from "../session/session-manager";
+import { JournalOuterWorkOwner } from "../session/journal-outer-work";
 import { getTinyLocalModelSpec } from "../tiny/models";
 import localPromptTemplate from "../prompts/system/judgment-local.md" with { type: "text" };
 import { tinyModelClient } from "../tiny/title-client";
@@ -264,6 +265,8 @@ export class ChainJudge implements Judge {
 	}
 
 	async withCandidate<T>(run: (judge: Judge, kind: JudgeKind) => Promise<T>, options: JudgeOptions = {}): Promise<T> {
+		const outerWork = JournalOuterWorkOwner.fromExecution(getModelRequestExecution());
+		return outerWork.run(async () => {
 		const signal = options.signal;
 		let lastFailure: string | undefined;
 		let lastUnavailable: string | undefined;
@@ -315,6 +318,7 @@ export class ChainJudge implements Judge {
 		}
 		if (candidates.length === 0) throw new Error("judgment: no judge model available");
 		throw new Error(`judgment: every judge candidate failed: ${lastFailure ?? lastUnavailable ?? "unknown error"}`);
+		});
 	}
 
 	/** Attribute one attempt: the ledger unless answered wholly from cache, and one telemetry span. */

@@ -37,6 +37,7 @@ import { type Theme, theme } from "@oh-my-pi/pi-tui/theme";
 import type { AsyncJobSnapshot } from "../../session/agent-session";
 import { MAIN_AGENT_ID } from "../../registry/agent-registry";
 import type { SessionManager } from "../../session/session-manager";
+import { JournalOuterWorkOwner } from "../../session/journal-outer-work";
 import { addFileDeleteFallback, addFileWriteFallback } from "../../tools/file-write-fallback";
 import type { BranchHandler, NavigateTreeHandler, NewSessionHandler } from "../session-handler-types";
 import { accumulateToolCallResult, buildAggregatedToolCallResult } from "../shared-events";
@@ -485,6 +486,10 @@ interface ToolRegistrationScope {
 	closed: boolean;
 }
 
+interface HandlerJournalOuterWorkScope {
+	readonly outerWork: JournalOuterWorkOwner;
+}
+
 /** Identity reported by a session that is not a subagent and received no explicit identity. */
 export const TOP_LEVEL_AGENT: ExtensionAgentIdentity = Object.freeze({
 	kind: "main",
@@ -518,6 +523,7 @@ export class ExtensionRunner {
 	#getMemoryFn?: () => MemoryRuntimeContext | undefined;
 	#commandDiagnostics: Array<{ type: string; message: string; path: string }> = [];
 	#toolRegistrationScope = new AsyncLocalStorage<ToolRegistrationScope>();
+	#handlerJournalOuterWork = new AsyncLocalStorage<HandlerJournalOuterWorkScope>();
 	#toolRegistrationBarrier: Promise<void> | undefined;
 	/**
 	 * Core-minted model-request context of the session this runner serves. Every place that runs
@@ -1162,6 +1168,11 @@ export class ExtensionRunner {
 					);
 					return;
 				}
+				const handlerScope = this.#handlerJournalOuterWork.getStore();
+				if (handlerScope?.outerWork.active) {
+					handlerScope.outerWork.trackDetached(pending);
+					return;
+				}
 				void pending.catch(error => {
 					this.emitError({
 						extensionPath: extension.path,
@@ -1547,73 +1558,94 @@ export class ExtensionRunner {
 		const signals = [outerSignal, sessionStopSignal].filter((s): s is AbortSignal => s !== undefined);
 		const signal = signals.length === 0 ? undefined : signals.length === 1 ? signals[0] : AbortSignal.any(signals);
 		if (signal?.aborted) return undefined;
-		const registrationScope: ToolRegistrationScope = { pending: new Set(), closed: false };
-		let handlerResult: R | typeof EXTENSION_HANDLER_TIMEOUT | typeof EXTENSION_HANDLER_ABORTED | undefined;
-		let handlerFailure: { error: unknown } | undefined;
-		try {
-			handlerResult = await this.runScoped(() =>
-				raceHandlerWithTimeout(
-					async (handlerSignal, budget) => {
-						registrationScope.signal = handlerSignal;
-						let result: R | undefined;
-						try {
-							const handlerContext = createHandlerContext(
-								ctx,
-								handlerSignal,
-								event.type === "tool_call" ? budget : undefined,
-							);
-							result = await this.#toolRegistrationScope.run(registrationScope, () =>
-								handler(event, handlerContext),
-							);
-						} catch (error) {
-							handlerFailure = { error };
-						} finally {
-							registrationScope.closed = true;
-						}
-						try {
-							await this.#flushToolRegistrations(registrationScope.pending);
-						} catch (error) {
-							handlerFailure ??= { error };
-						}
-						return result;
-					},
-					timeoutMs,
-					signal,
-				),
-			);
-		} catch (error) {
-			handlerFailure = { error };
-		} finally {
-			registrationScope.closed = true;
-		}
-		if (handlerResult === EXTENSION_HANDLER_ABORTED) return undefined;
-		if (handlerResult === EXTENSION_HANDLER_TIMEOUT) {
-			const error = `handler timed out after ${timeoutMs}ms`;
-			logger.warn("Extension handler timed out", {
-				extensionPath: ext.path,
-				event: event.type,
-				timeoutMs,
-			});
-			this.emitError({
-				extensionPath: ext.path,
-				event: event.type,
-				error,
-			});
-			return onFailure?.("timeout", error);
-		}
-		if (handlerFailure) {
-			const message =
-				handlerFailure.error instanceof Error ? handlerFailure.error.message : String(handlerFailure.error);
-			const stack = handlerFailure.error instanceof Error ? handlerFailure.error.stack : undefined;
-			this.emitError({
-				extensionPath: ext.path,
-				event: event.type,
-				error: message,
-				stack,
-			});
-			return onFailure?.("error", message);
-		}
-		return handlerResult as R | undefined;
+		const outerWork = JournalOuterWorkOwner.fromExecution(this.#modelRequestExecution);
+		return this.#handlerJournalOuterWork.run({ outerWork }, async () => {
+			const registrationScope: ToolRegistrationScope = { pending: new Set(), closed: false };
+			let handlerResult: R | typeof EXTENSION_HANDLER_TIMEOUT | typeof EXTENSION_HANDLER_ABORTED | undefined;
+			let handlerFailure: { error: unknown } | undefined;
+			let flushFailure: unknown;
+			try {
+				handlerResult = await this.runScoped(() =>
+					raceHandlerWithTimeout(
+						async (handlerSignal, budget) => {
+							registrationScope.signal = handlerSignal;
+							let result: R | undefined;
+							try {
+								const handlerContext = createHandlerContext(
+									ctx,
+									handlerSignal,
+									event.type === "tool_call" ? budget : undefined,
+								);
+								result = await this.#toolRegistrationScope.run(registrationScope, () =>
+									handler(event, handlerContext),
+								);
+							} catch (error) {
+								handlerFailure = { error };
+							} finally {
+								registrationScope.closed = true;
+							}
+							try {
+								await this.#flushToolRegistrations(registrationScope.pending);
+							} catch (error) {
+								flushFailure = error;
+								handlerFailure ??= { error };
+							}
+							return result;
+						},
+						timeoutMs,
+						signal,
+					),
+				);
+			} catch (error) {
+				handlerFailure = { error };
+			} finally {
+				registrationScope.closed = true;
+			}
+			const aggregateFailure = (): unknown | undefined => {
+				const failures: unknown[] = [];
+				if (handlerFailure) failures.push(handlerFailure.error);
+				if (flushFailure !== undefined && flushFailure !== handlerFailure?.error) failures.push(flushFailure);
+				if (failures.length === 0) return undefined;
+				if (failures.length === 1) return failures[0];
+				return new AggregateError(failures, "Extension handler outer work failed");
+			};
+			try {
+				if (handlerResult === EXTENSION_HANDLER_ABORTED) return undefined;
+				if (handlerResult === EXTENSION_HANDLER_TIMEOUT) {
+					const error = `handler timed out after ${timeoutMs}ms`;
+					logger.warn("Extension handler timed out", {
+						extensionPath: ext.path,
+						event: event.type,
+						timeoutMs,
+					});
+					this.emitError({
+						extensionPath: ext.path,
+						event: event.type,
+						error,
+					});
+					return onFailure?.("timeout", error);
+				}
+				if (handlerFailure) {
+					const message =
+						handlerFailure.error instanceof Error ? handlerFailure.error.message : String(handlerFailure.error);
+					const stack = handlerFailure.error instanceof Error ? handlerFailure.error.stack : undefined;
+					this.emitError({
+						extensionPath: ext.path,
+						event: event.type,
+						error: message,
+						stack,
+					});
+					return onFailure?.("error", message);
+				}
+				return handlerResult as R | undefined;
+			} finally {
+				try {
+					await outerWork.complete(aggregateFailure());
+				} catch {
+					// Outer work end is accounted; handler errors were already surfaced.
+				}
+			}
+		});
 	}
 
 	async emit<TEvent extends RunnerEmitEvent>(event: TEvent): Promise<RunnerEmitResult<TEvent>> {

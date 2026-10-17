@@ -321,7 +321,7 @@ export class SessionMemory {
 
 	/** Runs `work` after every earlier transition; its failure does not block later ones. */
 	#enqueueTransition<T>(work: () => Promise<T>): Promise<T> {
-		const transition = this.#memoryBackendTransition.then(work);
+		const transition = this.#memoryBackendTransition.then(() => this.#host.journalOuterWorkOwner().run(work));
 		this.#memoryBackendTransition = transition.then(
 			() => undefined,
 			() => undefined,

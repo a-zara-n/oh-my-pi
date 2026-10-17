@@ -4,6 +4,8 @@
 
 ### Added
 
+- Wired DES-004 §6.7.2i outer journal work (`beginJournalBindingWork` / `beginJournalExecutionWork` / `endJournalWork`) through coding-agent canonical producers: SDK session startup, agent session event/persistence pipelines, subagent spawn, memory backends (local startup, Hindsight mental-model bootstrap, Mnemopi load/dispose detach), Sharpshooter tick/extraction/consolidation, extension handler timeout/late tool registration, legacy shim reload, and judgment `withCandidate`. Consumer-visible AC-OL fixtures live in `test/fixtures/journal-outer-work-callers.suite.ts` (isolated subprocess).
+
 - Added the core execution context for model requests: sessions, agent runs, extension handlers/tools/commands, child sessions, advisors and background jobs now carry a session, root and purpose, and child sessions receive their spawner's root explicitly (`modelRequestRoot`).
 - Replaced the internal managed journal sink-slot/promise handoff with composition of the actual File principal. Manager header, transcript, title, snapshots and branch state project from that principal; existing ordinary lazy persistence and Memory storage paths remain distinct.
 - Readiness checks now include omitted executions after the irreversible journal-required latch and recheck after authorization/provider waits. Ordinary pre-latch sinkless use retains its path. These regressions are unrun; managed dispatch remains unsupported pending the genuine short-scope dispatch contract.
