@@ -43,8 +43,13 @@ mac("owned SQLite fixed control", () => {
 					reader.exec("ROLLBACK");
 				} finally { reader.close(); }
 				const backupPath = path.join(directory, "backup.sqlite3");
-				created.database.query("VACUUM INTO ?").run(backupPath);
-				assertModelRequestJournalDatabase(created.database);
+				const backupSource = openModelRequestJournalDatabase(path.join(directory, "state.sqlite3"), {readonly: true, create: false, strict: true});
+				try {
+					backupSource.exec("PRAGMA query_only=OFF");
+					backupSource.query("VACUUM INTO ?").run(backupPath);
+					assertModelRequestJournalDatabase(backupSource);
+					expect(() => backupSource.exec("UPDATE evidence SET value='forbidden'")).toThrow();
+				} finally { backupSource.close(); }
 				const backup = openModelRequestJournalDatabase(backupPath, {readonly: true, create: false, strict: true});
 				try {
 					expect(backup.query<{value: string}, []>("SELECT value FROM evidence").get()?.value).toBe("new");
