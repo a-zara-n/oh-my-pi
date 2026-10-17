@@ -1538,17 +1538,17 @@ function streamSimpleRequest<TApi extends Api>(
 			}
 			return undefined;
 		};
-		const emitFailure = (failure: AuthRetryFailure): void => {
-			emitBufferedEvents(outer, failure.bufferedEvents);
-			if (failure.terminalEvent) {
-				outer.push(failure.terminalEvent);
-			} else {
-				outer.fail(failure.error);
-			}
-		};
-
 		void (async () => {
 			const resolverWork = openJournalOuterWorkFromCurrent();
+			const emitFailure = (failure: AuthRetryFailure): void => {
+				resolverWork?.noteFailure(failure.error);
+				emitBufferedEvents(outer, failure.bufferedEvents);
+				if (failure.terminalEvent) {
+					outer.push(failure.terminalEvent);
+				} else {
+					outer.fail(failure.error);
+				}
+			};
 			try {
 				let lastKey: string | undefined;
 				let credentialId: number | undefined;

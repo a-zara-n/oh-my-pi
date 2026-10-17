@@ -195,10 +195,11 @@ const SCENARIOS: ReadonlyArray<{
 	},
 	{
 		name: "a03-header-resolver-reject",
-		rows: ["A-03", "AC-OL-12"],
+		rows: ["A-03", "AC-OL-12", "AC-OL-14"],
 		expect: v => {
-			expect(v.failure).toBe(true);
-			expect(v.authorityOk).toBe(true);
+			expect(v.rootCauseSeen).toBe(true);
+			expect(v.authorityOk).toBe(false);
+			expect(v.authorityPreservesRootCause).toBe(true);
 		},
 	},
 	{
@@ -215,8 +216,8 @@ const SCENARIOS: ReadonlyArray<{
 		rows: ["A-04", "AC-OL-12", "AC-OL-14"],
 		expect: v => {
 			expect(v.failed).toBe(true);
-			expect(v.authorityOk).toBe(true);
-			expect(v.authorityRejected).not.toBe(true);
+			expect(v.authorityOk).toBe(false);
+			expect(v.authorityPreservesStreamFailure).toBe(true);
 		},
 	},
 	{
