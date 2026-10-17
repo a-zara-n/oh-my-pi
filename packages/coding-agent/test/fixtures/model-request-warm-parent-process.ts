@@ -145,7 +145,9 @@ try {
 		});
 		const unsubscribe = b.session.subscribe(event => {
 			if (event.type === "tool_execution_start" && event.toolName === "write") {
-				assertJournalExecutionIdentity(b.execution, getModelRequestExecution());
+				const active = getModelRequestExecution();
+				assert(active !== undefined, "actual write turn lost its execution");
+				assertJournalExecutionIdentity(b.execution, active);
 				writeStartedUnderB = true;
 			}
 			if (event.type === "tool_execution_end" && event.toolName === "write") {
