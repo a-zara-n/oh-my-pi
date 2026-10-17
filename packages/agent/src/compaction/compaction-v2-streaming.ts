@@ -10,7 +10,7 @@
 import type { CodexCompactionContext, FetchImpl, Model, ProviderSessionState } from "@oh-my-pi/pi-ai";
 import type { Api } from "@oh-my-pi/pi-utils/model-data";
 import * as AIError from "@oh-my-pi/pi-ai/error";
-import { gateFetch, runWithModelRequestLineage } from "@oh-my-pi/pi-ai/model-request-execution";
+import { gateFetch, getModelRequestExecution, runWithModelRequestLineage } from "@oh-my-pi/pi-ai/model-request-execution";
 import { createOpenAICodexCompactionRequestContext } from "@oh-my-pi/pi-ai/providers/openai-codex-compaction";
 import { applyCodexResponsesLiteShape } from "@oh-my-pi/pi-ai/providers/openai-codex/request-transformer";
 import {
@@ -26,6 +26,8 @@ import {
 	resolveOpenAIRequestSetup,
 } from "@oh-my-pi/pi-ai/providers/openai-shared";
 import { captureOpenAIHttpError } from "@oh-my-pi/pi-ai/utils/openai-http";
+import { modelRequestBuiltinFetch } from "@oh-my-pi/pi-ai/utils/model-request-builtin-fetch";
+import { assertJournalExecutionReady } from "@oh-my-pi/pi-utils/model-request-journal-composition";
 import { isBedrockOpenAIUrl } from "@oh-my-pi/pi-catalog/hosts";
 import {
 	applyCodexResidencyHeader,
@@ -261,10 +263,13 @@ export async function requestCompactionV2Streaming(
 		preferWebsockets?: boolean;
 	},
 ): Promise<CompactionV2Response> {
+	const execution = getModelRequestExecution();
+	assertJournalExecutionReady(execution);
+	const required = execution !== undefined && execution.journalState !== "untracked";
 	let fetchImpl: FetchImpl = gateFetch(
 		{ provider: model.provider, id: model.id, api: model.api, baseUrl: model.baseUrl },
 		"chat",
-		options?.fetch ?? globalThis.fetch,
+		options?.fetch ?? (required ? modelRequestBuiltinFetch : globalThis.fetch),
 	);
 	if (isBedrockOpenAIUrl(model.baseUrl)) {
 		({

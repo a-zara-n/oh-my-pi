@@ -188,6 +188,11 @@ before selecting its base; it never evaluates a replacement `fetch` getter.
 Untracked construction retains the normal global/Cowork selection. Every wrapper
 still rechecks its current execution at invocation, including one constructed
 before the process acquired a journal requirement.
+The V1/V2/generic compaction callers and native judge constructor check readiness
+before evaluating their default fetch argument. They choose the captured builtin
+directly for a required execution, not a late global getter. A generic summarizer
+without model identity retains its ordinary untracked behavior but is unsupported
+under a requirement rather than becoming an ungated raw-builtin escape.
 
 `gateFetch` returns an existing function unchanged only when its private set
 records a closure that this canonical factory actually created. Public
@@ -267,6 +272,13 @@ Parent verification uses the real builtin, not a fake-fetch wiring test:
    builtin loopback I/O, queued custom-sender rejection and a physical module copy.
    Without the native preload the required-binding case is explicitly skipped;
    the other cases do not establish that boundary.
+   Also run
+   `bun --preload ./scripts/audit-library-bootstrap.ts test packages/coding-agent/test/model-request-core-fetch-getters.test.ts`.
+   This uses the actual three compaction entrypoints and construction-only native
+   `ChainJudge.withCandidate` under a genuine pending execution. All four must
+   reject with zero global-getter calls; the native callback must not run. Its
+   real isolated registry/auth/settings are prepared before installing the getter,
+   and the construction callback never asks a provider for a judgment.
 2. Run
    `bun --preload ./scripts/audit-library-bootstrap.ts test packages/ai/test/model-request-trusted-dispatch.test.ts`
    with the actual retained-root and File-principal implementation. Its isolated

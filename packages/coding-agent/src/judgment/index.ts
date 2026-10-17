@@ -40,9 +40,12 @@ import * as AIError from "@oh-my-pi/pi-ai/error";
 import {
 	createModelRequestRetryChain,
 	gateFetch,
+	getModelRequestExecution,
 	runInModelRequestRetryChain,
 	runWithModelRequestPurpose,
 } from "@oh-my-pi/pi-ai/model-request-execution";
+import { modelRequestBuiltinFetch } from "@oh-my-pi/pi-ai/utils/model-request-builtin-fetch";
+import { assertJournalExecutionReady } from "@oh-my-pi/pi-utils/model-request-journal-composition";
 import type { ModelRequestPurpose } from "@oh-my-pi/pi-utils/model-request-data";
 import { calculateCost } from "@oh-my-pi/pi-catalog/models";
 import { logger, prompt } from "@oh-my-pi/pi-utils";
@@ -354,6 +357,9 @@ export class ChainJudge implements Judge {
 		const apiKey = this.#deps.registry.resolver(model, this.#deps.sessionId);
 		if (isJudgmentApi(model.api)) {
 			const headers = await this.#deps.registry.resolveModelHeaders(model, signal);
+			const execution = getModelRequestExecution();
+			assertJournalExecutionReady(execution);
+			const required = execution !== undefined && execution.journalState !== "untracked";
 			const judge = new TypeSafeJudge({
 				apiKey,
 				api: model.api,
@@ -364,7 +370,7 @@ export class ChainJudge implements Judge {
 				fetch: gateFetch(
 					{ provider: model.provider, id: model.id, api: model.api, baseUrl: model.baseUrl },
 					"judgment",
-					fetch,
+					required ? modelRequestBuiltinFetch : fetch,
 				),
 			});
 			return nativeJudge(judge, model, this.#deps.cache, attempt => this.#report(attempt));

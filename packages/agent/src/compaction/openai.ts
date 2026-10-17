@@ -15,12 +15,14 @@
  *   with `{ summary, shortSummary? }`.
  */
 
-import { attach, create, Flag, ProviderHttpError } from "@oh-my-pi/pi-ai/error";
-import { gateFetch, runWithModelRequestLineage } from "@oh-my-pi/pi-ai/model-request-execution";
+import { attach, create, Flag, ModelRequestDeniedError, ProviderHttpError } from "@oh-my-pi/pi-ai/error";
+import { gateFetch, getModelRequestExecution, runWithModelRequestLineage } from "@oh-my-pi/pi-ai/model-request-execution";
 import { getCodexAttestationHeader } from "@oh-my-pi/pi-ai/providers/openai-codex-attestation";
 import { createOpenAICodexCompactionRequestContext } from "@oh-my-pi/pi-ai/providers/openai-codex-compaction";
 import { applyCodexResponsesLiteShape } from "@oh-my-pi/pi-ai/providers/openai-codex/request-transformer";
 import { createOpenAICodexCompatibilityMetadata } from "@oh-my-pi/pi-ai/providers/openai-codex-responses";
+import { modelRequestBuiltinFetch } from "@oh-my-pi/pi-ai/utils/model-request-builtin-fetch";
+import { assertJournalExecutionReady } from "@oh-my-pi/pi-utils/model-request-journal-composition";
 import {
 	encodeResponsesToolResultOutput,
 	hoistInterleavedResponsesToolBatchMessages,
@@ -817,10 +819,13 @@ export async function requestOpenAiRemoteCompaction(
 		codexCompaction?: CodexCompactionContext;
 	},
 ): Promise<OpenAiRemoteCompactionResponse> {
+	const execution = getModelRequestExecution();
+	assertJournalExecutionReady(execution);
+	const required = execution !== undefined && execution.journalState !== "untracked";
 	let fetchImpl: FetchImpl = gateFetch(
 		{ provider: model.provider, id: model.id, api: model.api, baseUrl: model.baseUrl },
 		"chat",
-		opts?.fetch ?? fetch,
+		opts?.fetch ?? (required ? modelRequestBuiltinFetch : fetch),
 	);
 	if (isBedrockOpenAIUrl(model.baseUrl)) {
 		({ model, apiKey, fetch: fetchImpl } = await prepareBedrockCompactionRequest(model, apiKey, opts?.fetch, signal));
@@ -985,6 +990,12 @@ export async function requestRemoteCompaction(
 	signal?: AbortSignal,
 	opts?: { fetch?: FetchImpl; timeoutMs?: number; model?: Model; apiKey?: string },
 ): Promise<RemoteCompactionResponse> {
+	const execution = getModelRequestExecution();
+	assertJournalExecutionReady(execution);
+	const required = execution !== undefined && execution.journalState !== "untracked";
+	if (required && opts?.model === undefined) {
+		throw new ModelRequestDeniedError("transport-unsupported", "required remote compaction needs a model-bound builtin dispatch");
+	}
 	let endpointPath = endpoint;
 	try {
 		endpointPath = new URL(endpoint).pathname;
@@ -1010,7 +1021,7 @@ export async function requestRemoteCompaction(
 			}
 		: { systemPrompt: request.systemPrompt, prompt: request.prompt, maxTokens: request.maxTokens };
 
-	const customFetch = opts?.fetch ?? fetch;
+	const customFetch = opts?.fetch ?? (required ? modelRequestBuiltinFetch : fetch);
 	// A bare summarizer endpoint has no model; only a request made on behalf of a model is a model request.
 	const sendFetch: FetchImpl = opts?.model
 		? gateFetch(
