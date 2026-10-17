@@ -39,11 +39,15 @@ the caller already stopped waiting (timeout or abort) is released as `not-sent`,
 
 - A session the user started or resumed is its own root, **re-evaluated on every request** from
   `sessionManager.getSessionId()`, so `/new` never bills the previous root.
-- A child session receives its spawner's root **explicitly** (`CreateAgentSessionOptions.modelRequestRoot`, obtained from
-  `AgentSession.childModelRequestRoot()` / `ToolSession.childModelRequestRoot()`). It is never inferred from a
-  `parentSession` header or an agent id chain.
-- A session created while another session's context is active, without an explicit hand-over, is a child with
-  `rootSessionId: undefined`. The gap is visible to the gate; it is not turned into a fresh root.
+- A child session receives a frozen handover **explicitly** (`CreateAgentSessionOptions.modelRequestRoot`, obtained from
+  `AgentSession.childModelRequestRoot()` / `ToolSession.childModelRequestRoot()`). It contains the exact genuine
+  spawning execution alongside its root and optional binding, never a parent reconstructed from a `parentSession`
+  header, agent id, or serialized capability. Task/eval descendants and in-memory warm revives retain that reference.
+- Ordinary untracked sessions keep the existing lazy root/scope projection without a File principal or binding.
+  A session created in an ordinary active context without a handover retains `rootSessionId: undefined`; the gap is
+  visible to the gate and is not turned into a fresh root.
+- Required children must retain a live genuine parent and its exact binding/root. Missing, fake, revoked or mismatched
+  handovers fail closed; a warm revive outside an active context uses its explicit parent, not a registry or header substitute.
 
 The execution module (`@oh-my-pi/pi-ai/model-request-execution`) is internal and deliberately absent from the
 `@oh-my-pi/pi-ai` barrel, and no public option or request argument accepts an origin, scope or root. That is the whole

@@ -19,7 +19,10 @@ import {
 } from "@oh-my-pi/pi-ai/model-request-execution";
 import type { ModelRequestAgent, ModelRequestPurpose } from "@oh-my-pi/pi-utils/model-request-data";
 import type { ModelRequestJournalLeaseBinding } from "@oh-my-pi/pi-utils/model-request-journal-authority";
-import { assertJournalExecutionReady } from "@oh-my-pi/pi-utils/model-request-journal-composition";
+import {
+	assertJournalExecutionIdentity,
+	assertJournalExecutionReady,
+} from "@oh-my-pi/pi-utils/model-request-journal-composition";
 
 /**
  * Hand-over of the root session id from a spawning session to a child session, passed as
@@ -33,6 +36,7 @@ export interface ModelRequestRootAssignment {
 	readonly kind: "child";
 	readonly rootSessionId: string | undefined;
 	readonly modelRequestJournalLeaseBinding?: ModelRequestJournalLeaseBinding;
+	readonly parentExecution?: ModelRequestExecution;
 }
 
 /**
@@ -56,14 +60,40 @@ export function resolveModelRequestRootSource(
 	}
 	const modelRequestJournalLeaseBinding = binding ?? assignment?.modelRequestJournalLeaseBinding;
 	const activeExecution = getModelRequestExecution();
-	if (
-		activeExecution?.modelRequestJournalLeaseBinding !== undefined &&
-		modelRequestJournalLeaseBinding !== activeExecution.modelRequestJournalLeaseBinding
-	) {
-		throw new Error("a managed child must explicitly retain its parent's model request journal binding");
+	const parentExecution = assignment?.parentExecution;
+	if (parentExecution !== undefined) assertJournalExecutionIdentity(parentExecution);
+	const required = modelRequestJournalLeaseBinding !== undefined ||
+		parentExecution !== undefined && parentExecution.journalState !== "untracked" ||
+		activeExecution !== undefined && activeExecution.journalState !== "untracked";
+	if (required) {
+		if (activeExecution !== undefined) {
+			assertJournalExecutionReady(activeExecution);
+			if (modelRequestJournalLeaseBinding !== activeExecution.modelRequestJournalLeaseBinding) {
+				throw new Error("a managed child must explicitly retain its parent's model request journal binding");
+			}
+		}
+		if (assignment !== undefined || activeExecution !== undefined) {
+			if (assignment === undefined || parentExecution === undefined) {
+				throw new Error("a managed child must retain its genuine parent execution");
+			}
+			assertJournalExecutionReady(parentExecution);
+			if (parentExecution.journalState === "untracked" ||
+				modelRequestJournalLeaseBinding !== parentExecution.modelRequestJournalLeaseBinding ||
+				assignment.rootSessionId !== resolveModelRequestScope(parentExecution).rootSessionId ||
+				assignment.rootSessionId !== modelRequestJournalLeaseBinding?.rootSessionId) {
+				throw new Error("model request journal root differs from its genuine parent");
+			}
+			if (activeExecution !== undefined &&
+				resolveModelRequestScope(activeExecution).rootSessionId !== assignment.rootSessionId) {
+				throw new Error("model request journal root differs from the active parent");
+			}
+		}
 	}
 	if (assignment !== undefined) {
-		return { kind: "inherited", rootSessionId: assignment.rootSessionId, modelRequestJournalLeaseBinding };
+		return Object.freeze({
+			kind: "inherited", rootSessionId: assignment.rootSessionId,
+			modelRequestJournalLeaseBinding, parentExecution,
+		});
 	}
 	if (activeExecution !== undefined) {
 		return { kind: "inherited", rootSessionId: undefined, modelRequestJournalLeaseBinding };
@@ -97,11 +127,12 @@ export function createSessionModelRequestExecution(init: SessionModelRequestExec
 /** The root assignment a session gives to a child it spawns, resolved as of now. */
 export function childModelRequestRootOf(execution: ModelRequestExecution): ModelRequestRootAssignment {
 	assertJournalExecutionReady(execution);
-	return {
+	return Object.freeze({
 		kind: "child",
 		rootSessionId: resolveModelRequestScope(execution).rootSessionId,
 		modelRequestJournalLeaseBinding: execution.modelRequestJournalLeaseBinding,
-	};
+		parentExecution: execution,
+	});
 }
 
 /**

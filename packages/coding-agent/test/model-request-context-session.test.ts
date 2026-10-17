@@ -8,6 +8,7 @@ import {
 } from "@oh-my-pi/pi-ai";
 import type { Api, AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import {
+	deriveModelRequestExecution,
 	getModelRequestExecution,
 	resolveModelRequestScope,
 } from "@oh-my-pi/pi-ai/model-request-execution";
@@ -27,7 +28,12 @@ import { BUILTIN_LIFECYCLE_SLASH_COMMANDS } from "@oh-my-pi/pi-coding-agent/slas
 import type { SlashCommandRuntime } from "@oh-my-pi/pi-coding-agent/slash-commands/types";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import type { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
-import type { ModelRequestRootAssignment } from "@oh-my-pi/pi-coding-agent/session/model-request-context";
+import {
+	childModelRequestRootOf,
+	createSessionModelRequestExecution,
+	type ModelRequestRootAssignment,
+	resolveModelRequestRootSource,
+} from "@oh-my-pi/pi-coding-agent/session/model-request-context";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import { createAssistantMessage, createInMemoryAuthStorage } from "./helpers/agent-session-setup";
@@ -78,10 +84,12 @@ describe("managed model request context isolation", () => {
 		["rejected-promise", "keeps a managed child root unavailable before and after a caller promise rejects"],
 		["resolved-promise", "does not grant readiness when a caller promise resolves to a readiness-shaped DTO"],
 		["fake-execution", "does not accept a readiness-shaped execution DTO as canonical identity"],
+		["genuine-parent", "retains a live genuine required parent and rejects missing, fake, mismatched and revoked handovers"],
 	] as const;
 
 	for (const [scenario, title] of cases) {
-		it(title, async () => {
+		const test = scenario === "genuine-parent" && process.platform !== "darwin" ? it.skip : it;
+		test(title, async () => {
 			const child = Bun.spawn(
 				[process.execPath, path.join(import.meta.dir, "fixtures/model-request-context-journal-probe.ts"), scenario],
 				{
@@ -262,6 +270,49 @@ describe("model request context of an AgentSession", () => {
 		});
 	});
 
+	it("freezes the exact parent execution without File or binding requirements for ordinary descendants", async () => {
+		const parent = await createSession({ agentId: ROOT_AGENT_ID });
+		const handover = parent.childModelRequestRoot();
+		expect(Object.isFrozen(handover)).toBe(true);
+		expect(handover.parentExecution).toBe(parent.runInModelRequestContext(() => getModelRequestExecution()));
+		expect(handover.parentExecution?.journalState).toBe("untracked");
+		expect(handover.modelRequestJournalLeaseBinding).toBeUndefined();
+		const source = resolveModelRequestRootSource(handover);
+		expect(source.kind).toBe("inherited");
+		if (source.kind !== "inherited") throw new Error("expected inherited root");
+		expect(source.parentExecution).toBe(handover.parentExecution);
+
+		const child = await createSession({ agentId: "Child", taskDepth: 1, modelRequestRoot: handover });
+		const childHandover = child.childModelRequestRoot();
+		expect(childHandover.parentExecution).not.toBe(handover.parentExecution);
+		expect(childHandover.parentExecution).toBe(child.runInModelRequestContext(() => getModelRequestExecution()));
+		const deepChild = await createSession({ agentId: "DeepChild", taskDepth: 2, modelRequestRoot: childHandover });
+		await deepChild.prompt("deep work");
+		expect(observed.at(-1)).toMatchObject({ rootSessionId: sessionIdOf(parent), sessionId: sessionIdOf(deepChild) });
+	});
+
+	it("keeps ordinary derived execution scope and an explicitly missing inherited root", () => {
+		const parent = createSessionModelRequestExecution({
+			getSessionId: () => "ordinary-rootless",
+			root: resolveModelRequestRootSource({ kind: "child", rootSessionId: undefined }),
+			agent: { kind: "sub", id: "Rootless", name: "ordinary", depth: 1 },
+		});
+		const derived = deriveModelRequestExecution(parent, { purpose: "advisor" });
+		expect(resolveModelRequestScope(derived)).toMatchObject({
+			sessionId: "ordinary-rootless", rootSessionId: undefined, purpose: "advisor",
+		});
+		const handover = childModelRequestRootOf(derived);
+		expect(handover.parentExecution).toBe(derived);
+		expect(handover.rootSessionId).toBeUndefined();
+		expect(handover.modelRequestJournalLeaseBinding).toBeUndefined();
+		const child = createSessionModelRequestExecution({
+			getSessionId: () => "ordinary-rootless-child",
+			root: resolveModelRequestRootSource(handover),
+			agent: { kind: "sub", id: "RootlessChild", name: "ordinary", depth: 2 },
+		});
+		expect(resolveModelRequestScope(child).rootSessionId).toBeUndefined();
+	});
+
 	it("follows the live session id of a root across /new, for its own requests and for children it spawns afterwards", async () => {
 		const session = await createSession({ agentId: ROOT_AGENT_ID });
 		await session.prompt("before the reset");
@@ -279,7 +330,7 @@ describe("model request context of an AgentSession", () => {
 			[previousId, previousId],
 			[freshId, freshId],
 		]);
-		expect(session.childModelRequestRoot()).toEqual({ kind: "child", rootSessionId: freshId });
+		expect(session.childModelRequestRoot()).toMatchObject({ kind: "child", rootSessionId: freshId });
 	});
 
 	it("gives a session created inside another session's context without a hand-over no root", async () => {
@@ -294,7 +345,7 @@ describe("model request context of an AgentSession", () => {
 			sessionId: sessionIdOf(orphan),
 			rootSessionId: undefined,
 		});
-		expect(orphan.childModelRequestRoot()).toEqual({ kind: "child", rootSessionId: undefined });
+		expect(orphan.childModelRequestRoot()).toMatchObject({ kind: "child", rootSessionId: undefined });
 	});
 
 	it("declares the title purpose for title generation", async () => {

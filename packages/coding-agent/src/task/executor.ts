@@ -79,7 +79,7 @@ import { type ArtifactManager, writeArtifact } from "../session/artifacts";
 import { ASYNC_RESULT_MESSAGE_TYPE } from "../session/async-job-delivery";
 import type { AuthStorage } from "../session/auth-storage";
 import { SKILL_PROMPT_MESSAGE_TYPE } from "../session/messages";
-import type { ModelRequestRootAssignment } from "../session/model-request-context";
+import { type ModelRequestRootAssignment, resolveModelRequestRootSource } from "../session/model-request-context";
 import { hasConversationalHistory, SessionManager } from "../session/session-manager";
 import { truncateTail } from "@oh-my-pi/pi-tui/tools/streaming-output";
 import {
@@ -3706,6 +3706,7 @@ function buildSubagentSessionOptions(
 	const mcpTools = spec.options.mcpManager ? createMCPProxyTools(spec.options.mcpManager) : [];
 	const customTools = spec.options.customTools ?? [];
 	return {
+		// Keep the in-memory handover (including its exact parent capability), never a DTO copy.
 		...spec.options,
 		mcpTools: mcpTools.length > 0 ? mcpTools : undefined,
 		customTools: customTools.length > 0 ? customTools : undefined,
@@ -3783,6 +3784,7 @@ function restoreSubagentSettings(recipe: SubagentSettingsRecipe): Settings {
 /** Everything the lifecycle reviver of a kept-alive subagent needs, captured explicitly. */
 interface WarmReviveCapture {
 	sessionFile: string;
+	/** In-memory only: options.modelRequestRoot retains the genuine parent, never serialized into the session. */
 	spec: SubagentSessionSpec;
 	/** Re-captured whenever the live session is disposed, so a revive restores its latest settings writes. */
 	settings: SubagentSettingsRecipe;
@@ -3811,6 +3813,12 @@ function trackSubagentSettings(session: AgentSession, capture: WarmReviveCapture
  */
 function createWarmSubagentReviver(capture: WarmReviveCapture): AgentReviver {
 	return async expectedAgentRef => {
+		// Reject a revoked captured parent before reopening its child. SDK/leaf recheck
+		// after the intervening awaits; neither a saved header nor current ALS replaces it.
+		resolveModelRequestRootSource(
+			capture.spec.options.modelRequestRoot,
+			capture.spec.options.modelRequestJournalLeaseBinding,
+		);
 		const { id } = capture.spec.prompt;
 		const reopened = await SessionManager.open(capture.sessionFile, undefined, undefined, {
 			suppressBreadcrumb: true,

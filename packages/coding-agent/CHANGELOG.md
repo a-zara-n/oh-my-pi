@@ -16,6 +16,7 @@
 
 ### Changed
 
+- Child model-request handovers now freeze the exact spawning execution alongside its root and binding. Task/eval descendants and in-memory warm revives retain that capability; ordinary untracked sessions keep their existing root/scope projections without requiring File journal composition. Required handovers recheck genuine identity, readiness and root/binding consistency.
 - A model request gate denial now stops turn auto-retry, model fallback, judge-candidate fallback and compaction fallback instead of retrying.
 - A gate denial of an advisor turn ends that review whatever its wording says: a denial message that reads like a provider content filter no longer triggers the reasoning-stripped resend or the advisor model fallback, and the structured denial is kept when the advisor failure is reported.
 

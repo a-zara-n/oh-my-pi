@@ -3000,7 +3000,9 @@ export class AgentSession implements SettingsScope {
 	 */
 	childModelRequestRoot(): ModelRequestRootAssignment {
 		const execution = this.#modelRequestExecution;
-		return execution === undefined ? { kind: "child", rootSessionId: undefined } : childModelRequestRootOf(execution);
+		return execution === undefined
+			? Object.freeze({ kind: "child", rootSessionId: undefined })
+			: childModelRequestRootOf(execution);
 	}
 
 	/**

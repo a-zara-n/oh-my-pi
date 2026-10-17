@@ -18,9 +18,11 @@ import { runEvalAgent } from "@oh-my-pi/pi-coding-agent/eval/agent-bridge";
 import { runEvalWait } from "@oh-my-pi/pi-coding-agent/eval/handle-bridge";
 import { AgentLifecycleManager } from "@oh-my-pi/pi-coding-agent/registry/agent-lifecycle";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
+import * as sdkModule from "@oh-my-pi/pi-coding-agent/sdk";
 import { AgentStorage } from "@oh-my-pi/pi-coding-agent/session/agent-storage";
 import type { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import {
+	childModelRequestRootOf,
 	createSessionModelRequestExecution,
 	type ModelRequestRootAssignment,
 } from "@oh-my-pi/pi-coding-agent/session/model-request-context";
@@ -36,7 +38,7 @@ import { createInMemoryAuthStorage } from "../helpers/agent-session-setup";
 const MOCK_API_SOURCE = "test/model-request-root-handover";
 const ENV_KEYS = ["HOME", "PI_CODING_AGENT_DIR", "OMP_PROFILE", "PI_PROFILE"] as const;
 const TOP_LEVEL_ROOT = "top-level-root";
-const HAND_OVER: ModelRequestRootAssignment = { kind: "child", rootSessionId: TOP_LEVEL_ROOT };
+let HAND_OVER: ModelRequestRootAssignment;
 const AGENT_DEFINITION: AgentDefinition = {
 	name: "worker",
 	description: "test worker",
@@ -76,6 +78,11 @@ beforeEach(async () => {
 	AgentLifecycleManager.resetGlobalForTests();
 	registerMockApi(MOCK_API_SOURCE);
 	manager = new AsyncJobManager({ maxRunningJobs: 4 });
+	HAND_OVER = childModelRequestRootOf(createSessionModelRequestExecution({
+		getSessionId: () => TOP_LEVEL_ROOT,
+		root: { kind: "self" },
+		agent: { kind: "main", id: "Main", name: "main", depth: 0 },
+	}));
 	AsyncJobManager.setInstance(manager);
 });
 
@@ -187,6 +194,16 @@ function seenRoots(): Set<string | undefined> {
 	return new Set(gate.attempts.map(attempt => attempt.scope?.rootSessionId));
 }
 
+function observeHandovers(): Array<ModelRequestRootAssignment | undefined> {
+	const observed: Array<ModelRequestRootAssignment | undefined> = [];
+	const create = sdkModule.createAgentSession;
+	vi.spyOn(sdkModule, "createAgentSession").mockImplementation(options => {
+		observed.push(options?.modelRequestRoot);
+		return create(options);
+	});
+	return observed;
+}
+
 describe("child sessions reach the gate under the spawning session's root", () => {
 	it("a task child spawned with the parent's hand-over is metered under the parent's root, not its own session id", async () => {
 		const env = await createSpawnEnvironment();
@@ -237,6 +254,7 @@ describe("child sessions reach the gate under the spawning session's root", () =
 
 	it("a structured subagent spawned from a tool session is metered under that session's root", async () => {
 		const env = await createSpawnEnvironment();
+		const handovers = observeHandovers();
 		vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({
 			agents: [AGENT_DEFINITION],
 			projectAgentsDir: null,
@@ -253,11 +271,46 @@ describe("child sessions reach the gate under the spawning session's root", () =
 		});
 
 		expect(result.exitCode).toBe(0);
+		expect(handovers.length).toBeGreaterThan(0);
+		expect(handovers.every(handover => handover === HAND_OVER)).toBe(true);
 		expect(seenRoots()).toEqual(new Set([TOP_LEVEL_ROOT]));
 	}, 15_000);
 
+	it("warm-revives an ordinary child with the captured genuine parent and no journal binding", async () => {
+		const env = await createSpawnEnvironment();
+		const handovers = observeHandovers();
+		const parent = createSessionModelRequestExecution({
+			getSessionId: () => TOP_LEVEL_ROOT,
+			root: { kind: "self" },
+			agent: { kind: "main", id: "WarmHost", name: "main", depth: 0 },
+		});
+		const handover = childModelRequestRootOf(parent);
+		const result = await spawnChild(env, { id: "WarmChild", modelRequestRoot: handover });
+		expect(result.exitCode).toBe(0);
+		const first = AgentRegistry.global().get("WarmChild")?.session;
+		if (!first) throw new Error("kept-alive child has no live session");
+		const firstExecution = first.childModelRequestRoot().parentExecution;
+		const originalSessionId = first.sessionManager.getSessionId();
+		await AgentLifecycleManager.global().park("WarmChild");
+		const revived = await AgentLifecycleManager.global().ensureLive("WarmChild");
+		expect(handovers).toHaveLength(2);
+		expect(handovers.every(captured => captured === handover && captured.parentExecution === parent)).toBe(true);
+		expect(revived).not.toBe(first);
+		expect(revived.sessionManager.getSessionId()).toBe(originalSessionId);
+		const revivedHandover = revived.childModelRequestRoot();
+		expect(revivedHandover.rootSessionId).toBe(TOP_LEVEL_ROOT);
+		expect(revivedHandover.parentExecution).not.toBe(firstExecution);
+		expect(revivedHandover.parentExecution?.journalState).toBe("untracked");
+		expect(revivedHandover.modelRequestJournalLeaseBinding).toBeUndefined();
+		expect(handover.parentExecution).toBe(parent);
+		await revived.prompt("work again");
+		await revived.waitForIdle();
+		expect([...seenRoots()]).toEqual([TOP_LEVEL_ROOT]);
+	}, 30_000);
+
 	it("an eval agent() child is metered under the calling session's root", async () => {
 		const env = await createSpawnEnvironment();
+		const handovers = observeHandovers();
 		vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({
 			agents: [AGENT_DEFINITION],
 			projectAgentsDir: null,
@@ -268,6 +321,8 @@ describe("child sessions reach the gate under the spawning session's root", () =
 		const waited = await runEvalWait({ items: [{ kind: "agent", id: handle.id }] }, options);
 
 		expect(waited.items[0]?.status).toBe("completed");
+		expect(handovers.length).toBeGreaterThan(0);
+		expect(handovers.every(handover => handover === HAND_OVER)).toBe(true);
 		expect(seenRoots()).toEqual(new Set([TOP_LEVEL_ROOT]));
 	}, 15_000);
 });

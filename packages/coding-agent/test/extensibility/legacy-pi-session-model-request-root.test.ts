@@ -35,9 +35,12 @@ describe("legacy createAgentSession model-request root", () => {
 	it("hands the running host session's root to the session it creates", async () => {
 		const sdkCall = captureSdkCall();
 
-		await runWithModelRequestExecution(hostExecution("legacy-host-session"), () => legacyCreateAgentSession({}));
+		const parent = hostExecution("legacy-host-session");
+		await runWithModelRequestExecution(parent, () => legacyCreateAgentSession({}));
 
-		expect(sdkCall.options()?.modelRequestRoot).toEqual({ kind: "child", rootSessionId: "legacy-host-session" });
+		expect(sdkCall.options()?.modelRequestRoot).toMatchObject({ kind: "child", rootSessionId: "legacy-host-session" });
+		expect(sdkCall.options()?.modelRequestRoot?.parentExecution).toBe(parent);
+		expect(Object.isFrozen(sdkCall.options()?.modelRequestRoot)).toBe(true);
 	});
 
 	it("keeps an explicit hand-over instead of deriving one", async () => {

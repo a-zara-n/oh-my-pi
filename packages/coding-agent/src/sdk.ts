@@ -2293,6 +2293,8 @@ async function createAgentSessionScoped(
 			if (rootSessionId === sessionManager.getSessionId()) {
 				rootManager = sessionManager;
 			} else {
+				// The registry locates a candidate manager only. Composition rechecks the genuine
+				// parent execution and actual File root; agent ids are never ancestry proof.
 				for (const ref of agentRegistry.list()) {
 					const candidate = ref.session?.sessionManager;
 					if (candidate?.getSessionId() !== rootSessionId) continue;
