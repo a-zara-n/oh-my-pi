@@ -114,11 +114,8 @@ function describeFailure(error: unknown): unknown {
 }
 
 async function diagnosePhase<T>(phase: string, run: () => Promise<T>): Promise<T> {
-	console.error(JSON.stringify({ diagnostic: "warm-parent-phase", phase, event: "begin", stage }));
 	try {
-		const result = await run();
-		console.error(JSON.stringify({ diagnostic: "warm-parent-phase", phase, event: "end", stage }));
-		return result;
+		return await run();
 	} catch (error) {
 		console.error(JSON.stringify({ diagnostic: "warm-parent-phase", phase, event: "error", stage,
 			failure: describeFailure(error) }));
