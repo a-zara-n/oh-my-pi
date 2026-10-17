@@ -21,6 +21,7 @@
 	},
 	"files": [
 		"src",
+		"internal",
 		"README.md",
 		"CHANGELOG.md"
 	],
@@ -36,9 +37,6 @@
 			"types": "./src/ar/index.ts",
 			"import": "./src/ar/index.ts"
 		},
-		"./internal/model-request-journal-binding-lifetime": null,
-		"./internal/model-request-journal-binding-lifetime.js": null,
-		"./internal/model-request-journal-binding-lifetime.ts": null,
 		"./*": {
 			"types": "./src/*.ts",
 			"import": "./src/*.ts"
@@ -46,12 +44,12 @@
 		"./*.js": "./src/*.ts"
 	},
 	"scripts": {
-		"check": "oxlint . && oxfmt --check --no-error-on-unmatched-pattern 'src/**/*.{ts,tsx}' '{test,bench,examples,scripts}/**/*.ts' '*.ts' && bun run check:types",
+		"check": "oxlint . && oxfmt --check --no-error-on-unmatched-pattern '{src,internal}/**/*.{ts,tsx}' '{test,bench,examples,scripts}/**/*.ts' '*.ts' && bun run check:types",
 		"check:types": "tsgo -p tsconfig.json --noEmit",
 		"lint": "oxlint .",
 		"test": "bun test --parallel",
 		"fix": "oxlint --fix --fix-suggestions . && bun run fmt",
-		"fmt": "oxfmt --no-error-on-unmatched-pattern 'src/**/*.{ts,tsx}' '{test,bench,examples,scripts}/**/*.ts' '*.ts'"
+		"fmt": "oxfmt --no-error-on-unmatched-pattern '{src,internal}/**/*.{ts,tsx}' '{test,bench,examples,scripts}/**/*.ts' '*.ts'"
 	},
 	"dependencies": {
 		"@oh-my-pi/pi-natives": "catalog:"

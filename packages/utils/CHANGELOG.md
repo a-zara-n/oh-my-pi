@@ -54,8 +54,9 @@
 - Connected the genuine authority binding's private lifetime to canonical File principal
   registration, accepted composition/source/preparation work, real admission ending, queue
   drain, logical close and writer close before native owner release. Same-root work uses the
-  actual root queue; no caller callback, promise or boolean is authentication. The internal
-  lifecycle subpath is explicitly unavailable through all public wildcard spellings.
+  actual root queue; no caller callback, promise or boolean is authentication. Its internal
+  implementation is bundled outside the `src/` tree targeted by public wildcard exports;
+  authority and composition use only relative imports, not a spellings blacklist.
   This does not own pre-composition SDK startup, outer AgentSession event producers or the
   successful-response transport's detached lease settlement; full outer acceptance is not claimed.
   Worker-side verification was not run; managed sending is not accepted by these notes.

@@ -153,8 +153,10 @@ release, while a begun start span must reach its real `endJournalSendStart`. The
 joins accepted File queues, acknowledges deepest-first logical closes, and closes the actual
 File writers before the authority releases retained roots and the writer-owner scope.
 Failures remain failures, and a failed close does not become a durable closed acknowledgement.
-The five internal lifecycle operations are not package exports or caller registration hooks;
-ordinary sessions without a binding retain their existing behavior.
+The five internal lifecycle operations are not package exports or caller registration hooks.
+Their implementation is published under the package's `internal/` directory, outside the
+`src/` tree targeted by public wildcard exports, and is loaded only through relative imports.
+Ordinary sessions without a binding retain their existing behavior.
 
 This File-principal join does **not** establish ownership of SDK startup work before composition,
 AgentSession's external event/persistence producers, or the successful-response transport's

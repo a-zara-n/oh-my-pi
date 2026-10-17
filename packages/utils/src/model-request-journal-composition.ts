@@ -55,7 +55,7 @@ import { getSessionsDir } from "./dirs";
 import { parseSessionContent } from "./session-file-reader";
 import { migrateToCurrentVersion } from "./session-migrations";
 import { validateModelRequestRegistry } from "./model-request-registry";
-import { registerBindingPrincipal } from "./internal/model-request-journal-binding-lifetime";
+import { registerBindingPrincipal } from "../internal/model-request-journal-binding-lifetime";
 
 interface FileMutationGuard {
 	body(content: string): void;

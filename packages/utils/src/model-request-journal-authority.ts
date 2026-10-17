@@ -7,7 +7,7 @@ import {
 	finishBindingLifetime,
 	initializeBindingLifetime,
 	joinBindingPrincipalDrains,
-} from "./internal/model-request-journal-binding-lifetime";
+} from "../internal/model-request-journal-binding-lifetime";
 import { retainRawModelRequestJournalRoot, withRawModelRequestJournalLeases, type RawModelRequestJournalLeaseScope, type RawModelRequestJournalRetainedRootScope } from "./model-request-journal-leases";
 import { assertModelRequestJournalDatabase, openModelRequestJournalDatabase } from "./model-request-journal-sqlite-control";
 

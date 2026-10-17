@@ -1,4 +1,4 @@
-import type { ModelRequestJournalLeaseBinding } from "../model-request-journal-authority";
+import type { ModelRequestJournalLeaseBinding } from "../src/model-request-journal-authority";
 
 interface PrincipalDrain {
 	readonly drain: () => Promise<void>;
