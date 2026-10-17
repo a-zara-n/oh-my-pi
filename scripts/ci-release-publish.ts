@@ -55,6 +55,8 @@ export interface PublishPackage {
 	extraFiles?: readonly string[];
 	/** Extra tsgo invocations beyond `tsconfig.publish.json`. */
 	extraTypeConfigs?: readonly string[];
+	/** Emit package-root declarations, then preserve the public `dist/types` layout. */
+	packageRootDeclarations?: boolean;
 	/**
 	 * Also emit transpiled JS to `dist/js` (via `tsconfig.publish.js.json`)
 	 * and repoint the published runtime entries there so the package runs on
@@ -162,7 +164,7 @@ export function npmDistTag(version: string): string {
 const STATS_CLIENT_LOCK = "stats-client";
 
 export const packages: PublishPackage[] = [
-	{ dir: "packages/utils", kind: "typescript" },
+	{ dir: "packages/utils", kind: "typescript", packageRootDeclarations: true },
 	{ dir: "packages/wire", kind: "typescript" },
 	{ dir: "packages/omptype", kind: "typescript", publishJs: true },
 	{ dir: "packages/catalog", kind: "typescript" },
@@ -263,15 +265,30 @@ export async function rewriteManifest(pkg: PublishPackage, write: boolean): Prom
 	return manifest;
 }
 
+/** Stage public declarations without publishing body-only private module declarations. */
+export async function stagePublicTypeDeclarations(pkgDir: string): Promise<void> {
+	const emittedRoot = path.join(pkgDir, "dist/types-root");
+	const emittedPublic = path.join(emittedRoot, "src");
+	const publicTypes = path.join(pkgDir, "dist/types");
+	if (!(await fs.stat(emittedPublic)).isDirectory()) throw new Error("Missing emitted public declarations");
+	await fs.rm(publicTypes, { recursive: true, force: true });
+	await fs.rename(emittedPublic, publicTypes);
+	await fs.rm(emittedRoot, { recursive: true, force: true });
+}
+
 async function preparePackage(pkg: PublishPackage): Promise<PackageManifest> {
 	const pkgDir = path.join(repoRoot, pkg.dir);
 	for (const argv of pkg.preBuild ?? []) {
 		await $`${argv}`.cwd(pkgDir);
 	}
+	if (pkg.packageRootDeclarations) {
+		await fs.rm(path.join(pkgDir, "dist/types-root"), { recursive: true, force: true });
+	}
 	await $`bun x tsgo -p tsconfig.publish.json`.cwd(pkgDir);
 	for (const cfg of pkg.extraTypeConfigs ?? []) {
 		await $`bun x tsgo -p ${cfg}`.cwd(pkgDir);
 	}
+	if (pkg.packageRootDeclarations) await stagePublicTypeDeclarations(pkgDir);
 	if (pkg.publishJs) {
 		await $`bun x tsgo -p tsconfig.publish.js.json`.cwd(pkgDir);
 	}

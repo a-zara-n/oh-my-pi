@@ -12,6 +12,7 @@ import {
 	rewriteManifest,
 	runPublishJobs,
 	stageLegalPayloads,
+	stagePublicTypeDeclarations,
 } from "./ci-release-publish";
 
 describe("npm dist-tags", () => {
@@ -205,6 +206,40 @@ describe("published legal payloads", () => {
 	});
 });
 
+describe("package-root declaration staging", () => {
+	it("keeps public declaration bytes and paths, discarding only generated private declarations", async () => {
+		const pkgDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-publish-declarations-"));
+		try {
+			const publicDeclaration = 'export type { Header } from "./session-entries";\n';
+			const sessionDeclaration = "export interface Header { readonly id: string }\n";
+			const privateSource = "export function privateOperation(): void {}\n";
+			await Promise.all([
+				Bun.write(path.join(pkgDir, "dist/types-root/src/index.d.ts"), publicDeclaration),
+				Bun.write(path.join(pkgDir, "dist/types-root/src/ar/index.d.ts"), sessionDeclaration),
+				Bun.write(path.join(pkgDir, "dist/types-root/internal/lifetime.d.ts"), "export declare function privateOperation(): void;\n"),
+				Bun.write(path.join(pkgDir, "dist/types/stale.d.ts"), "stale\n"),
+				Bun.write(path.join(pkgDir, "internal/lifetime.ts"), privateSource),
+			]);
+			await stagePublicTypeDeclarations(pkgDir);
+			expect(await Bun.file(path.join(pkgDir, "dist/types/index.d.ts")).text()).toBe(publicDeclaration);
+			expect(await Bun.file(path.join(pkgDir, "dist/types/ar/index.d.ts")).text()).toBe(sessionDeclaration);
+			expect(await Bun.file(path.join(pkgDir, "dist/types/stale.d.ts")).exists()).toBe(false);
+			expect(await Bun.file(path.join(pkgDir, "dist/types-root/internal/lifetime.d.ts")).exists()).toBe(false);
+			expect(await Bun.file(path.join(pkgDir, "internal/lifetime.ts")).text()).toBe(privateSource);
+			expect(await Bun.file(path.join(pkgDir, "internal/lifetime.d.ts")).exists()).toBe(false);
+		} finally { await fs.rm(pkgDir, { recursive: true, force: true }); }
+	});
+
+	it("rejects missing public emit before replacing previous public declarations", async () => {
+		const pkgDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-publish-missing-declarations-"));
+		try {
+			await Bun.write(path.join(pkgDir, "dist/types/index.d.ts"), "existing\n");
+			await expect(stagePublicTypeDeclarations(pkgDir)).rejects.toThrow();
+			expect(await Bun.file(path.join(pkgDir, "dist/types/index.d.ts")).text()).toBe("existing\n");
+		} finally { await fs.rm(pkgDir, { recursive: true, force: true }); }
+	});
+});
+
 describe("published manifest topology", () => {
 	it("repoints omptype runtime entries to dist/js with a bun source condition", async () => {
 		const pkg = packages.find(entry => entry.dir === "packages/omptype");
@@ -242,6 +277,13 @@ describe("published manifest topology", () => {
 		if (!pkg) throw new Error("utils missing from publish set");
 
 		const manifest = await rewriteManifest(pkg, false);
+		expect(pkg.packageRootDeclarations).toBe(true);
+		const typeConfig: unknown = await Bun.file(path.join(import.meta.dir, "../packages/utils/tsconfig.publish.json")).json();
+		expect(typeConfig).toMatchObject({
+			compilerOptions: { rootDir: ".", outDir: "dist/types-root" },
+			include: ["src", "internal"],
+		});
+		expect(manifest.files).toEqual(expect.arrayContaining(["src", "internal", "dist/types"]));
 		expect(manifest.files).toEqual(expect.arrayContaining(["LICENSE", "THIRD-PARTY-NOTICES.txt"]));
 		expect(manifest.main).toBe("./src/index.ts");
 		expect(manifest.exports).toEqual({

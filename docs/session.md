@@ -156,6 +156,8 @@ Failures remain failures, and a failed close does not become a durable closed ac
 The five internal lifecycle operations are not package exports or caller registration hooks.
 Their implementation is published under the package's `internal/` directory, outside the
 `src/` tree targeted by public wildcard exports, and is loaded only through relative imports.
+Declaration generation uses a package-root staging directory; release preparation keeps the
+existing public `dist/types/` layout and discards unused private implementation declarations.
 Ordinary sessions without a binding retain their existing behavior.
 
 This File-principal join does **not** establish ownership of SDK startup work before composition,

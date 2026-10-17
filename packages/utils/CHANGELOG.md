@@ -87,6 +87,9 @@
 
 ### Fixed
 
+- Emit package-root declarations into a generated staging tree, then retain the existing
+  public `dist/types` layout during release preparation. Private body-only declarations
+  are not published or emitted beside their source.
 - Preserve literal brands through contextual typing of frozen genuine capabilities.
   Keep managed registry records outside mutable legacy ID migration, and load the
   canonical compaction augmentation in type-only dependency consumers.

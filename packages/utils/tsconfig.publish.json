@@ -7,10 +7,10 @@
 		"declarationMap": false,
 		"sourceMap": false,
 		"inlineSources": false,
-		"rootDir": "src",
-		"outDir": "dist/types",
+		"rootDir": ".",
+		"outDir": "dist/types-root",
 		"noCheck": true
 	},
-	"include": ["src"],
+	"include": ["src", "internal"],
 	"exclude": ["dist", "node_modules", "test"]
 }
