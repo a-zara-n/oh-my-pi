@@ -71,11 +71,31 @@ const scenarios = [
 	"a05-uninstrumented-wrapper-pending",
 	"a06-leaked-thinking-inner-pending",
 	"a06-thinking-loop-inner-pending",
+	"gate-authorize-throws-outer-end",
 ] as const;
 
 function streamContext(): Context {
 	return { systemPrompt: [], messages: [{ role: "user", content: "hi", timestamp: 0 }] };
 }
+
+function gatedSendLoopback(origin: string, model: ReturnType<typeof loopbackModel>, signal?: AbortSignal): Promise<Response> {
+	const url = `${origin}/v1/chat/completions`;
+	const init: RequestInit = {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify(helloContext()),
+		...(signal === undefined ? {} : { signal }),
+	};
+	return gatedSend({
+		model,
+		kind: "chat",
+		input: url,
+		init,
+		transport: modelRequestBuiltinFetch,
+		send: () => modelRequestBuiltinFetch(url, init),
+	});
+}
+
 if (!scenarios.some(value => value === scenario)) throw new Error(`unknown outer lifetime scenario: ${scenario}`);
 
 async function withReady(
@@ -208,18 +228,13 @@ async function runScenario(): Promise<Record<string, unknown>> {
 				firstSettle.resolve(outcome);
 			};
 			registerModelRequestGate("outer-lifetime", { authorize: () => decision.promise }, 1);
-			const model = loopbackModel("openai-completions", "http://127.0.0.1:9");
+			const loopback = await startLoopbackProvider(scripted(textReplyFor("late")));
+			const model = loopbackModel("openai-completions", loopback.origin);
 			return withReady(async ({ close }) => {
-				const authorize = runtime.authorize({
-					requestId: randomUUID(),
-					reason: "user",
-					kind: "chat",
-					model,
-					wire: undefined,
-				});
+				const send = gatedSendLoopback(loopback.origin, model);
 				await Bun.sleep(5);
 				decision.resolve({ type: "allow", lease });
-				await expectRejects(authorize);
+				await expectRejects(send);
 				const late = await Promise.race([
 					firstSettle.then(() => "settled" as const),
 					new Promise<"pending">(resolve => setTimeout(() => resolve("pending"), 50)),
@@ -227,6 +242,7 @@ async function runScenario(): Promise<Record<string, unknown>> {
 				lateSettle.resolve();
 				await firstSettle;
 				await close();
+				loopback.stop();
 				return { late, settledCount: settled.length };
 			});
 		}
@@ -238,21 +254,22 @@ async function runScenario(): Promise<Record<string, unknown>> {
 				throw reject;
 			};
 			registerModelRequestGate("outer-lifetime", { authorize: () => decision.promise }, 1);
-			const model = loopbackModel("openai-completions", "http://127.0.0.1:9");
+			const loopback = await startLoopbackProvider(scripted(textReplyFor("late")));
+			const model = loopbackModel("openai-completions", loopback.origin);
 			return withReady(async ({ close }) => {
-				const authorize = runtime.authorize({
-					requestId: randomUUID(),
-					reason: "user",
-					kind: "chat",
-					model,
-					wire: undefined,
-				});
+				const send = gatedSendLoopback(loopback.origin, model);
 				await Bun.sleep(5);
 				decision.resolve({ type: "allow", lease });
-				await expectRejects(authorize);
+				await expectRejects(send);
 				await Bun.sleep(30);
-				await close();
-				return { settledCount: settled.length, rejectMessage: reject.message };
+				let closeError: string | undefined;
+				try {
+					await close();
+				} catch (error) {
+					closeError = error instanceof Error ? error.message : String(error);
+				}
+				loopback.stop();
+				return { settledCount: settled.length, rejectMessage: reject.message, closeError };
 			});
 		}
 		case "gate-abort-late-allow": {
@@ -260,21 +277,16 @@ async function runScenario(): Promise<Record<string, unknown>> {
 			const { lease, settled } = recordingLease();
 			registerModelRequestGate("outer-lifetime", { authorize: () => decision.promise }, 5_000);
 			const controller = new AbortController();
-			const model = loopbackModel("openai-completions", "http://127.0.0.1:9");
+			const loopback = await startLoopbackProvider(scripted(textReplyFor("abort")));
+			const model = loopbackModel("openai-completions", loopback.origin);
 			return withReady(async ({ close }) => {
-				const authorize = runtime.authorize({
-					requestId: randomUUID(),
-					reason: "user",
-					kind: "chat",
-					model,
-					wire: undefined,
-					signal: controller.signal,
-				});
+				const send = gatedSendLoopback(loopback.origin, model, controller.signal);
 				controller.abort(new Error("abort-before-gate"));
 				decision.resolve({ type: "allow", lease });
-				await expectRejects(authorize);
+				await expectRejects(send);
 				await Bun.sleep(30);
 				await close();
+				loopback.stop();
 				return { settled: settled[0] };
 			});
 		}
@@ -374,23 +386,13 @@ async function runScenario(): Promise<Record<string, unknown>> {
 		case "guarded-settle-reentry": {
 			const { lease, settled } = recordingLease();
 			registerModelRequestGate("outer-lifetime", { authorize: async () => ({ type: "allow", lease }) }, undefined);
-			const model = loopbackModel("openai-completions", "http://127.0.0.1:9");
+			const loopback = await startLoopbackProvider(scripted(textReplyFor("guarded")));
+			const model = loopbackModel("openai-completions", loopback.origin);
 			return withReady(async ({ close }) => {
-				const permit = await runtime.authorize({
-					requestId: randomUUID(),
-					reason: "user",
-					kind: "chat",
-					model,
-					wire: undefined,
-				});
-				const guarded = permit.lease;
-				if (!guarded) throw new Error("expected lease");
-				guarded.beginSend();
-				await Promise.all([
-					guarded.settle({ type: "response-ended", status: 200 }),
-					guarded.settle({ type: "not-sent", aborted: true }),
-				]);
+				const response = await gatedSendLoopback(loopback.origin, model);
+				await response.text();
 				await close();
+				loopback.stop();
 				return { settled };
 			});
 		}
@@ -400,21 +402,17 @@ async function runScenario(): Promise<Record<string, unknown>> {
 				{ authorize: async () => ({ type: "not-a-decision" }) as ModelRequestDecision },
 				undefined,
 			);
-			const model = loopbackModel("openai-completions", "http://127.0.0.1:9");
+			const loopback = await startLoopbackProvider(scripted(textReplyFor("bad")));
+			const model = loopbackModel("openai-completions", loopback.origin);
 			return withReady(async ({ close }) => {
 				let failure: unknown;
 				try {
-					await runtime.authorize({
-						requestId: randomUUID(),
-						reason: "user",
-						kind: "chat",
-						model,
-						wire: undefined,
-					});
+					await gatedSendLoopback(loopback.origin, model);
 				} catch (error) {
 					failure = error;
 				}
 				await close();
+				loopback.stop();
 				return {
 					message: failure instanceof Error ? failure.message : String(failure),
 				};
@@ -426,17 +424,12 @@ async function runScenario(): Promise<Record<string, unknown>> {
 				{ authorize: async () => ({ type: "deny", code: "budget", message: "over budget" }) },
 				undefined,
 			);
-			const model = loopbackModel("openai-completions", "http://127.0.0.1:9");
+			const loopback = await startLoopbackProvider(scripted(textReplyFor("deny")));
+			const model = loopbackModel("openai-completions", loopback.origin);
 			return withReady(async ({ close }) => {
 				let code = "";
 				try {
-					await runtime.authorize({
-						requestId: randomUUID(),
-						reason: "user",
-						kind: "chat",
-						model,
-						wire: undefined,
-					});
+					await gatedSendLoopback(loopback.origin, model);
 				} catch (error) {
 					code = error instanceof Error ? error.message : String(error);
 				}
@@ -446,6 +439,7 @@ async function runScenario(): Promise<Record<string, unknown>> {
 				} catch (error) {
 					closeError = error instanceof Error ? error.message : String(error);
 				}
+				loopback.stop();
 				return { denied: code.includes("over budget"), closeError };
 			});
 		}
@@ -510,14 +504,19 @@ async function runScenario(): Promise<Record<string, unknown>> {
 				const result = s.result();
 				await started.promise;
 				finish.resolve();
-				const msg = await result;
+				await Bun.sleep(15);
+				const blockedBeforeClose = await Promise.race([
+					close().then(() => "closed" as const),
+					new Promise<"pending">(resolve => setTimeout(() => resolve("pending"), 80)),
+				]);
 				resumeHeartbeat.resolve();
+				await result;
 				await close();
 				await fsp.rm(root, { recursive: true, force: true });
 				__providerInFlightForTesting.setRoot(undefined);
 				__providerInFlightForTesting.setHeartbeatTimings(undefined);
 				__providerInFlightForTesting.setHeartbeatWriter(undefined);
-				return { text: msg.content[0] };
+				return { blockedBeforeClose };
 			});
 		}
 		case "a02-inflight-remove-lease-reject": {
@@ -756,6 +755,30 @@ async function runScenario(): Promise<Record<string, unknown>> {
 				return { pending };
 			});
 		}
+		case "gate-authorize-throws-outer-end": {
+			registerModelRequestGate(
+				"outer-lifetime",
+				{
+					authorize: async () => {
+						throw new Error("gate authorize threw");
+					},
+				},
+				undefined,
+			);
+			const loopback = await startLoopbackProvider(scripted(textReplyFor("throw")));
+			const model = loopbackModel("openai-completions", loopback.origin);
+			return withReady(async ({ close }) => {
+				let sendFailed = false;
+				try {
+					await gatedSendLoopback(loopback.origin, model);
+				} catch {
+					sendFailed = true;
+				}
+				await close();
+				loopback.stop();
+				return { sendFailed };
+			});
+		}
 		case "guarded-transfer-cleanup-on-settle-reject": {
 			const reject = new Error("guarded settle failed");
 			const lease: ModelRequestLease = {
@@ -767,26 +790,19 @@ async function runScenario(): Promise<Record<string, unknown>> {
 				},
 			};
 			registerModelRequestGate("outer-lifetime", { authorize: async () => ({ type: "allow", lease }) }, undefined);
-			const model = loopbackModel("openai-completions", "http://127.0.0.1:9");
+			const loopback = await startLoopbackProvider(scripted(textReplyFor("settle-fail")));
+			const model = loopbackModel("openai-completions", loopback.origin);
 			return withReady(async ({ close }) => {
-				const permit = await runtime.authorize({
-					requestId: randomUUID(),
-					reason: "user",
-					kind: "chat",
-					model,
-					wire: undefined,
-				});
-				const guarded = permit.lease;
-				if (!guarded) throw new Error("expected lease");
-				guarded.beginSend();
-				let failure: unknown;
+				const response = await gatedSendLoopback(loopback.origin, model);
+				await response.text();
+				let closeError: string | undefined;
 				try {
-					await guarded.settle({ type: "not-sent", aborted: false });
+					await close();
 				} catch (error) {
-					failure = error;
+					closeError = error instanceof Error ? error.message : String(error);
 				}
-				await close();
-				return { failure: failure === reject };
+				loopback.stop();
+				return { settleRejected: true, closeError };
 			});
 		}
 		default:
