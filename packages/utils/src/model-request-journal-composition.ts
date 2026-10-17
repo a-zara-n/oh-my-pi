@@ -57,8 +57,6 @@ import { parseSessionContent } from "./session-file-reader";
 import { migrateToCurrentVersion } from "./session-migrations";
 import { validateModelRequestRegistry } from "./model-request-registry";
 import {
-	beginClosingBindingLifetime,
-	joinBindingOuterWorkDrains,
 	registerBindingPrincipal,
 	registerJournalOuterWork,
 	settleJournalOuterWork,
@@ -4217,17 +4215,6 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 	async #drainAndCloseSession(states: JournalSessionState[], previousCloses: readonly Promise<void>[]): Promise<void> {
 		const failures: unknown[] = [];
 		try {
-			const bindings = new Set<ModelRequestJournalLeaseBinding>();
-			for (const state of states) bindings.add(state.binding);
-			for (const binding of bindings) {
-				try {
-					beginClosingBindingLifetime(binding);
-					await joinBindingOuterWorkDrains(binding);
-				} catch (error) {
-					failures.push(error);
-				}
-			}
-			if (failures.length > 0) throw new AggregateError(failures, "Journal outer work drain failed");
 			const cells = new Set(states.map(state => state.cell));
 			const drains = await Promise.allSettled([...previousCloses, ...[...cells].map(cell => cell.flush())]);
 			for (const drain of drains) if (drain.status === "rejected") failures.push(drain.reason);
