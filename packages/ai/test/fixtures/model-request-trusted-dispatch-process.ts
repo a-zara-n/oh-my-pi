@@ -102,6 +102,23 @@ interface ReadyContext {
 // message-only approximation, for the binding finalizer's retained-failure check.
 let prepareAwaitRevocationFailure: Error | undefined;
 
+/** Whether `error`'s aggregate/cause graph carries the exact send rejection the scenario observed. */
+function drainCarriesSendFailure(error: unknown, sendFailureMessage: string | undefined): boolean {
+	if (sendFailureMessage === undefined) return false;
+	const seen = new Set<unknown>();
+	const visit = (current: unknown): boolean => {
+		if (current === undefined || current === null || seen.has(current)) return false;
+		seen.add(current);
+		if (current instanceof Error && current.message === sendFailureMessage) return true;
+		if (current instanceof AggregateError) return current.errors.some(visit);
+		if (current instanceof Error) return visit(current.cause);
+		return false;
+	};
+	return visit(error);
+}
+let authorityDrain: { readonly rejected: boolean; readonly causesMatch?: boolean; readonly message?: string } | undefined;
+let bindingDrainRejected = false;
+
 async function withReadyRoot(use: (context: ReadyContext) => Promise<object>): Promise<object> {
 	const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "d37-trusted-dispatch-")));
 	const cell = openFileJournalCell({ cwd: directory, sessionDir: path.join(directory, "sessions") });
@@ -245,9 +262,31 @@ CREATE TABLE store_config_event(${common},key TEXT NOT NULL,value_json TEXT NOT 
 						} finally {
 							try {
 								await revoke();
+								authorityDrain = { rejected: false };
 							} catch (error) {
-								if (authorityMutation === undefined || result === undefined) throw error;
-								cleanupAuthorityErrors.push(error instanceof Error ? error.message : String(error));
+								// The new outer-work contract: an unrecovered send failure noted
+								// on the request's outer work makes the authority close reject.
+								// Accept that rejection only when it actually carries this
+								// scenario's observed send failure; anything else stays an error.
+								const sendFailureMessage =
+									result !== undefined && "error" in result && typeof result.error === "string"
+										? result.error
+										: undefined;
+								if (
+									sendFailureMessage !== undefined &&
+									authorityMutation === undefined &&
+									drainCarriesSendFailure(error, sendFailureMessage)
+								) {
+									authorityDrain = {
+										rejected: true,
+										causesMatch: true,
+										message: error instanceof Error ? error.message : String(error),
+									};
+								} else if (authorityMutation === undefined || result === undefined) {
+									throw error;
+								} else {
+									cleanupAuthorityErrors.push(error instanceof Error ? error.message : String(error));
+								}
 							}
 						}
 					});
@@ -309,8 +348,20 @@ CREATE TABLE store_config_event(${common},key TEXT NOT NULL,value_json TEXT NOT 
 					},
 				);
 				finalizerRootReleased = true;
+		} else {
+			const sendFailureMessage =
+				result !== undefined && "error" in result && typeof result.error === "string" ? result.error : undefined;
+			if (
+				authorityDrain?.rejected === true &&
+				authorityDrain.causesMatch === true &&
+				sendFailureMessage !== undefined &&
+				drainCarriesSendFailure(error, sendFailureMessage)
+			) {
+				// The binding finalizer re-reports the same expected drain rejection.
+				bindingDrainRejected = true;
+			} else if (authorityMutation === undefined || result === undefined) {
+				throw error;
 			} else {
-				if (authorityMutation === undefined || result === undefined) throw error;
 				cleanupAuthorityErrors.push(error instanceof Error ? error.message : String(error));
 			}
 		}
@@ -345,7 +396,13 @@ CREATE TABLE store_config_event(${common},key TEXT NOT NULL,value_json TEXT NOT 
 			finalizerRootReleased,
 		};
 	}
-	return { ...result, authorityMutation, cleanupAuthorityErrors };
+	return {
+		...result,
+		authorityMutation,
+		cleanupAuthorityErrors,
+		authorityDrainRejected: authorityDrain?.rejected ?? false,
+		authorityDrainCausesMatch: authorityDrain?.causesMatch ?? false,
+	};
 }
 
 function acquireAndReleaseRoot(context: ReadyContext): void {
@@ -788,7 +845,17 @@ async function dispatchRegression(context: ReadyContext): Promise<object> {
 			controller.abort(new Error("revoke after actual builtin dispatch"));
 		}
 		await within(sending, "canonical dispatch settlement");
-		if (revokePromise !== undefined) await revokePromise;
+		if (revokePromise !== undefined) {
+			try {
+				await revokePromise;
+			} catch {
+				// begin-revoke and dispatch-before-revoke share this cached close
+				// promise with withReadyRoot's finalizer, which re-validates the very
+				// same rejection against the scenario's exact send failure and
+				// rethrows anything unmatched. Resolving here is what lets that
+				// validation see the recorded scenario result.
+			}
+		}
 		// Let a wrongly invoked queued sender reach the loopback before counting.
 		await setImmediate();
 		await setImmediate();
@@ -846,4 +913,4 @@ const result = await withReadyRoot(async context => ({
 	journalStateBefore: context.execution.journalState,
 	...(await dispatchRegression(context)),
 }));
-console.log(JSON.stringify(result));
+console.log(JSON.stringify({ ...result, bindingDrainRejected }));

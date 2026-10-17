@@ -41,7 +41,7 @@ describe("process-wide gate behavior", () => {
 				managedWire: 0,
 				customStarts: 0,
 				gateCalls: 0,
-				denied: Array.from({ length: 10 }, () => true),
+				refused: Array.from({ length: 10 }, () => true),
 				registered: mode !== "none",
 			});
 		});

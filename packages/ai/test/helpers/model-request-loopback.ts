@@ -172,7 +172,13 @@ function replyStream(reply: LoopbackReply): ReadableStream<Uint8Array> {
 		async pull(controller) {
 			if (next >= reply.chunks.length) {
 				if (reply.dropAfterChunks) controller.error(new Error("loopback dropped the connection"));
-				else controller.close();
+				else {
+					// Hold only the end of the body. Headers and every chunk go out on
+					// the wire first, so a held reply exercises response-body lifetime
+					// instead of stalling the whole response before the status line.
+					if (reply.holdUntil !== undefined) await reply.holdUntil;
+					controller.close();
+				}
 				return;
 			}
 			controller.enqueue(encoder.encode(reply.chunks[next]!));
@@ -205,7 +211,6 @@ export function startLoopbackProvider(responder: LoopbackResponder, options: Loo
 			options.trace?.push("loopback-request");
 			for (const waiter of waiters) if (requests.length >= waiter.count) waiter.resolve();
 			const reply = await responder(received, index);
-			if (reply.holdUntil !== undefined) await reply.holdUntil;
 			return new Response(replyStream(reply), { status: reply.status, headers: reply.headers });
 		},
 	});

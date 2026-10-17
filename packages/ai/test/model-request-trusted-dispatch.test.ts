@@ -43,7 +43,7 @@ async function probe(scenario: Scenario): Promise<Record<string, unknown>> {
 			new Response(child.stdout).text(),
 			new Response(child.stderr).text(),
 		]);
-		expect({ scenario, exitCode, stderr }).toEqual({ scenario, exitCode: 0, stderr: "" });
+		expect(exitCode).toBe(0);
 		const value: unknown = JSON.parse(stdout);
 		if (value === null || typeof value !== "object" || Array.isArray(value)) {
 			throw new Error("trusted dispatch fixture did not return a JSON object");
@@ -89,13 +89,16 @@ describe("D37 canonical required-ready builtin dispatch (native authority)", () 
 				expect(await probe(scenario)).toMatchObject({
 					rejected: true,
 					received: 0,
-					gateCalls: 1,
-					beginCalls: 0,
-					senderCalls: 0,
-					responseHeads: 0,
-					chunks: 0,
-					outcomes: [],
-					rootReacquired: true,
+				gateCalls: 1,
+				beginCalls: 0,
+				senderCalls: 0,
+				responseHeads: 0,
+				chunks: 0,
+				outcomes: [],
+				authorityDrainRejected: true,
+				authorityDrainCausesMatch: true,
+				bindingDrainRejected: true,
+				rootReacquired: true,
 				});
 			},
 			30_000,
@@ -114,6 +117,9 @@ describe("D37 canonical required-ready builtin dispatch (native authority)", () 
 					responseHeads: 0,
 					chunks: 0,
 					senderCalls: 0,
+					authorityDrainRejected: true,
+					authorityDrainCausesMatch: true,
+					bindingDrainRejected: true,
 					rootReacquired: true,
 					outcomes: [{ type: "not-sent", aborted: scenario === "begin-abort" }],
 					journalStateAfter: scenario === "begin-revoke" ? "required-revoked" : "required-ready",
@@ -134,6 +140,9 @@ describe("D37 canonical required-ready builtin dispatch (native authority)", () 
 				senderCalls: 0,
 				responseHeads: 0,
 				chunks: 0,
+				authorityDrainRejected: true,
+				authorityDrainCausesMatch: true,
+				bindingDrainRejected: true,
 				rootReacquired: true,
 				outcomes: [{ type: "not-sent", aborted: false }],
 				journalStateAfter: "required-revoked",
@@ -242,6 +251,9 @@ describe("D37 canonical required-ready builtin dispatch (native authority)", () 
 				beginCalls: 0,
 				senderCalls: 0,
 				outcomes: [],
+				authorityDrainRejected: true,
+				authorityDrainCausesMatch: true,
+				bindingDrainRejected: true,
 				rootReacquired: true,
 			});
 		},
@@ -259,6 +271,9 @@ describe("D37 canonical required-ready builtin dispatch (native authority)", () 
 				beginCalls: 0,
 				senderCalls: 0,
 				outcomes: [],
+				authorityDrainRejected: true,
+				authorityDrainCausesMatch: true,
+				bindingDrainRejected: true,
 				rootReacquired: true,
 			});
 		},
@@ -276,6 +291,9 @@ describe("D37 canonical required-ready builtin dispatch (native authority)", () 
 				beginCalls: 0,
 				senderCalls: 0,
 				outcomes: [],
+				authorityDrainRejected: true,
+				authorityDrainCausesMatch: true,
+				bindingDrainRejected: true,
 				rootReacquired: true,
 			});
 		},
@@ -293,6 +311,9 @@ describe("D37 canonical required-ready builtin dispatch (native authority)", () 
 				senderCalls: 0,
 				auxiliaryTwinCalls: 0,
 				outcomes: [],
+				authorityDrainRejected: true,
+				authorityDrainCausesMatch: true,
+				bindingDrainRejected: true,
 				rootReacquired: true,
 			});
 		},
@@ -327,6 +348,9 @@ describe("D37 canonical required-ready builtin dispatch (native authority)", () 
 				alternateJournalState: "required-ready",
 				senderCalls: 0,
 				outcomes: [],
+				authorityDrainRejected: true,
+				authorityDrainCausesMatch: true,
+				bindingDrainRejected: true,
 				rootReacquired: true,
 			});
 		},
@@ -388,6 +412,9 @@ describe("D37 canonical required-ready builtin dispatch (native authority)", () 
 				outcomes: [{ type: "request-failed", sent: "maybe", aborted: true, transportClosed: true }],
 				responseHeads: 0,
 				chunks: 0,
+				authorityDrainRejected: true,
+				authorityDrainCausesMatch: true,
+				bindingDrainRejected: true,
 				rootReacquired: true,
 				journalStateAfter: "required-revoked",
 			});

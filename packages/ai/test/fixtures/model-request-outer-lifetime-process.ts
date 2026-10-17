@@ -22,7 +22,10 @@ import {
 	composeJournalSession,
 	openFileJournalCell,
 } from "@oh-my-pi/pi-utils/model-request-journal-composition";
-import { withRawModelRequestJournalLeases } from "@oh-my-pi/pi-utils/model-request-journal-leases";
+import {
+	tryAcquireRawModelRequestJournalFileLease,
+	withRawModelRequestJournalLeases,
+} from "@oh-my-pi/pi-utils/model-request-journal-leases";
 import { openModelRequestJournalDatabase } from "@oh-my-pi/pi-utils/model-request-journal-sqlite-control";
 import {
 	registerModelRequestGate,
@@ -60,11 +63,13 @@ const scenarios = [
 	"gate-decision-unrecognizable",
 	"gate-deny-outer-rejected",
 	"a01-tf-debug-holds-wire",
+	"a01-tf-debug-reject",
 	"a02-inflight-heartbeat-flush-pending",
 	"a02-inflight-heartbeat-flush-reject",
 	"a02-inflight-remove-lease-pending",
 	"a02-inflight-remove-lease-reject",
 	"a02-inflight-waiter-pending",
+	"a02-inflight-waiter-abort",
 	"a02-inflight-waiter-reject",
 	"a02-inflight-release-joins-raw",
 	"e02-guarded-concurrent-settle-reentry",
@@ -112,8 +117,11 @@ if (!scenarios.some(value => value === scenario)) throw new Error(`unknown outer
 type ManagedHarness = {
 	readonly sessionFile: string;
 	readonly bindingRecordPath: string;
+	readonly storeId: string;
 	readBindingState(): string | undefined;
 	startAuthorityClose: () => Promise<void>;
+	/** AC-OL-02 probe: can a genuine exclusive lease on the owner control lock be taken right now? */
+	probeOwnerExclusiveAvailable(): boolean;
 };
 
 async function countProviderLeaseDirs(provider: string, root?: string): Promise<number> {
@@ -155,14 +163,24 @@ async function raceAuthorityClose(
 	readonly authorityRace: "pending" | "settled";
 	readonly bindingState: string | undefined;
 	readonly osLeaseCount: number;
+	readonly ownerExclusiveDuringHold: boolean;
 }> {
 	const closing = harness.startAuthorityClose();
 	const snap = await snapshotOuterInflight(harness, provider);
+	// AC-OL-02: while the close is held at this pending point, a genuine
+	// exclusive acquisition on the owner control lock must fail; only the
+	// binding's own shared flocks can be holding it.
+	const ownerExclusiveDuringHold = harness.probeOwnerExclusiveAvailable();
 	const authorityRace = await Promise.race([
 		closing.then(() => "settled" as const),
 		new Promise<"pending">(resolve => setTimeout(() => resolve("pending"), ms)),
 	]);
-	return { authorityRace, bindingState: snap.bindingState, osLeaseCount: snap.osLeaseCount };
+	return {
+		authorityRace,
+		bindingState: snap.bindingState,
+		osLeaseCount: snap.osLeaseCount,
+		ownerExclusiveDuringHold,
+	};
 }
 
 function errorIncludesCause(error: unknown, root: unknown): boolean {
@@ -267,37 +285,66 @@ CREATE TABLE store_config_event(${common},key TEXT NOT NULL,value_json TEXT NOT 
 			{ mode: 0o600 },
 		);
 	});
-	return withVerifiedModelRequestJournalBinding(
-		{ resources: { storeId, databasePath }, requester, mode: "resume", rootSessionId },
-		async binding => {
-			const execution = runtime.createSessionExecution({
-				sessionId: () => rootSessionId,
-				root: { kind: "self", modelRequestJournalLeaseBinding: binding },
-				agent,
-				purpose: "main",
-			});
-			return runtime.runWith(execution, async () => {
-				const session = await composeJournalSession({ cell, root: cell, binding, execution });
-				assertJournalExecutionReady(execution);
-				const sessionFile = cell.getSessionFile();
-				let authorityClosing: Promise<void> | undefined;
-				const harness: ManagedHarness = {
-					sessionFile,
-					bindingRecordPath,
-					readBindingState: () => {
-						try {
-							const parsed = JSON.parse(fs.readFileSync(bindingRecordPath, "utf8")) as { state?: string };
-							return parsed.state;
-						} catch {
-							return undefined;
-						}
-					},
-					startAuthorityClose: () => (authorityClosing ??= closeJournalSession(session)),
-				};
-				return body(harness);
-			});
-		},
-	);
+	// The authority's verify keeps requiring a live writer generation for this
+	// database; the harness must hold the connection itself (the registry only
+	// keeps a weak reference) until the binding has fully closed, then close it.
+	const controlLockPath = path.join(path.dirname(bindingRecordPath), "control", `${storeId}.lock`);
+	const probeOwnerExclusiveAvailable = (): boolean => {
+		const lease = tryAcquireRawModelRequestJournalFileLease(
+			controlLockPath,
+			"exclusive",
+			process.getuid?.() ?? 0,
+		);
+		if (lease === undefined) return false;
+		lease.release();
+		return true;
+	};
+	try {
+		const scenarioResult = await withVerifiedModelRequestJournalBinding(
+			{ resources: { storeId, databasePath }, requester, mode: "resume", rootSessionId },
+			async binding => {
+				const execution = runtime.createSessionExecution({
+					sessionId: () => rootSessionId,
+					root: { kind: "self", modelRequestJournalLeaseBinding: binding },
+					agent,
+					purpose: "main",
+				});
+				return runtime.runWith(execution, async () => {
+					const session = await composeJournalSession({ cell, root: cell, binding, execution });
+					assertJournalExecutionReady(execution);
+					const sessionFile = cell.getSessionFile();
+					let authorityClosing: Promise<void> | undefined;
+					const harness: ManagedHarness = {
+						sessionFile,
+						bindingRecordPath,
+						storeId,
+						readBindingState: () => {
+							try {
+								const parsed = JSON.parse(fs.readFileSync(bindingRecordPath, "utf8")) as { state?: string };
+								return parsed.state;
+							} catch {
+								return undefined;
+							}
+						},
+						startAuthorityClose: () => (authorityClosing ??= closeJournalSession(session)),
+						probeOwnerExclusiveAvailable,
+					};
+					return body(harness);
+				});
+			},
+		);
+		// AC-OL-02 counter-proof: once the binding has fully settled — with or
+		// without aggregated outer-work failures — the owner control lock must be
+		// exclusively acquirable again.
+		return { ...scenarioResult, ownerExclusiveAfterClose: probeOwnerExclusiveAvailable() };
+	} finally {
+		try {
+			database.close();
+		} catch {
+			// The binding is fully closed by now; a fixture-side close failure must
+			// not mask the scenario's own result or failure.
+		}
+	}
 }
 
 function recordingLease(): {
@@ -351,7 +398,11 @@ async function runScenario(): Promise<Record<string, unknown>> {
 				const send = gatedSendLoopback(loopback.origin, model);
 				await Bun.sleep(5);
 				decision.resolve({ type: "allow", lease });
-				await expectRejects(send);
+				let sendFailure: unknown;
+				await send.catch((error: unknown) => {
+					sendFailure = error;
+				});
+				if (sendFailure === undefined) throw new Error("expected the gated send to reject on gate timeout");
 				const late = await Promise.race([
 					firstSettle.then(() => "settled" as const),
 					new Promise<"pending">(resolve => setTimeout(() => resolve("pending"), 50)),
@@ -360,7 +411,12 @@ async function runScenario(): Promise<Record<string, unknown>> {
 				await firstSettle;
 				const authority = await finishAuthorityClose(harness);
 				loopback.stop();
-				return { late, settledCount: settled.length, authorityOk: authority.ok };
+				return {
+					late,
+					settledCount: settled.length,
+					authorityRejected: !authority.ok,
+					authorityPreservesCause: !authority.ok && errorIncludesCause(authority.error, sendFailure),
+				};
 			});
 		}
 		case "gate-late-allow-settle-reject": {
@@ -389,6 +445,7 @@ async function runScenario(): Promise<Record<string, unknown>> {
 					settledCount: settled.length,
 					rejectMessage: reject.message,
 					authorityRejected: !authority.ok,
+					authorityPreservesCause: !authority.ok && errorIncludesCause(authority.error, reject),
 				};
 			});
 		}
@@ -404,14 +461,23 @@ async function runScenario(): Promise<Record<string, unknown>> {
 			const loopback = await startLoopbackProvider(scripted(openAiText("abort")));
 			const model = loopbackModel("openai-completions", loopback.origin);
 			return withManagedHarness(async harness => {
+				const abortReason = new Error("abort-before-gate");
 				const send = gatedSendLoopback(loopback.origin, model, controller.signal);
-				controller.abort(new Error("abort-before-gate"));
+				controller.abort(abortReason);
 				decision.resolve({ type: "allow", lease });
-				await expectRejects(send);
+				let sendFailure: unknown;
+				await send.catch((error: unknown) => {
+					sendFailure = error;
+				});
+				if (sendFailure !== abortReason) throw new Error("expected the gated send to reject with the abort reason");
 				await Bun.sleep(30);
 				const authority = await finishAuthorityClose(harness);
 				loopback.stop();
-				return { settled: settled[0], authorityOk: authority.ok };
+				return {
+					settled: settled[0],
+					authorityRejected: !authority.ok,
+					authorityPreservesCause: !authority.ok && errorIncludesCause(authority.error, abortReason),
+				};
 			});
 		}
 		case "pass-body-hold-until-read": {
@@ -423,8 +489,6 @@ async function runScenario(): Promise<Record<string, unknown>> {
 			const model = loopbackModel("openai-completions", loopback.origin);
 			const url = `${loopback.origin}/v1/chat/completions`;
 			return withManagedHarness(async harness => {
-				// Do not await gatedSend before authority race: loopback holds the wire until
-				// `hold` is released from outside the send await (same pattern as a01 debug body).
 				const sendPromise = gatedSend({
 					model,
 					kind: "chat",
@@ -437,20 +501,40 @@ async function runScenario(): Promise<Record<string, unknown>> {
 							body: JSON.stringify(helloContext()),
 						}),
 				});
+				// The loopback delivers headers and the first chunk but defers only the
+				// body's EOF, so the response reaches this consumer while the request
+				// work still owns the settlement.
+				let reading: Promise<string> | undefined;
 				try {
 					await loopback.arrived(1);
-					const { authorityRace, bindingState } = await raceAuthorityClose(harness, 80);
-					hold.resolve();
 					const response = await sendPromise;
-					await response.text();
+					reading = response.text();
+					const { authorityRace, bindingState, ownerExclusiveDuringHold } = await raceAuthorityClose(
+						harness,
+						80,
+					);
+					hold.resolve();
+					const body = await reading;
+					reading = undefined;
 					const authority = await finishAuthorityClose(harness);
 					return {
 						blockedBeforeRead: authorityRace,
 						bindingActiveDuringRace: bindingState === "active",
+						ownerExclusiveDuringHold,
+						bodyText: body,
 						authorityOk: authority.ok,
 					};
 				} finally {
 					hold.resolve();
+					// On failure the deferred read must still be joined so the fixture
+					// cannot deadlock or leak an unhandled rejection of its own.
+					if (reading !== undefined) await reading.catch(() => undefined);
+					await sendPromise.then(
+						async response => {
+							await response.body?.cancel().catch(() => undefined);
+						},
+						() => undefined,
+					);
 					loopback.stop();
 				}
 			});
@@ -483,37 +567,34 @@ async function runScenario(): Promise<Record<string, unknown>> {
 			registerModelRequestGate("outer-lifetime", { authorize: async () => ({ type: "pass" }) }, undefined);
 			const loopback = await startLoopbackProvider(scripted(openAiText("ok")));
 			const model = loopbackModel("openai-completions", loopback.origin);
+			// The one-shot release fault arrives through this child's preload
+			// (outer-lifetime-release-fault-preload.ts): the real builtin dispatch
+			// runs, the real root release runs, and only then does the release throw
+			// once — the exact branch where sendRequired must still join the started
+			// response and its late body cleanup on the original work.
 			return withManagedHarness(async harness => {
-				let observed = 0;
-				const original = modelRequestBuiltinFetch;
-				const throwingFetch: typeof modelRequestBuiltinFetch = async (input, init) => {
-					observed++;
-					await original(input, init);
-					throw new Error("sync throw after dispatch started");
-				};
+				const controller = new AbortController();
 				let failure: unknown;
+				const send = gatedSendLoopback(loopback.origin, model, controller.signal);
 				try {
-					await gatedSend({
-						model,
-						kind: "chat",
-						input: `${loopback.origin}/v1/chat/completions`,
-						init: { method: "POST", body: JSON.stringify(helloContext()) },
-						transport: throwingFetch,
-						send: () =>
-							throwingFetch(`${loopback.origin}/v1/chat/completions`, {
-								method: "POST",
-								body: JSON.stringify(helloContext()),
-							}),
-					});
+					await loopback.arrived(1);
+					const response = await send;
+					// The send is expected to reject; consuming here would be a bug.
+					await response.text();
+					failure = new Error("dispatch-sync-throw send unexpectedly succeeded");
 				} catch (error) {
 					failure = error;
 				}
+				// Nobody consumes the late response body; abort the request signal so
+				// the wrapped body's settlement can finish instead of deadlocking.
+				controller.abort(new Error("dispatch-sync-throw late body released"));
 				const authority = await finishAuthorityClose(harness);
 				loopback.stop();
 				return {
-					observed,
+					observed: loopback.requests.length,
 					failure: failure instanceof Error ? failure.message : String(failure),
-					authorityOk: authority.ok,
+					authorityRejected: !authority.ok,
+					authorityPreservesCause: !authority.ok && errorIncludesCause(authority.error, failure),
 				};
 			});
 		}
@@ -570,7 +651,8 @@ async function runScenario(): Promise<Record<string, unknown>> {
 				loopback.stop();
 				return {
 					message: failure instanceof Error ? failure.message : String(failure),
-					authorityOk: authority.ok,
+					authorityRejected: !authority.ok,
+					authorityPreservesCause: !authority.ok && failure !== undefined && errorIncludesCause(authority.error, failure),
 				};
 			});
 		}
@@ -583,15 +665,20 @@ async function runScenario(): Promise<Record<string, unknown>> {
 			const loopback = await startLoopbackProvider(scripted(openAiText("deny")));
 			const model = loopbackModel("openai-completions", loopback.origin);
 			return withManagedHarness(async harness => {
-				let code = "";
+				let sendFailure: unknown;
 				try {
 					await gatedSendLoopback(loopback.origin, model);
 				} catch (error) {
-					code = error instanceof Error ? error.message : String(error);
+					sendFailure = error;
 				}
 				const authority = await finishAuthorityClose(harness);
 				loopback.stop();
-				return { denied: code.includes("over budget"), authorityOk: authority.ok };
+				return {
+					denied: sendFailure !== undefined && String(sendFailure).includes("over budget"),
+					authorityRejected: !authority.ok,
+					authorityPreservesCause:
+						!authority.ok && sendFailure !== undefined && errorIncludesCause(authority.error, sendFailure),
+				};
 			});
 		}
 		case "a01-tf-debug-holds-wire": {
@@ -629,6 +716,35 @@ async function runScenario(): Promise<Record<string, unknown>> {
 					authorityRace,
 					bindingActiveDuringRace: bindingState === "active",
 					authorityOk: authority.ok,
+				};
+			});
+		}
+		case "a01-tf-debug-reject": {
+			Bun.env.PI_REQ_DEBUG = "1";
+			registerModelRequestGate("outer-lifetime", { authorize: async () => ({ type: "pass" }) }, undefined);
+			const loopback = await startLoopbackProvider(scripted(openAiText("dbg-fail")));
+			const model = loopbackModel("openai-completions", loopback.origin);
+			const url = `${loopback.origin}/v1/chat/completions`;
+			return withManagedHarness(async harness => {
+				let failure: unknown;
+				const tf = transportFetch(model, modelRequestBuiltinFetch);
+				try {
+					// The child runs with a read-only cwd, so creating the request
+					// debug file (rr-session-N.json) fails for real: an unrecovered
+					// debug preparation failure that must reach the work's outcome.
+					await tf(url, { method: "POST", body: JSON.stringify(helloContext()) });
+					throw new Error("debug session unexpectedly created under a read-only cwd");
+				} catch (error) {
+					failure = error;
+				}
+				const authority = await finishAuthorityClose(harness);
+				loopback.stop();
+				delete Bun.env.PI_REQ_DEBUG;
+				return {
+					debugFailed: failure !== undefined && !(failure instanceof Error && failure.message.startsWith("debug session unexpectedly")),
+					wireAttempts: loopback.requests.length,
+					authorityRejected: !authority.ok,
+					authorityPreservesCause: !authority.ok && failure !== undefined && errorIncludesCause(authority.error, failure),
 				};
 			});
 		}
@@ -861,7 +977,7 @@ async function runScenario(): Promise<Record<string, unknown>> {
 				};
 			});
 		}
-		case "a02-inflight-waiter-reject": {
+		case "a02-inflight-waiter-abort": {
 			registerMockApi();
 			const root = await fsp.mkdtemp(path.join(os.tmpdir(), "omp-ol-inflight-"));
 			__providerInFlightForTesting.setRoot(root);
@@ -881,17 +997,16 @@ async function runScenario(): Promise<Record<string, unknown>> {
 				await firstStarted.promise;
 				const waiting = nextLimiterWait();
 				const controller = new AbortController();
+				const abortReason = new Error("waiter aborted");
 				const second = streamSimple(mock.model, streamContext(), {
 					maxInFlightRequests: { tests: 1 },
 					signal: controller.signal,
 				});
 				const secondResult = second.result();
 				await waiting;
-				const { authorityRace, bindingState, osLeaseCount } = await raceAuthorityClose(harness, 80, {
-					name: "tests",
-					root,
-				});
-				controller.abort(new Error("waiter aborted"));
+				const { authorityRace, bindingState, osLeaseCount, ownerExclusiveDuringHold } =
+					await raceAuthorityClose(harness, 80, { name: "tests", root });
+				controller.abort(abortReason);
 				let waiterFailed = false;
 				try {
 					await secondResult;
@@ -909,7 +1024,53 @@ async function runScenario(): Promise<Record<string, unknown>> {
 					authorityRace,
 					bindingActiveDuringRace: bindingState === "active",
 					osLeaseCountDuringRace: osLeaseCount,
-					authorityOk: authority.ok,
+					ownerExclusiveDuringHold,
+					authorityRejected: !authority.ok,
+					authorityPreservesCause: !authority.ok && errorIncludesCause(authority.error, abortReason),
+				};
+			});
+		}
+		case "a02-inflight-waiter-reject": {
+			registerMockApi();
+			const root = await fsp.mkdtemp(path.join(os.tmpdir(), "omp-ol-inflight-"));
+			__providerInFlightForTesting.setRoot(root);
+			const firstStarted = Promise.withResolvers<void>();
+			const releaseFirst = Promise.withResolvers<void>();
+			// The notification itself fails: the injected wakeup writer throws, so
+			// no `.wakeup` file is written and the waiting request can only proceed
+			// on its fallback poll. The unrecovered failure must still be accounted.
+			const notificationFailure = Object.assign(new Error("provider in-flight waiter wakeup failed"), {
+				code: "EIO",
+			});
+			__providerInFlightForTesting.setWakeupWriter(async () => {
+				throw notificationFailure;
+			});
+			const mock = createMockModel({
+				provider: "tests",
+				handler: async () => {
+					firstStarted.resolve();
+					await releaseFirst.promise;
+					return { content: ["first"] };
+				},
+			});
+			return withManagedHarness(async harness => {
+				const first = streamSimple(mock.model, streamContext(), { maxInFlightRequests: { tests: 1 } });
+				const firstResult = first.result();
+				await firstStarted.promise;
+				const second = streamSimple(mock.model, streamContext(), { maxInFlightRequests: { tests: 1 } });
+				const secondResult = second.result();
+				releaseFirst.resolve();
+				// Waiters poll on a fallback timer, so both requests complete even
+				// though every wakeup notification failed.
+				await Promise.all([firstResult, secondResult]);
+				const authority = await finishAuthorityClose(harness);
+				await fsp.rm(root, { recursive: true, force: true });
+				__providerInFlightForTesting.setRoot(undefined);
+				__providerInFlightForTesting.setWakeupWriter(undefined);
+				return {
+					requestsCompleted: true,
+					authorityRejected: !authority.ok,
+					authorityPreservesCause: !authority.ok && errorIncludesCause(authority.error, notificationFailure),
 				};
 			});
 		}
@@ -1096,7 +1257,7 @@ async function runScenario(): Promise<Record<string, unknown>> {
 			const model = loopbackModel("openai-completions", loopback.origin);
 			const url = `${loopback.origin}/v1/chat/completions`;
 			return withManagedHarness(async harness => {
-				let failed = false;
+				let sendFailure: unknown;
 				try {
 					await gatedSend({
 						model,
@@ -1111,12 +1272,18 @@ async function runScenario(): Promise<Record<string, unknown>> {
 								body: JSON.stringify(helloContext()),
 							}),
 					});
-				} catch {
-					failed = true;
+				} catch (error) {
+					sendFailure = error;
 				}
 				const authority = await finishAuthorityClose(harness);
 				loopback.stop();
-				return { failed, authorityOk: authority.ok, wireAttempts: loopback.requests.length };
+				return {
+					failed: sendFailure !== undefined,
+					wireAttempts: loopback.requests.length,
+					authorityRejected: !authority.ok,
+					authorityPreservesCause:
+						!authority.ok && sendFailure !== undefined && errorIncludesCause(authority.error, sendFailure),
+				};
 			});
 		}
 		case "gate-authorize-throws-outer-end": {
@@ -1132,15 +1299,20 @@ async function runScenario(): Promise<Record<string, unknown>> {
 			const loopback = await startLoopbackProvider(scripted(openAiText("throw")));
 			const model = loopbackModel("openai-completions", loopback.origin);
 			return withManagedHarness(async harness => {
-				let sendFailed = false;
+				let sendFailure: unknown;
 				try {
 					await gatedSendLoopback(loopback.origin, model);
-				} catch {
-					sendFailed = true;
+				} catch (error) {
+					sendFailure = error;
 				}
 				const authority = await finishAuthorityClose(harness);
 				loopback.stop();
-				return { sendFailed, authorityOk: authority.ok };
+				return {
+					sendFailed: sendFailure !== undefined,
+					authorityRejected: !authority.ok,
+					authorityPreservesCause:
+						!authority.ok && sendFailure !== undefined && errorIncludesCause(authority.error, sendFailure),
+				};
 			});
 		}
 		case "guarded-transfer-cleanup-on-settle-reject": {
