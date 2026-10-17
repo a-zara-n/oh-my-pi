@@ -38,7 +38,7 @@ import { assertModelRequestBuiltinFetch, modelRequestBuiltinFetch } from "./mode
 import {
 	beginManagedExecutionOuterWork,
 	type ManagedOuterWorkScope,
-} from "../model-request-journal-outer-work";
+} from "../model-request/journal-outer-work";
 
 /**
  * Ordinary untracked wrapping hint and auxiliary transport mapping. Public

@@ -1,6 +1,7 @@
 /**
- * @internal DES-004 §6.7.2i — managed execution outer work only. Not under `./utils/*`
- * exports; not re-exported from package entrypoints.
+ * @internal DES-004 §6.7.2i — managed execution outer work only.
+ * Lives under `src/model-request/` (not `src/*.ts` top-level) so `package.json` `"./*"`
+ * does not publish this module as a subpath.
  */
 import {
 	assertJournalExecutionReady,
@@ -10,13 +11,14 @@ import {
 	type JournalWorkOutcome,
 	type ModelRequestExecution,
 } from "@oh-my-pi/pi-utils/model-request-journal-composition";
-import { getModelRequestRuntime } from "./model-request-runtime";
+import { getModelRequestRuntime } from "../model-request-runtime";
 
 export interface ManagedOuterWorkScope {
 	readonly active: boolean;
 	track<T>(promise: Promise<T>): Promise<T>;
 	noteFailure(error: unknown): void;
 	transfer(): void;
+	abortTransfer(): void;
 	end(): Promise<void>;
 	endTransferred(): Promise<void>;
 }
@@ -32,6 +34,7 @@ const inactiveOuterWork: ManagedOuterWorkScope = {
 	track: promise => promise,
 	noteFailure() {},
 	transfer() {},
+	abortTransfer() {},
 	end: async () => {},
 	endTransferred: async () => {},
 };
@@ -52,23 +55,25 @@ class ActiveOuterWorkScope implements ManagedOuterWorkScope {
 		this.#failures.push(error);
 	}
 
+	/** Join settlement without treating rejection as a journal failure (DES-004 §6.7.2i recovered retry). */
 	track<T>(promise: Promise<T>): Promise<T> {
-		const tracked = promise.catch(error => {
-			this.#failures.push(error);
-			throw error;
-		});
-		const join = tracked.then(
+		const join = promise.then(
 			() => undefined as unknown,
 			() => undefined as unknown,
 		);
 		this.#joined.add(join);
 		void join.finally(() => this.#joined.delete(join));
-		return tracked;
+		return promise;
 	}
 
 	transfer(): void {
 		if (this.#ended || this.#transferred) return;
 		this.#transferred = true;
+	}
+
+	abortTransfer(): void {
+		if (this.#ended) return;
+		if (this.#transferred) this.#transferred = false;
 	}
 
 	async end(): Promise<void> {

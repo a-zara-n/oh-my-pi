@@ -54,7 +54,7 @@ import * as AIError from "../error";
 import type { Model, StreamOptions } from "../types";
 import type { Api, AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import { AssistantMessageEventStream } from "./event-stream";
-import { beginManagedOuterWorkFromCurrent } from "../model-request-journal-outer-work";
+import { beginManagedOuterWorkFromCurrent } from "../model-request/journal-outer-work";
 
 /** Stable lead phrase of the guard's error message; exported for tests. The
  *  message also carries "stream stall" so the session + transport retry
