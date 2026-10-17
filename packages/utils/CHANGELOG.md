@@ -2,10 +2,6 @@
 
 ## [Unreleased]
 
-### Fixed
-
-- `closeJournalSession` drains registered journal outer work (rejected outcomes fail logical close) before principal flush, so authority close observes unrecovered caller raw failures.
-
 ### Added
 
 - Outer work lifetime on `@oh-my-pi/pi-utils/model-request-journal-composition`: `JournalWorkOutcome`,
