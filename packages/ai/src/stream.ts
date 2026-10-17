@@ -683,7 +683,11 @@ async function acquireProviderInFlightSlot(
 			loggedWait = true;
 			logger.debug("Provider in-flight limit blocked request", { provider, limit });
 		}
-		await waitForProviderInFlightSignal(provider, signal);
+		if (slotWork !== undefined) {
+			await joinJournalOuterWork(slotWork, waitForProviderInFlightSignal(provider, signal));
+		} else {
+			await waitForProviderInFlightSignal(provider, signal);
+		}
 	}
 }
 

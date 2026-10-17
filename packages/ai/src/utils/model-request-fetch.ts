@@ -636,6 +636,7 @@ export async function gatedSend(args: GatedSendArgs): Promise<Response> {
 		bodyLifetime.transferred = true;
 		return observed.response;
 	} catch (error) {
+		work?.noteFailure(error);
 		throw error;
 	} finally {
 		await endWorkUnlessBodyTransferred();
