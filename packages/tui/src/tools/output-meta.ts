@@ -1,4 +1,11 @@
-import type { DiagnosticMeta, LimitsMeta, OutputMeta, SourceMeta, TruncationMeta } from "@oh-my-pi/pi-utils/agent-messages";
+import type {
+	DiagnosticMeta,
+	LimitsMeta,
+	OutputArtifactError,
+	OutputMeta,
+	SourceMeta,
+	TruncationMeta,
+} from "@oh-my-pi/pi-utils/agent-messages";
 export type { DiagnosticMeta, LimitsMeta, OutputMeta, SourceMeta, TruncationMeta } from "@oh-my-pi/pi-utils/agent-messages";
 import type { Theme } from "../theme/theme";
 import { formatBytes, wrapBrackets } from "../render/render-utils";
