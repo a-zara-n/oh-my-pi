@@ -278,7 +278,7 @@ async function installPrimaryState(
 	// after those awaits still needs a handle acquired before them.
 	const bootstrapWork = beginDetachedAgentSessionOuterWork(session);
 	try {
-		return await installConfiguredPrimaryState(session, config, banksSet, bootstrapWork);
+		return await installConfiguredPrimaryState(session, sessionId, config, banksSet, bootstrapWork);
 	} catch (error) {
 		// The pre-begun handle would otherwise never settle, leaving the binding's
 		// outer-work drain waiting forever; the install failure still propagates.
@@ -289,7 +289,8 @@ async function installPrimaryState(
 
 async function installConfiguredPrimaryState(
 	session: AgentSession,
-	config: HindsightConfig,
+	sessionId: string,
+	config: HindsightConfig & { hindsightApiUrl: string },
 	banksSet: Set<string>,
 	bootstrapWork: AgentSessionDetachedOuterWork,
 ): Promise<HindsightSessionState | undefined> {

@@ -25,6 +25,7 @@
 
 ### Fixed
 
+- Detached journal producers now propagate a refused work registration before starting instead of falling back to untracked execution. Extension registration drains preserve every listener failure, including failures arriving after the handler timeout.
 - Fixed managed model-request context probes reporting expected failed-session cleanup as an uncaught exception and starting genuine-authority checks without the pinned SQLite library.
 - Aligned session-tree registry types and hid registry bookkeeping in every selector mode; kept File-principal snapshot assertions readonly-compatible and adapted checkpoint regression tools through schema-validated execution wrappers. Verification of this integration correction is pending.
 - Fixed a managed subagent's saved warm reviver inheriting a waking sibling's execution context. Revival now rebinds the genuine saved spawning execution through the existing runtime API before parent checks and SDK reconstruction; exact-family rejection, revoked-parent checks, outside-context revival and ordinary untracked behavior remain intact.

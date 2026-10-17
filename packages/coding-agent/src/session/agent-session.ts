@@ -367,7 +367,6 @@ import {
 import {
 	bindAgentSessionOuterWorkBridge,
 	type AgentSessionDetachedOuterWork,
-	observeDetachedOuterWork,
 } from "./internal/agent-session-outer-work";
 import { journalOuterWorkFromExecution, type JournalOuterWorkScope } from "./internal/outer-work";
 import {
@@ -3054,18 +3053,12 @@ export class AgentSession implements SettingsScope {
 	 * observation alone.
 	 */
 	#beginDetachedJournalOuterWork(): AgentSessionDetachedOuterWork {
-		try {
-			const scope = journalOuterWorkFromExecution(this.#modelRequestExecution);
-			return {
-				settle: (promise, onError) => {
-					void scope.run(() => promise).catch(error => onError(error));
-				},
-			};
-		} catch {
-			// Begin refused (closing/faulted family takes no new work): settling then
-			// observes the raw promise directly so the failure still surfaces to the caller.
-			return { settle: observeDetachedOuterWork };
-		}
+		const scope = journalOuterWorkFromExecution(this.#modelRequestExecution);
+		return {
+			settle: (promise, onError) => {
+				void scope.run(() => promise).catch(error => onError(error));
+			},
+		};
 	}
 
 

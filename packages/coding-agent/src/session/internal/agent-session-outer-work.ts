@@ -21,7 +21,7 @@ export interface AgentSessionDetachedOuterWork {
 	settle(promise: Promise<unknown>, onError: (error: unknown) => void): void;
 }
 
-/** Observe a raw future directly when no journal work handle could be acquired. */
+/** Observe a raw future for a session without a journal bridge. */
 export function observeDetachedOuterWork(promise: Promise<unknown>, onError: (error: unknown) => void): void {
 	void promise.then(
 		() => {},
@@ -64,9 +64,9 @@ export function noteAgentSessionOuterWorkFailure(session: AgentSession, error: u
 /**
  * Begin a self-contained journal work handle for a producer the consumer will not
  * await, so the caller keeps its bounded return. Acquire this before starting the
- * producer: a binding that moved to closing in between refuses new begins, and the
- * fallback then only observes the raw future. `settle` holds the raw promise on the
- * open handle for its full lifetime, with `onError` observing the accounted
+ * producer: a binding that moved to closing in between refuses new begins.
+ * Sessions without a journal bridge observe the future directly. `settle` holds
+ * the raw promise on the open handle for its full lifetime, with `onError` observing the accounted
  * rejection (journal `end` happens first), so a void call site never turns it into
  * an unhandled fatal.
  */

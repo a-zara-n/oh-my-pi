@@ -1201,17 +1201,18 @@ export class ExtensionRunner {
 	}
 
 	async #flushToolRegistrations(pendingRegistrations: Set<Promise<void>>): Promise<void> {
-		let firstFailure: PromiseRejectedResult | undefined;
+		const failures: unknown[] = [];
 		while (pendingRegistrations.size > 0) {
 			const pending = Array.from(pendingRegistrations);
 			const settled = await Promise.allSettled(pending);
 			for (let index = 0; index < settled.length; index += 1) {
 				pendingRegistrations.delete(pending[index]);
 				const result = settled[index];
-				if (!firstFailure && result?.status === "rejected") firstFailure = result;
+				if (result?.status === "rejected") failures.push(result.reason);
 			}
 		}
-		if (firstFailure) throw firstFailure.reason;
+		if (failures.length === 1) throw failures[0];
+		if (failures.length > 1) throw new AggregateError(failures, "Tool registrations failed");
 	}
 
 	/** Composer shapes registered during extension load, with later extensions winning id collisions. */
