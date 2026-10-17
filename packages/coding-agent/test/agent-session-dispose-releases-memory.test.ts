@@ -13,9 +13,17 @@ import { ExtensionRunner } from "@oh-my-pi/pi-coding-agent/extensibility/extensi
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import type { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { FileSessionStorage } from "@oh-my-pi/pi-utils/model-request-journal-composition";
+import {
+	FileSessionStorage,
+	type SessionStorage,
+	type SessionStorageStat,
+	type SessionStorageWriteOptions,
+	type SessionStorageWriter,
+	type WriteTextAtomicOptions,
+} from "@oh-my-pi/pi-utils/model-request-journal-composition";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import type { SessionTitleUpdate } from "@oh-my-pi/pi-utils/session-title-slot";
 import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
 
 // Regression: a keep-alive subagent's AgentSession is disposed at park() but
@@ -497,17 +505,102 @@ describe("AgentSession dispose releases retained memory", () => {
 		const reachedAtomic = Promise.withResolvers<void>();
 		let armed = false;
 		let atomicWrites = 0;
-		class FailingAtomicStorage extends FileSessionStorage {
-			override async writeTextAtomic(
+		// A FileSessionStorage subclass is replaced wholesale: the SessionManager
+		// constructor swaps any `instanceof FileSessionStorage` backend for the
+		// journal principal cell, whose own storage performs every write, so a
+		// subclass override here would never run and the batch would park
+		// forever. A plain SessionStorage wrapper keeps this manager on the
+		// fixture, delegating every operation to a real FileSessionStorage and
+		// intercepting only the atomic text publish. writeLinesAtomic stays
+		// deliberately absent so the manager falls back to writeTextAtomic.
+		class FailingAtomicStorage implements SessionStorage {
+			readonly #inner = new FileSessionStorage();
+
+			get modelRequestJournal() {
+				return this.#inner.modelRequestJournal;
+			}
+
+			async writeTextAtomic(
 				filePath: string,
 				body: string,
-				options?: { commitGuard?: () => boolean },
+				options?: WriteTextAtomicOptions,
 			): Promise<void> {
-				if (!armed) return super.writeTextAtomic(filePath, body, options);
+				if (!armed) return this.#inner.writeTextAtomic(filePath, body, options);
 				atomicWrites++;
 				reachedAtomic.resolve();
 				await gate.promise;
 				throw new Error("injected atomic write failure");
+			}
+
+			// Delegate the remaining SessionStorage surface to the real file backend.
+			ensureDirSync(dir: string): void {
+				this.#inner.ensureDirSync(dir);
+			}
+			existsSync(filePath: string): boolean {
+				return this.#inner.existsSync(filePath);
+			}
+			writeTextSync(filePath: string, content: string, options?: SessionStorageWriteOptions): void {
+				this.#inner.writeTextSync(filePath, content, options);
+			}
+			writeLinesSync(filePath: string, lines: readonly string[], options?: SessionStorageWriteOptions): void {
+				this.#inner.writeLinesSync(filePath, lines, options);
+			}
+			updateSessionTitle(filePath: string, update: SessionTitleUpdate): Promise<void> {
+				return this.#inner.updateSessionTitle(filePath, update);
+			}
+			statSync(filePath: string): SessionStorageStat {
+				return this.#inner.statSync(filePath);
+			}
+			listFilesSync(dir: string, pattern: string): string[] {
+				return this.#inner.listFilesSync(dir, pattern);
+			}
+			exists(filePath: string): Promise<boolean> {
+				return this.#inner.exists(filePath);
+			}
+			readText(filePath: string): Promise<string> {
+				return this.#inner.readText(filePath);
+			}
+			readTextSync(filePath: string): string {
+				return this.#inner.readTextSync(filePath);
+			}
+			readTextSlices(filePath: string, prefixBytes: number, suffixBytes: number): Promise<[string, string]> {
+				return this.#inner.readTextSlices(filePath, prefixBytes, suffixBytes);
+			}
+			hasAssistantTurn(filePath: string): Promise<boolean> {
+				return this.#inner.hasAssistantTurn(filePath);
+			}
+			writeText(filePath: string, content: string): Promise<void> {
+				return this.#inner.writeText(filePath, content);
+			}
+			rename(filePath: string, nextPath: string): Promise<void> {
+				return this.#inner.rename(filePath, nextPath);
+			}
+			unlink(filePath: string): Promise<void> {
+				return this.#inner.unlink(filePath);
+			}
+			deleteSessionWithArtifacts(sessionPath: string): Promise<void> {
+				return this.#inner.deleteSessionWithArtifacts(sessionPath);
+			}
+			deleteSessionWithArtifactsIf(
+				sessionPath: string,
+				shouldDelete: (content: string) => boolean,
+			): Promise<boolean> {
+				return this.#inner.deleteSessionWithArtifactsIf(sessionPath, shouldDelete);
+			}
+			openWriter(
+				filePath: string,
+				options?: { flags?: "a" | "w"; onError?: (err: Error) => void },
+			): SessionStorageWriter {
+				return this.#inner.openWriter(filePath, options);
+			}
+			withSessionFileLockSync<T>(sessionPath: string, operation: () => T): T {
+				return this.#inner.withSessionFileLockSync(sessionPath, operation);
+			}
+			claimSession(sessionId: string, sessionPath: string): (() => void) | null {
+				return this.#inner.claimSession(sessionId, sessionPath);
+			}
+			drain(): Promise<void> {
+				return this.#inner.drain();
 			}
 		}
 		const sessionManager = SessionManager.create(tempDir.path(), tempDir.path(), new FailingAtomicStorage());
