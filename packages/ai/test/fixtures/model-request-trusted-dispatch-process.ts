@@ -41,6 +41,7 @@ const scenarios = [
 	"same-stack-release", "dispatch-before-revoke",
 	"gate-await-revoke", "begin-epoch-change", "begin-database-close",
 	"prepare-await-revoke",
+	"authorize-accessor",
 ] as const;
 if (!scenarios.some(value => value === scenario)) throw new Error("unknown trusted dispatch scenario");
 
@@ -292,6 +293,7 @@ async function dispatchRegression(context: ReadyContext): Promise<object> {
 	let senderCalls = 0;
 	let fakeLeaseCalls = 0;
 	let forgedAuthorizeCalls = 0;
+	let authorizePropertyReads = 0;
 	let responseResolved = false;
 	let revokePromise: Promise<void> | undefined;
 	const rootProbe = Promise.withResolvers<{ acquired: boolean; responsePending: boolean; error?: string }>();
@@ -323,7 +325,7 @@ async function dispatchRegression(context: ReadyContext): Promise<object> {
 		registerModelRequestGate("native-trusted-dispatch-regression", {
 			async authorize() {
 				gateCalls++;
-				if (scenario === "deny" || scenario === "fake-supplied" || scenario === "forged-authorize") {
+				if (scenario === "deny" || scenario === "fake-supplied" || scenario === "forged-authorize" || scenario === "authorize-accessor") {
 					return { type: "deny", code: "fixture-deny", message: "real gate denied" };
 				}
 				if (scenario === "gate-await-revoke") {
@@ -371,6 +373,14 @@ async function dispatchRegression(context: ReadyContext): Promise<object> {
 				send: async () => { senderCalls++; return modelRequestBuiltinFetch(`${server.origin}/fake`, { signal }); },
 			};
 			invoke = () => gatedSend(args);
+		} else if (scenario === "authorize-accessor") {
+			// Go directly through the actual closed dispatcher, so its runtime
+			// shape read, reference check and old mutable call are reads 1/2/3.
+			invoke = () => gatedSend({
+				model, kind: "chat", input: `${server.origin}/authorize-accessor`, init: { signal },
+				transport: modelRequestBuiltinFetch,
+				send: async () => { senderCalls++; return modelRequestBuiltinFetch(`${server.origin}/authorize-accessor`, { signal }); },
+			});
 		} else {
 			invoke = () => transportFetch(model, undefined)(`${server.origin}/builtin`, { method: "POST", body: "real-request", signal });
 		}
@@ -379,6 +389,21 @@ async function dispatchRegression(context: ReadyContext): Promise<object> {
 				forgedAuthorizeCalls++;
 				return { attemptId: randomUUID(), lease: undefined };
 			};
+		}
+		if (scenario === "authorize-accessor") {
+			Object.defineProperty(runtime, "authorize", {
+				configurable: true,
+				get() {
+					authorizePropertyReads++;
+					if (authorizePropertyReads !== 3) return originalAuthorize;
+					return async () => {
+						forgedAuthorizeCalls++;
+						// Restore before private permit registration/revalidation.
+						Object.defineProperty(runtime, "authorize", { configurable: true, writable: true, value: originalAuthorize });
+						return { attemptId: randomUUID(), lease: undefined };
+					};
+				},
+			});
 		}
 		// Attach both continuations immediately, including on negative scenarios.
 		const sending = (async () => {
@@ -415,12 +440,12 @@ async function dispatchRegression(context: ReadyContext): Promise<object> {
 		return {
 			rejected, error, body, received: server.requests.length,
 			gateCalls, beginCalls, responseHeads, chunks, senderCalls, fakeLeaseCalls,
-			forgedAuthorizeCalls, outcomes, probe, inflight, rootReacquired: true,
+			forgedAuthorizeCalls, authorizePropertyReads, outcomes, probe, inflight, rootReacquired: true,
 			verifiedReacquireRejected,
 			journalStateAfter: context.execution.journalState,
 		};
 	} finally {
-		runtime.authorize = originalAuthorize;
+		Object.defineProperty(runtime, "authorize", { configurable: true, writable: true, value: originalAuthorize });
 		controller.abort();
 		hold.resolve();
 		server.stop();

@@ -11,7 +11,7 @@ type Scenario =
 	| "custom-sender" | "fake-supplied" | "forged-authorize" | "leaf-replay"
 	| "same-stack-release" | "dispatch-before-revoke"
 	| "gate-await-revoke" | "begin-epoch-change" | "begin-database-close"
-	| "prepare-await-revoke";
+	| "prepare-await-revoke" | "authorize-accessor";
 
 async function probe(scenario: Scenario): Promise<Record<string, unknown>> {
 	const fixture = path.join(import.meta.dir, "fixtures/model-request-trusted-dispatch-process.ts");
@@ -133,6 +133,14 @@ describe("D37 canonical required-ready builtin dispatch (native authority)", () 
 		expect(await probe("forged-authorize")).toMatchObject({
 			rejected: true, received: 0, forgedAuthorizeCalls: 0,
 			gateCalls: 0, beginCalls: 0, senderCalls: 0,
+			outcomes: [], rootReacquired: true,
+		});
+	}, 30_000);
+
+	test.skipIf(!nativePreloaded)("an authorizer accessor cannot substitute a restoring fake between reference check and direct authorization", async () => {
+		expect(await probe("authorize-accessor")).toMatchObject({
+			rejected: true, received: 0, forgedAuthorizeCalls: 0,
+			gateCalls: 1, beginCalls: 0, senderCalls: 0,
 			outcomes: [], rootReacquired: true,
 		});
 	}, 30_000);
