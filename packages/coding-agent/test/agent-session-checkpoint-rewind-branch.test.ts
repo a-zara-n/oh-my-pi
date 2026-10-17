@@ -247,7 +247,6 @@ describe("AgentSession checkpoint rewind branch context", () => {
 	it.each([null, "missing-checkpoint-entry"])(
 		"does not discard file-backed history when the checkpoint boundary is %s",
 		async checkpointEntryId => {
-			let session: AgentSession;
 			const toolSession = createToolSession({
 				getCheckpointState: () => session.getCheckpointState(),
 			});
@@ -270,7 +269,7 @@ describe("AgentSession checkpoint rewind branch context", () => {
 				[rewindAgentTool(toolSession)],
 				{ fileBacked: true },
 			);
-			session = harness.session;
+			const session: AgentSession = harness.session;
 			await session.prompt("Prior user conversation");
 			const priorIds = session.sessionManager.getBranch().map(entry => entry.id);
 			session.setCheckpointState({
@@ -295,7 +294,6 @@ describe("AgentSession checkpoint rewind branch context", () => {
 
 	it("retains the persisted checkpoint and prior conversation when file storage clones tool results", async () => {
 		const report = "findings retained after exploration";
-		let session: AgentSession | undefined;
 		const getSession = (): AgentSession => {
 			if (!session) throw new Error("Expected the checkpoint harness to be initialized");
 			return session;
@@ -342,7 +340,7 @@ describe("AgentSession checkpoint rewind branch context", () => {
 			[checkpointAgentTool(toolSession), rewindAgentTool(toolSession)],
 			{ fileBacked: true },
 		);
-		session = harness.session;
+		const session: AgentSession | undefined = harness.session;
 		await session.prompt("Prior user conversation");
 		const priorIds = session.sessionManager
 			.getBranch()

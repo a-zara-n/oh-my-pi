@@ -230,7 +230,8 @@ function observeResponse(lease: ModelRequestLease, response: Response, signal: A
 		lease.observeResponse({ status: response.status, headers: responseHeaders(response.headers) }),
 	);
 	let settled = false;
-	let onAbort: (() => void) | undefined;
+	const onAbort: (() => void) | undefined = () =>
+		finish({ type: "response-failed", status: response.status, aborted: true, transportClosed: true });
 	const finish = (outcome: ModelRequestOutcome): void => {
 		if (settled) return;
 		settled = true;
@@ -242,8 +243,6 @@ function observeResponse(lease: ModelRequestLease, response: Response, signal: A
 		finish({ type: "response-ended", status: response.status });
 		return response;
 	}
-	onAbort = () =>
-		finish({ type: "response-failed", status: response.status, aborted: true, transportClosed: true });
 	if (signal?.aborted) onAbort();
 	else signal?.addEventListener("abort", onAbort, { once: true });
 
