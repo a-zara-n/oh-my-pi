@@ -27,6 +27,7 @@ import readPathTemplate from "../prompts/memories/read-path.md" with { type: "te
 import stageOneInputTemplate from "../prompts/memories/stage_one_input.md" with { type: "text" };
 import stageOneSystemTemplate from "../prompts/memories/stage_one_system.md" with { type: "text" };
 import type { AgentSession } from "../session/agent-session";
+import { runAgentSessionOuterWork } from "../session/internal/agent-session-outer-work";
 import {
 	claimStage1Jobs,
 	clearMemoryData as clearMemoryDataInDb,
@@ -154,8 +155,9 @@ export function startMemoryStartupTask(options: {
 	}
 
 	const signal = session.beginLocalMemoryStartup?.() ?? new AbortController().signal;
-	void session
-		.runJournalOuterWork(() => runMemoryStartup({ session, settings, modelRegistry, agentDir, config: cfg, signal }))
+	void runAgentSessionOuterWork(session, () =>
+		runMemoryStartup({ session, settings, modelRegistry, agentDir, config: cfg, signal }),
+	)
 		.catch(error => {
 			if (!signal.aborted) logger.warn("Memory startup failed", { error: String(error) });
 		})

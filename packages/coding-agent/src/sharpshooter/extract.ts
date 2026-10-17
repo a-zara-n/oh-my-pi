@@ -10,6 +10,7 @@ import type { Settings } from "../config/settings";
 import extractInputTemplate from "../prompts/memories/sharpshooter-extract-input.md" with { type: "text" };
 import extractSystemTemplate from "../prompts/memories/sharpshooter-extract-system.md" with { type: "text" };
 import type { AgentSession } from "../session/agent-session";
+import { runAgentSessionOuterWork } from "../session/internal/agent-session-outer-work";
 import { customMessageContentText } from "../session/checkpoint-entries";
 import { appendSharpshooterDelta } from "./queue";
 import type { SharpshooterDelta, SharpshooterDeltaKind, SharpshooterDeltaSource, SharpshooterFriction } from "./types";
@@ -188,8 +189,7 @@ export function maybeStartSharpshooterExtraction(options: {
 		const trimmedPrompt = envelope.prompt.trim();
 		if (trimmedPrompt.startsWith("/") || trimmedPrompt.length < 16) return;
 
-		const run = session
-			.runJournalOuterWork(() => runSharpshooterExtraction(options, envelope))
+		const run = runAgentSessionOuterWork(session, () => runSharpshooterExtraction(options, envelope))
 			.catch(error => {
 				logger.debug("Sharpshooter extraction failed", { error: String(error), sessionId: session.sessionId });
 			})

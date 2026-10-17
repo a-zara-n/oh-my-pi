@@ -181,6 +181,7 @@ import {
 	type SecretObfuscator,
 } from "./secrets";
 import { AgentSession, type InitialRetryFallbackState, type PlanYolo, type Prewalk } from "./session/agent-session";
+import { runAgentSessionOuterWork } from "./session/internal/agent-session-outer-work";
 import { journalOuterWorkFromBinding } from "./session/internal/outer-work";
 import {
 	createAuthStorageSettingsSync,
@@ -5239,7 +5240,7 @@ async function createAgentSessionScoped(
 		}
 
 		const startMemoryBackend = async () => {
-			await session.runJournalOuterWork(async () => {
+			await runAgentSessionOuterWork(session, async () => {
 				const memoryBackend = await resolveMemoryBackend(settings);
 				await session.runInModelRequestContext(async () => {
 					const started = memoryBackend.start({

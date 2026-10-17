@@ -291,12 +291,20 @@ function createHandlerContext(
  * review, `chatgpt-codex-connector[bot]`). `setTimeout` returns a handle we
  * can `clearTimeout` on the winning branch.
  */
-async function raceHandlerWithTimeout<T>(
+function startRaceHandlerWithTimeout<T>(
 	work: (handlerSignal: AbortSignal, timeoutBudget: HandlerTimeoutBudget) => Promise<T> | T,
 	timeoutMs: number,
 	signal?: AbortSignal,
-): Promise<T | typeof EXTENSION_HANDLER_TIMEOUT | typeof EXTENSION_HANDLER_ABORTED> {
-	if (signal?.aborted) return EXTENSION_HANDLER_ABORTED;
+): {
+	workPromise: Promise<T | undefined>;
+	resultPromise: Promise<T | typeof EXTENSION_HANDLER_TIMEOUT | typeof EXTENSION_HANDLER_ABORTED>;
+} {
+	if (signal?.aborted) {
+		return {
+			workPromise: Promise.resolve(undefined),
+			resultPromise: Promise.resolve(EXTENSION_HANDLER_ABORTED),
+		};
+	}
 
 	const timeoutController = new AbortController();
 	const handlerSignal = signal ? AbortSignal.any([signal, timeoutController.signal]) : timeoutController.signal;
@@ -348,24 +356,27 @@ async function raceHandlerWithTimeout<T>(
 		},
 	};
 	armTimer();
-	try {
-		if (signal?.aborted) return EXTENSION_HANDLER_ABORTED;
-		const workPromise = Promise.resolve(work(handlerSignal, timeoutBudget));
-		const result = await Promise.race([workPromise, interruptPromise]);
-		if (result === EXTENSION_HANDLER_TIMEOUT) {
-			await Promise.race([
-				workPromise.then(
-					() => undefined,
-					() => undefined,
-				),
-				Bun.sleep(0),
-			]);
+	const workPromise = Promise.resolve(work(handlerSignal, timeoutBudget));
+	const resultPromise = (async () => {
+		try {
+			if (signal?.aborted) return EXTENSION_HANDLER_ABORTED;
+			const result = await Promise.race([workPromise, interruptPromise]);
+			if (result === EXTENSION_HANDLER_TIMEOUT) {
+				await Promise.race([
+					workPromise.then(
+						() => undefined,
+						() => undefined,
+					),
+					Bun.sleep(0),
+				]);
+			}
+			return result;
+		} finally {
+			settle();
+			signal?.removeEventListener("abort", onAbort);
 		}
-		return result;
-	} finally {
-		settle();
-		signal?.removeEventListener("abort", onAbort);
-	}
+	})();
+	return { workPromise, resultPromise };
 }
 
 const MAX_PENDING_CREDENTIAL_DISABLED = 32;
@@ -1565,37 +1576,37 @@ export class ExtensionRunner {
 			let handlerFailure: { error: unknown } | undefined;
 			let flushFailure: unknown;
 			try {
-				handlerResult = await this.runScoped(() =>
-					raceHandlerWithTimeout(
-						async (handlerSignal, budget) => {
-							registrationScope.signal = handlerSignal;
-							let result: R | undefined;
-							try {
-								const handlerContext = createHandlerContext(
-									ctx,
-									handlerSignal,
-									event.type === "tool_call" ? budget : undefined,
-								);
-								result = await this.#toolRegistrationScope.run(registrationScope, () =>
-									handler(event, handlerContext),
-								);
-							} catch (error) {
-								handlerFailure = { error };
-							} finally {
-								registrationScope.closed = true;
-							}
-							try {
-								await this.#flushToolRegistrations(registrationScope.pending);
-							} catch (error) {
-								flushFailure = error;
-								handlerFailure ??= { error };
-							}
-							return result;
-						},
-						timeoutMs,
-						signal,
-					),
+				const raced = startRaceHandlerWithTimeout(
+					async (handlerSignal, budget) => {
+						registrationScope.signal = handlerSignal;
+						let result: R | undefined;
+						try {
+							const handlerContext = createHandlerContext(
+								ctx,
+								handlerSignal,
+								event.type === "tool_call" ? budget : undefined,
+							);
+							result = await this.#toolRegistrationScope.run(registrationScope, () =>
+								handler(event, handlerContext),
+							);
+						} catch (error) {
+							handlerFailure = { error };
+						} finally {
+							registrationScope.closed = true;
+						}
+						try {
+							await this.#flushToolRegistrations(registrationScope.pending);
+						} catch (error) {
+							flushFailure = error;
+							handlerFailure ??= { error };
+						}
+						return result;
+					},
+					timeoutMs,
+					signal,
 				);
+				outerWork.trackDetached(raced.workPromise);
+				handlerResult = await this.runScoped(() => raced.resultPromise);
 			} catch (error) {
 				handlerFailure = { error };
 			} finally {

@@ -17,6 +17,10 @@ import { countUserTurns, extractMessages } from "../hindsight/transcript";
 import type { MemoryPromptPreparation } from "../memory-backend/types";
 import { redactMemorySecrets, redactRememberWrite } from "../memory-backend/redact";
 import type { AgentSession, AgentSessionEvent } from "../session/agent-session";
+import {
+	runAgentSessionOuterWork,
+	trackAgentSessionOuterWork,
+} from "../session/internal/agent-session-outer-work";
 import type { MnemopiBackendConfig, MnemopiScoping } from "./config";
 import { mnemopiEmbedClient } from "./embed-client";
 
@@ -791,7 +795,7 @@ export class MnemopiSessionState {
 	}
 
 	async dispose(options: { consolidate?: boolean; timeoutMs?: number; retain?: boolean } = {}): Promise<void> {
-		await this.session.runJournalOuterWork(async () => {
+		await runAgentSessionOuterWork(this.session, async () => {
 		this.#recallGeneration++;
 		this.unsubscribe?.();
 		this.unsubscribe = undefined;
@@ -812,14 +816,15 @@ export class MnemopiSessionState {
 			extract: false,
 			sleep: false,
 			retain: this.config.autoRetain && options.retain !== false,
-		}).catch((error: unknown) => {
+		});
+		const loggedConsolidate = consolidatePromise.catch((error: unknown) => {
 			logger.warn("Mnemopi: consolidation on dispose failed.", { error: String(error) });
 		});
 		if (deadline !== undefined) {
 			const remainingMs = deadline - performance.now();
 			const completed =
 				remainingMs > 0
-					? await Promise.race([consolidatePromise.then(() => true), Bun.sleep(remainingMs).then(() => false)])
+					? await Promise.race([loggedConsolidate.then(() => true), Bun.sleep(remainingMs).then(() => false)])
 					: false;
 			if (!completed) {
 				logger.warn("Mnemopi: consolidate-on-dispose exceeded shutdown budget; detaching to background.", {
@@ -830,11 +835,11 @@ export class MnemopiSessionState {
 				// to `postmortem.quit(0)`; if it exits first, the OS reclaims
 				// the handles (and a still-pending embed() goes down with the
 				// embed worker the caller is about to SIGKILL).
-				this.session.trackJournalOuterWork(consolidatePromise.finally(closeOwned));
+				trackAgentSessionOuterWork(this.session, consolidatePromise.finally(closeOwned));
 				return;
 			}
 		} else {
-			await consolidatePromise;
+			await loggedConsolidate;
 		}
 		closeOwned();
 		});
