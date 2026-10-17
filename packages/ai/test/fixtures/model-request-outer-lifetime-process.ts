@@ -56,14 +56,18 @@ const scenarios = [
 	"pass-body-hold-until-read",
 	"pass-body-cancel-reject",
 	"dispatch-sync-throw-joins-response",
-	"guarded-settle-reentry",
 	"guarded-transfer-cleanup-on-settle-reject",
 	"gate-decision-unrecognizable",
 	"gate-deny-outer-rejected",
 	"a01-tf-debug-holds-wire",
 	"a02-inflight-heartbeat-flush-pending",
+	"a02-inflight-heartbeat-flush-reject",
+	"a02-inflight-remove-lease-pending",
 	"a02-inflight-remove-lease-reject",
+	"a02-inflight-waiter-pending",
+	"a02-inflight-waiter-reject",
 	"a02-inflight-release-joins-raw",
+	"e02-guarded-concurrent-settle-reentry",
 	"a03-header-resolver-pending",
 	"a03-header-resolver-reject",
 	"a04-auth-retry-recovered-fulfilled",
@@ -98,8 +102,40 @@ function gatedSendLoopback(origin: string, model: ReturnType<typeof loopbackMode
 
 if (!scenarios.some(value => value === scenario)) throw new Error(`unknown outer lifetime scenario: ${scenario}`);
 
-async function withReady(
-	use: (ctx: { close: () => Promise<void> }) => Promise<Record<string, unknown>>,
+type ManagedHarness = {
+	readonly sessionFile: string;
+	startAuthorityClose: () => Promise<void>;
+};
+
+async function raceAuthorityClose(harness: ManagedHarness, ms: number): Promise<"pending" | "settled"> {
+	const closing = harness.startAuthorityClose();
+	return Promise.race([
+		closing.then(() => "settled" as const),
+		new Promise<"pending">(resolve => setTimeout(() => resolve("pending"), ms)),
+	]);
+}
+
+async function finishAuthorityClose(
+	harness: ManagedHarness,
+): Promise<{ readonly ok: true } | { readonly ok: false; readonly message: string }> {
+	try {
+		await harness.startAuthorityClose();
+		return { ok: true };
+	} catch (error) {
+		return { ok: false, message: error instanceof Error ? error.message : String(error) };
+	}
+}
+
+function nextLimiterWait(provider = "tests"): Promise<void> {
+	const waiting = Promise.withResolvers<void>();
+	__providerInFlightForTesting.setWaitObserver(waitingProvider => {
+		if (waitingProvider === provider) waiting.resolve();
+	});
+	return waiting.promise;
+}
+
+async function withManagedHarness(
+	body: (harness: ManagedHarness) => Promise<Record<string, unknown>>,
 ): Promise<Record<string, unknown>> {
 	const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ai-outer-lifetime-")));
 	const cell = openFileJournalCell({ cwd: directory, sessionDir: path.join(directory, "sessions") });
@@ -178,11 +214,13 @@ CREATE TABLE store_config_event(${common},key TEXT NOT NULL,value_json TEXT NOT 
 			return runtime.runWith(execution, async () => {
 				const session = await composeJournalSession({ cell, root: cell, binding, execution });
 				assertJournalExecutionReady(execution);
-				let closing: Promise<void> | undefined;
-				const close = () => (closing ??= closeJournalSession(session));
-				const payload = await use({ close });
-				await close();
-				return payload;
+				const sessionFile = cell.getSessionFile();
+				let authorityClosing: Promise<void> | undefined;
+				const harness: ManagedHarness = {
+					sessionFile,
+					startAuthorityClose: () => (authorityClosing ??= closeJournalSession(session)),
+				};
+				return body(harness);
 			});
 		},
 	);
@@ -230,7 +268,7 @@ async function runScenario(): Promise<Record<string, unknown>> {
 			registerModelRequestGate("outer-lifetime", { authorize: () => decision.promise }, 1);
 			const loopback = await startLoopbackProvider(scripted(textReplyFor("late")));
 			const model = loopbackModel("openai-completions", loopback.origin);
-			return withReady(async ({ close }) => {
+			return withManagedHarness(async harness => {
 				const send = gatedSendLoopback(loopback.origin, model);
 				await Bun.sleep(5);
 				decision.resolve({ type: "allow", lease });
@@ -241,9 +279,9 @@ async function runScenario(): Promise<Record<string, unknown>> {
 				]);
 				lateSettle.resolve();
 				await firstSettle;
-				await close();
+				const authority = await finishAuthorityClose(harness);
 				loopback.stop();
-				return { late, settledCount: settled.length };
+				return { late, settledCount: settled.length, authorityOk: authority.ok };
 			});
 		}
 		case "gate-late-allow-settle-reject": {
@@ -256,20 +294,19 @@ async function runScenario(): Promise<Record<string, unknown>> {
 			registerModelRequestGate("outer-lifetime", { authorize: () => decision.promise }, 1);
 			const loopback = await startLoopbackProvider(scripted(textReplyFor("late")));
 			const model = loopbackModel("openai-completions", loopback.origin);
-			return withReady(async ({ close }) => {
+			return withManagedHarness(async harness => {
 				const send = gatedSendLoopback(loopback.origin, model);
 				await Bun.sleep(5);
 				decision.resolve({ type: "allow", lease });
 				await expectRejects(send);
 				await Bun.sleep(30);
-				let closeError: string | undefined;
-				try {
-					await close();
-				} catch (error) {
-					closeError = error instanceof Error ? error.message : String(error);
-				}
+				const authority = await finishAuthorityClose(harness);
 				loopback.stop();
-				return { settledCount: settled.length, rejectMessage: reject.message, closeError };
+				return {
+					settledCount: settled.length,
+					rejectMessage: reject.message,
+					authorityRejected: !authority.ok,
+				};
 			});
 		}
 		case "gate-abort-late-allow": {
@@ -279,15 +316,15 @@ async function runScenario(): Promise<Record<string, unknown>> {
 			const controller = new AbortController();
 			const loopback = await startLoopbackProvider(scripted(textReplyFor("abort")));
 			const model = loopbackModel("openai-completions", loopback.origin);
-			return withReady(async ({ close }) => {
+			return withManagedHarness(async harness => {
 				const send = gatedSendLoopback(loopback.origin, model, controller.signal);
 				controller.abort(new Error("abort-before-gate"));
 				decision.resolve({ type: "allow", lease });
 				await expectRejects(send);
 				await Bun.sleep(30);
-				await close();
+				const authority = await finishAuthorityClose(harness);
 				loopback.stop();
-				return { settled: settled[0] };
+				return { settled: settled[0], authorityOk: authority.ok };
 			});
 		}
 		case "pass-body-hold-until-read": {
@@ -297,8 +334,7 @@ async function runScenario(): Promise<Record<string, unknown>> {
 				scripted({ status: 200, chunks: ["hello"], holdUntil: hold.promise }),
 			);
 			const model = loopbackModel("openai-completions", loopback.origin);
-			return withReady(async ({ close }) => {
-				const closeRace = close();
+			return withManagedHarness(async harness => {
 				const response = await gatedSend({
 					model,
 					kind: "chat",
@@ -311,22 +347,19 @@ async function runScenario(): Promise<Record<string, unknown>> {
 							body: JSON.stringify(helloContext()),
 						}),
 				});
-				const blocked = await Promise.race([
-					closeRace.then(() => "closed" as const),
-					new Promise<"pending">(resolve => setTimeout(() => resolve("pending"), 80)),
-				]);
+				const authorityRace = await raceAuthorityClose(harness, 80);
 				hold.resolve();
 				await response.text();
-				await closeRace;
+				const authority = await finishAuthorityClose(harness);
 				loopback.stop();
-				return { blockedBeforeRead: blocked };
+				return { blockedBeforeRead: authorityRace, authorityOk: authority.ok };
 			});
 		}
 		case "pass-body-cancel-reject": {
 			registerModelRequestGate("outer-lifetime", { authorize: () => ({ type: "pass" }) }, undefined);
 			const loopback = await startLoopbackProvider(scripted(textReplyFor("abc")));
 			const model = loopbackModel("openai-completions", loopback.origin);
-			return withReady(async ({ close }) => {
+			return withManagedHarness(async harness => {
 				const response = await gatedSend({
 					model,
 					kind: "chat",
@@ -341,16 +374,16 @@ async function runScenario(): Promise<Record<string, unknown>> {
 				});
 				await response.body?.cancel();
 				await Bun.sleep(30);
-				await close();
+				const authority = await finishAuthorityClose(harness);
 				loopback.stop();
-				return { cancelled: true };
+				return { cancelled: true, authorityOk: authority.ok };
 			});
 		}
 		case "dispatch-sync-throw-joins-response": {
 			registerModelRequestGate("outer-lifetime", { authorize: () => ({ type: "pass" }) }, undefined);
 			const loopback = await startLoopbackProvider(scripted(textReplyFor("ok")));
 			const model = loopbackModel("openai-completions", loopback.origin);
-			return withReady(async ({ close }) => {
+			return withManagedHarness(async harness => {
 				let observed = 0;
 				const original = modelRequestBuiltinFetch;
 				const throwingFetch: typeof modelRequestBuiltinFetch = async (input, init) => {
@@ -375,25 +408,37 @@ async function runScenario(): Promise<Record<string, unknown>> {
 				} catch (error) {
 					failure = error;
 				}
-				await close();
+				const authority = await finishAuthorityClose(harness);
 				loopback.stop();
 				return {
 					observed,
 					failure: failure instanceof Error ? failure.message : String(failure),
+					authorityOk: authority.ok,
 				};
 			});
 		}
-		case "guarded-settle-reentry": {
+		case "e02-guarded-concurrent-settle-reentry": {
 			const { lease, settled } = recordingLease();
 			registerModelRequestGate("outer-lifetime", { authorize: async () => ({ type: "allow", lease }) }, undefined);
-			const loopback = await startLoopbackProvider(scripted(textReplyFor("guarded")));
-			const model = loopbackModel("openai-completions", loopback.origin);
-			return withReady(async ({ close }) => {
-				const response = await gatedSendLoopback(loopback.origin, model);
-				await response.text();
-				await close();
-				loopback.stop();
-				return { settled };
+			const model = loopbackModel("openai-completions", "http://127.0.0.1:9");
+			return withManagedHarness(async harness => {
+				const permit = await runtime.authorize({
+					requestId: randomUUID(),
+					reason: "user",
+					kind: "chat",
+					model,
+					wire: undefined,
+				});
+				const guarded = permit.lease;
+				if (!guarded) throw new Error("expected lease");
+				guarded.beginSend();
+				guarded.observeResponse({ status: 200, headers: {} });
+				await Promise.all([
+					guarded.settle({ type: "response-ended", status: 200 }),
+					guarded.settle({ type: "not-sent", aborted: true }),
+				]);
+				const authority = await finishAuthorityClose(harness);
+				return { settled, authorityOk: authority.ok };
 			});
 		}
 		case "gate-decision-unrecognizable": {
@@ -404,17 +449,18 @@ async function runScenario(): Promise<Record<string, unknown>> {
 			);
 			const loopback = await startLoopbackProvider(scripted(textReplyFor("bad")));
 			const model = loopbackModel("openai-completions", loopback.origin);
-			return withReady(async ({ close }) => {
+			return withManagedHarness(async harness => {
 				let failure: unknown;
 				try {
 					await gatedSendLoopback(loopback.origin, model);
 				} catch (error) {
 					failure = error;
 				}
-				await close();
+				const authority = await finishAuthorityClose(harness);
 				loopback.stop();
 				return {
 					message: failure instanceof Error ? failure.message : String(failure),
+					authorityRejected: !authority.ok,
 				};
 			});
 		}
@@ -426,21 +472,16 @@ async function runScenario(): Promise<Record<string, unknown>> {
 			);
 			const loopback = await startLoopbackProvider(scripted(textReplyFor("deny")));
 			const model = loopbackModel("openai-completions", loopback.origin);
-			return withReady(async ({ close }) => {
+			return withManagedHarness(async harness => {
 				let code = "";
 				try {
 					await gatedSendLoopback(loopback.origin, model);
 				} catch (error) {
 					code = error instanceof Error ? error.message : String(error);
 				}
-				let closeError: string | undefined;
-				try {
-					await close();
-				} catch (error) {
-					closeError = error instanceof Error ? error.message : String(error);
-				}
+				const authority = await finishAuthorityClose(harness);
 				loopback.stop();
-				return { denied: code.includes("over budget"), closeError };
+				return { denied: code.includes("over budget"), authorityRejected: !authority.ok };
 			});
 		}
 		case "a01-tf-debug-holds-wire": {
@@ -450,7 +491,7 @@ async function runScenario(): Promise<Record<string, unknown>> {
 			const loopback = await startLoopbackProvider(scripted(textReplyFor("dbg")));
 			const model = loopbackModel("openai-completions", loopback.origin);
 			const url = `${loopback.origin}/v1/chat/completions`;
-			return withReady(async ({ close }) => {
+			return withManagedHarness(async harness => {
 				const body = new ReadableStream<Uint8Array>({
 					start(controller) {
 						void holdBody.promise.then(() => {
@@ -467,16 +508,13 @@ async function runScenario(): Promise<Record<string, unknown>> {
 				});
 				await Bun.sleep(30);
 				const wireBefore = loopback.requests.length;
-				const closeRace = await Promise.race([
-					close().then(() => "closed" as const),
-					new Promise<"pending">(resolve => setTimeout(() => resolve("pending"), 100)),
-				]);
+				const authorityRace = await raceAuthorityClose(harness, 100);
 				holdBody.resolve();
 				await inflight;
-				await close();
+				const authority = await finishAuthorityClose(harness);
 				loopback.stop();
 				delete Bun.env.PI_REQ_DEBUG;
-				return { wireBefore, closeRace };
+				return { wireBefore, authorityRace, authorityOk: authority.ok };
 			});
 		}
 		case "a02-inflight-heartbeat-flush-pending": {
@@ -499,24 +537,84 @@ async function runScenario(): Promise<Record<string, unknown>> {
 					return { content: ["ok"] };
 				},
 			});
-			return withReady(async ({ close }) => {
+			return withManagedHarness(async harness => {
 				const s = streamSimple(mock.model, streamContext(), { maxInFlightRequests: { tests: 1 } });
 				const result = s.result();
 				await started.promise;
 				finish.resolve();
 				await Bun.sleep(15);
-				const blockedBeforeClose = await Promise.race([
-					close().then(() => "closed" as const),
-					new Promise<"pending">(resolve => setTimeout(() => resolve("pending"), 80)),
-				]);
+				const authorityRace = await raceAuthorityClose(harness, 80);
 				resumeHeartbeat.resolve();
 				await result;
-				await close();
+				const authority = await finishAuthorityClose(harness);
 				await fsp.rm(root, { recursive: true, force: true });
 				__providerInFlightForTesting.setRoot(undefined);
 				__providerInFlightForTesting.setHeartbeatTimings(undefined);
 				__providerInFlightForTesting.setHeartbeatWriter(undefined);
-				return { blockedBeforeClose };
+				return { authorityRace, authorityOk: authority.ok };
+			});
+		}
+		case "a02-inflight-heartbeat-flush-reject": {
+			registerMockApi();
+			const root = await fsp.mkdtemp(path.join(os.tmpdir(), "omp-ol-inflight-"));
+			__providerInFlightForTesting.setRoot(root);
+			__providerInFlightForTesting.setHeartbeatTimings({ heartbeatMs: 5, heartbeatFlushTimeoutMs: 25 });
+			const resumeHeartbeat = Promise.withResolvers<void>();
+			__providerInFlightForTesting.setHeartbeatWriter(async () => {
+				await resumeHeartbeat.promise;
+				throw Object.assign(new Error("heartbeat flush rejected"), { code: "EIO" });
+			});
+			const started = Promise.withResolvers<void>();
+			const finish = Promise.withResolvers<void>();
+			const mock = createMockModel({
+				provider: "tests",
+				handler: async () => {
+					started.resolve();
+					await finish.promise;
+					return { content: ["ok"] };
+				},
+			});
+			return withManagedHarness(async harness => {
+				const s = streamSimple(mock.model, streamContext(), { maxInFlightRequests: { tests: 1 } });
+				const result = s.result();
+				await started.promise;
+				finish.resolve();
+				await Bun.sleep(15);
+				resumeHeartbeat.resolve();
+				await result;
+				const authority = await finishAuthorityClose(harness);
+				await fsp.rm(root, { recursive: true, force: true });
+				__providerInFlightForTesting.setRoot(undefined);
+				__providerInFlightForTesting.setHeartbeatTimings(undefined);
+				__providerInFlightForTesting.setHeartbeatWriter(undefined);
+				return { authorityRejected: !authority.ok, authorityMessage: authority.ok ? undefined : authority.message };
+			});
+		}
+		case "a02-inflight-remove-lease-pending": {
+			registerMockApi();
+			const root = await fsp.mkdtemp(path.join(os.tmpdir(), "omp-ol-inflight-"));
+			__providerInFlightForTesting.setRoot(root);
+			const releaseRemover = Promise.withResolvers<void>();
+			__providerInFlightForTesting.setLeaseRemover(async () => {
+				await releaseRemover.promise;
+			});
+			const mock = createMockModel({
+				provider: "tests",
+				handler: async () => ({ content: ["ok"] }),
+			});
+			return withManagedHarness(async harness => {
+				const result = streamSimple(mock.model, streamContext(), {
+					maxInFlightRequests: { tests: 1 },
+				}).result();
+				await Bun.sleep(10);
+				const authorityRace = await raceAuthorityClose(harness, 80);
+				releaseRemover.resolve();
+				await result;
+				const authority = await finishAuthorityClose(harness);
+				await fsp.rm(root, { recursive: true, force: true });
+				__providerInFlightForTesting.setRoot(undefined);
+				__providerInFlightForTesting.setLeaseRemover(undefined);
+				return { authorityRace, authorityOk: authority.ok };
 			});
 		}
 		case "a02-inflight-remove-lease-reject": {
@@ -530,20 +628,15 @@ async function runScenario(): Promise<Record<string, unknown>> {
 				provider: "tests",
 				handler: async () => ({ content: ["ok"] }),
 			});
-			return withReady(async ({ close }) => {
-				const msg = await streamSimple(mock.model, streamContext(), {
+			return withManagedHarness(async harness => {
+				await streamSimple(mock.model, streamContext(), {
 					maxInFlightRequests: { tests: 1 },
 				}).result();
-				let closeError: string | undefined;
-				try {
-					await close();
-				} catch (error) {
-					closeError = error instanceof Error ? error.message : String(error);
-				}
+				const authority = await finishAuthorityClose(harness);
 				await fsp.rm(root, { recursive: true, force: true });
 				__providerInFlightForTesting.setRoot(undefined);
 				__providerInFlightForTesting.setLeaseRemover(undefined);
-				return { text: msg.content[0], closeError };
+				return { authorityRejected: !authority.ok };
 			});
 		}
 		case "a02-inflight-release-joins-raw": {
@@ -564,23 +657,102 @@ async function runScenario(): Promise<Record<string, unknown>> {
 					return { content: [`r${callIndex}`] };
 				},
 			});
-			return withReady(async ({ close }) => {
+			return withManagedHarness(async harness => {
 				const first = streamSimple(mock.model, streamContext(), { maxInFlightRequests: { tests: 1 } });
 				const firstResult = first.result();
 				await firstStarted.promise;
 				const second = streamSimple(mock.model, streamContext(), { maxInFlightRequests: { tests: 1 } });
 				const secondResult = second.result();
-				await Bun.sleep(50);
-				const blocked = await Promise.race([
-					close().then(() => "closed" as const),
-					new Promise<"pending">(resolve => setTimeout(() => resolve("pending"), 80)),
-				]);
+				const providerDir = __providerInFlightForTesting.providerDir("tests");
+				const ownerLease = path.join(providerDir, "owner-hold");
+				await fsp.mkdir(ownerLease, { recursive: true });
+				await Bun.write(
+					path.join(ownerLease, "info.json"),
+					JSON.stringify({ pid: process.pid, timestamp: Date.now(), token: "owner-hold" }),
+				);
+				const authorityRace = await raceAuthorityClose(harness, 80);
 				releaseFirst.resolve();
+				await fsp.rm(ownerLease, { recursive: true, force: true });
+				await Bun.write(path.join(providerDir, ".wakeup"), String(Date.now()));
 				await Promise.all([firstResult, secondResult]);
-				await close();
+				const authority = await finishAuthorityClose(harness);
 				await fsp.rm(root, { recursive: true, force: true });
 				__providerInFlightForTesting.setRoot(undefined);
-				return { blocked, calls: callIndex };
+				return { authorityRace, calls: callIndex, authorityOk: authority.ok };
+			});
+		}
+		case "a02-inflight-waiter-pending": {
+			registerMockApi();
+			const root = await fsp.mkdtemp(path.join(os.tmpdir(), "omp-ol-inflight-"));
+			__providerInFlightForTesting.setRoot(root);
+			const firstStarted = Promise.withResolvers<void>();
+			const releaseFirst = Promise.withResolvers<void>();
+			const mock = createMockModel({
+				provider: "tests",
+				handler: async () => {
+					firstStarted.resolve();
+					await releaseFirst.promise;
+					return { content: ["first"] };
+				},
+			});
+			return withManagedHarness(async harness => {
+				const first = streamSimple(mock.model, streamContext(), { maxInFlightRequests: { tests: 1 } });
+				const firstResult = first.result();
+				await firstStarted.promise;
+				const waiting = nextLimiterWait();
+				const second = streamSimple(mock.model, streamContext(), { maxInFlightRequests: { tests: 1 } });
+				const secondResult = second.result();
+				await waiting;
+				const authorityRace = await raceAuthorityClose(harness, 80);
+				releaseFirst.resolve();
+				await Promise.all([firstResult, secondResult]);
+				const authority = await finishAuthorityClose(harness);
+				await fsp.rm(root, { recursive: true, force: true });
+				__providerInFlightForTesting.setRoot(undefined);
+				__providerInFlightForTesting.setWaitObserver(undefined);
+				return { authorityRace, authorityOk: authority.ok };
+			});
+		}
+		case "a02-inflight-waiter-reject": {
+			registerMockApi();
+			const root = await fsp.mkdtemp(path.join(os.tmpdir(), "omp-ol-inflight-"));
+			__providerInFlightForTesting.setRoot(root);
+			const firstStarted = Promise.withResolvers<void>();
+			const releaseFirst = Promise.withResolvers<void>();
+			const mock = createMockModel({
+				provider: "tests",
+				handler: async () => {
+					firstStarted.resolve();
+					await releaseFirst.promise;
+					return { content: ["first"] };
+				},
+			});
+			return withManagedHarness(async harness => {
+				const first = streamSimple(mock.model, streamContext(), { maxInFlightRequests: { tests: 1 } });
+				const firstResult = first.result();
+				await firstStarted.promise;
+				const waiting = nextLimiterWait();
+				const controller = new AbortController();
+				const second = streamSimple(mock.model, streamContext(), {
+					maxInFlightRequests: { tests: 1 },
+					signal: controller.signal,
+				});
+				const secondResult = second.result();
+				await waiting;
+				controller.abort(new Error("waiter aborted"));
+				let waiterFailed = false;
+				try {
+					await secondResult;
+				} catch {
+					waiterFailed = true;
+				}
+				releaseFirst.resolve();
+				await firstResult;
+				const authority = await finishAuthorityClose(harness);
+				await fsp.rm(root, { recursive: true, force: true });
+				__providerInFlightForTesting.setRoot(undefined);
+				__providerInFlightForTesting.setWaitObserver(undefined);
+				return { waiterFailed, authorityOk: authority.ok };
 			});
 		}
 		case "a03-header-resolver-pending": {
@@ -595,19 +767,16 @@ async function runScenario(): Promise<Record<string, unknown>> {
 					return { "x-ol": "1" };
 				},
 			};
-			return withReady(async ({ close }) => {
+			return withManagedHarness(async harness => {
 				const outer = stream(model, streamContext(), {
 					fetch: transportFetch(base, modelRequestBuiltinFetch),
 				});
-				const pending = await Promise.race([
-					close().then(() => "closed" as const),
-					new Promise<"pending">(resolve => setTimeout(() => resolve("pending"), 80)),
-				]);
+				const authorityRace = await raceAuthorityClose(harness, 80);
 				hold.resolve();
 				await outer.result();
-				await close();
+				const authority = await finishAuthorityClose(harness);
 				loopback.stop();
-				return { pending };
+				return { authorityRace, authorityOk: authority.ok };
 			});
 		}
 		case "a03-header-resolver-reject": {
@@ -621,7 +790,7 @@ async function runScenario(): Promise<Record<string, unknown>> {
 					throw reject;
 				},
 			};
-			return withReady(async ({ close }) => {
+			return withManagedHarness(async harness => {
 				let failure: unknown;
 				try {
 					await stream(model, streamContext(), {
@@ -630,14 +799,9 @@ async function runScenario(): Promise<Record<string, unknown>> {
 				} catch (error) {
 					failure = error;
 				}
-				let closeError: string | undefined;
-				try {
-					await close();
-				} catch (error) {
-					closeError = error instanceof Error ? error.message : String(error);
-				}
+				const authority = await finishAuthorityClose(harness);
 				loopback.stop();
-				return { failure: failure === reject, closeError };
+				return { failure: failure === reject, authorityOk: authority.ok };
 			});
 		}
 		case "a04-auth-retry-recovered-fulfilled": {
@@ -646,21 +810,21 @@ async function runScenario(): Promise<Record<string, unknown>> {
 				i === 0 ? errorReply(401, "bad key") : textReplyFor("recovered"),
 			);
 			const model = loopbackModel("openai-completions", loopback.origin);
-			return withReady(async ({ close }) => {
+			return withManagedHarness(async harness => {
 				const msg = await streamSimple(model, streamContext(), {
 					apiKey: async ({ lastChance }) => (lastChance ? "key-rotate" : "key-first"),
 					fetch: transportFetch(model, modelRequestBuiltinFetch),
 				}).result();
-				await close();
+				const authority = await finishAuthorityClose(harness);
 				loopback.stop();
-				return { stopReason: msg.stopReason, wireAttempts: loopback.requests.length };
+				return { stopReason: msg.stopReason, wireAttempts: loopback.requests.length, authorityOk: authority.ok };
 			});
 		}
 		case "a04-auth-retry-unrecovered-rejected": {
 			registerModelRequestGate("outer-lifetime", { authorize: () => ({ type: "pass" }) }, undefined);
 			const loopback = await startLoopbackProvider(scripted(errorReply(401, "bad key")));
 			const model = loopbackModel("openai-completions", loopback.origin);
-			return withReady(async ({ close }) => {
+			return withManagedHarness(async harness => {
 				let failed = false;
 				try {
 					await streamSimple(model, streamContext(), {
@@ -670,14 +834,9 @@ async function runScenario(): Promise<Record<string, unknown>> {
 				} catch {
 					failed = true;
 				}
-				let closeError: string | undefined;
-				try {
-					await close();
-				} catch (error) {
-					closeError = error instanceof Error ? error.message : String(error);
-				}
+				const authority = await finishAuthorityClose(harness);
 				loopback.stop();
-				return { failed, closeError };
+				return { failed, authorityOk: authority.ok };
 			});
 		}
 		case "a05-uninstrumented-wrapper-pending": {
@@ -699,16 +858,13 @@ async function runScenario(): Promise<Record<string, unknown>> {
 			});
 			const mock = createMockModel({ provider: "ol-ext", handler: async () => ({ content: ["ext"] }) });
 			const model = { ...mock.model, api, provider: "ol-ext" };
-			return withReady(async ({ close }) => {
+			return withManagedHarness(async harness => {
 				const outer = stream(model, streamContext());
-				const pending = await Promise.race([
-					close().then(() => "closed" as const),
-					new Promise<"pending">(resolve => setTimeout(() => resolve("pending"), 80)),
-				]);
+				const authorityRace = await raceAuthorityClose(harness, 80);
 				hold.resolve();
 				await outer.result();
-				await close();
-				return { pending };
+				const authority = await finishAuthorityClose(harness);
+				return { authorityRace, authorityOk: authority.ok };
 			});
 		}
 		case "a06-leaked-thinking-inner-pending": {
@@ -721,16 +877,13 @@ async function runScenario(): Promise<Record<string, unknown>> {
 					return { content: ["```thinking\nx\n```", "answer"] };
 				},
 			});
-			return withReady(async ({ close }) => {
+			return withManagedHarness(async harness => {
 				const outer = streamSimple(mock.model, streamContext());
-				const pending = await Promise.race([
-					close().then(() => "closed" as const),
-					new Promise<"pending">(resolve => setTimeout(() => resolve("pending"), 80)),
-				]);
+				const authorityRace = await raceAuthorityClose(harness, 80);
 				hold.resolve();
 				await outer.result();
-				await close();
-				return { pending };
+				const authority = await finishAuthorityClose(harness);
+				return { authorityRace, authorityOk: authority.ok };
 			});
 		}
 		case "a06-thinking-loop-inner-pending": {
@@ -743,16 +896,13 @@ async function runScenario(): Promise<Record<string, unknown>> {
 					return { content: ["short ok"] };
 				},
 			});
-			return withReady(async ({ close }) => {
+			return withManagedHarness(async harness => {
 				const outer = streamSimple(mock.model, streamContext());
-				const pending = await Promise.race([
-					close().then(() => "closed" as const),
-					new Promise<"pending">(resolve => setTimeout(() => resolve("pending"), 80)),
-				]);
+				const authorityRace = await raceAuthorityClose(harness, 80);
 				hold.resolve();
 				await outer.result();
-				await close();
-				return { pending };
+				const authority = await finishAuthorityClose(harness);
+				return { authorityRace, authorityOk: authority.ok };
 			});
 		}
 		case "gate-authorize-throws-outer-end": {
@@ -767,16 +917,16 @@ async function runScenario(): Promise<Record<string, unknown>> {
 			);
 			const loopback = await startLoopbackProvider(scripted(textReplyFor("throw")));
 			const model = loopbackModel("openai-completions", loopback.origin);
-			return withReady(async ({ close }) => {
+			return withManagedHarness(async harness => {
 				let sendFailed = false;
 				try {
 					await gatedSendLoopback(loopback.origin, model);
 				} catch {
 					sendFailed = true;
 				}
-				await close();
+				const authority = await finishAuthorityClose(harness);
 				loopback.stop();
-				return { sendFailed };
+				return { sendFailed, authorityRejected: !authority.ok };
 			});
 		}
 		case "guarded-transfer-cleanup-on-settle-reject": {
@@ -792,17 +942,12 @@ async function runScenario(): Promise<Record<string, unknown>> {
 			registerModelRequestGate("outer-lifetime", { authorize: async () => ({ type: "allow", lease }) }, undefined);
 			const loopback = await startLoopbackProvider(scripted(textReplyFor("settle-fail")));
 			const model = loopbackModel("openai-completions", loopback.origin);
-			return withReady(async ({ close }) => {
+			return withManagedHarness(async harness => {
 				const response = await gatedSendLoopback(loopback.origin, model);
 				await response.text();
-				let closeError: string | undefined;
-				try {
-					await close();
-				} catch (error) {
-					closeError = error instanceof Error ? error.message : String(error);
-				}
+				const authority = await finishAuthorityClose(harness);
 				loopback.stop();
-				return { settleRejected: true, closeError };
+				return { settleRejected: true, authorityRejected: !authority.ok };
 			});
 		}
 		default:
