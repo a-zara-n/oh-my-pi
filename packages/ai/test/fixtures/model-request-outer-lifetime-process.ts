@@ -122,6 +122,8 @@ type ManagedHarness = {
 	startAuthorityClose: () => Promise<void>;
 	/** AC-OL-02 probe: can a genuine exclusive lease on the owner control lock be taken right now? */
 	probeOwnerExclusiveAvailable(): boolean;
+	/** The most recent in-race observation; merged into every scenario result that raced the close. */
+	ownerExclusiveDuringHold: boolean | undefined;
 };
 
 async function countProviderLeaseDirs(provider: string, root?: string): Promise<number> {
@@ -171,6 +173,7 @@ async function raceAuthorityClose(
 	// exclusive acquisition on the owner control lock must fail; only the
 	// binding's own shared flocks can be holding it.
 	const ownerExclusiveDuringHold = harness.probeOwnerExclusiveAvailable();
+	harness.ownerExclusiveDuringHold = ownerExclusiveDuringHold;
 	const authorityRace = await Promise.race([
 		closing.then(() => "settled" as const),
 		new Promise<"pending">(resolve => setTimeout(() => resolve("pending"), ms)),
@@ -299,44 +302,85 @@ CREATE TABLE store_config_event(${common},key TEXT NOT NULL,value_json TEXT NOT 
 		lease.release();
 		return true;
 	};
+	let authorityCloseError: unknown;
+	let harnessRef: ManagedHarness | undefined;
+	let authorityCloseObserved = false;
 	try {
-		const scenarioResult = await withVerifiedModelRequestJournalBinding(
-			{ resources: { storeId, databasePath }, requester, mode: "resume", rootSessionId },
-			async binding => {
-				const execution = runtime.createSessionExecution({
-					sessionId: () => rootSessionId,
-					root: { kind: "self", modelRequestJournalLeaseBinding: binding },
-					agent,
-					purpose: "main",
-				});
-				return runtime.runWith(execution, async () => {
-					const session = await composeJournalSession({ cell, root: cell, binding, execution });
-					assertJournalExecutionReady(execution);
-					const sessionFile = cell.getSessionFile();
-					let authorityClosing: Promise<void> | undefined;
-					const harness: ManagedHarness = {
-						sessionFile,
-						bindingRecordPath,
-						storeId,
-						readBindingState: () => {
-							try {
-								const parsed = JSON.parse(fs.readFileSync(bindingRecordPath, "utf8")) as { state?: string };
-								return parsed.state;
-							} catch {
-								return undefined;
-							}
-						},
-						startAuthorityClose: () => (authorityClosing ??= closeJournalSession(session)),
-						probeOwnerExclusiveAvailable,
-					};
-					return body(harness);
-				});
-			},
-		);
+		let scenarioResult: Record<string, unknown> | undefined;
+		let bindingFailure: unknown;
+		let bindingFailed = false;
+		try {
+			scenarioResult = await withVerifiedModelRequestJournalBinding(
+				{ resources: { storeId, databasePath }, requester, mode: "resume", rootSessionId },
+				async binding => {
+					const execution = runtime.createSessionExecution({
+						sessionId: () => rootSessionId,
+						root: { kind: "self", modelRequestJournalLeaseBinding: binding },
+						agent,
+						purpose: "main",
+					});
+					return runtime.runWith(execution, async () => {
+						const session = await composeJournalSession({ cell, root: cell, binding, execution });
+						assertJournalExecutionReady(execution);
+						const sessionFile = cell.getSessionFile();
+						let authorityClosing: Promise<void> | undefined;
+						const harness: ManagedHarness = {
+							sessionFile,
+							bindingRecordPath,
+							storeId,
+							readBindingState: () => {
+								try {
+									const parsed = JSON.parse(fs.readFileSync(bindingRecordPath, "utf8")) as {
+										state?: string;
+									};
+									return parsed.state;
+								} catch {
+									return undefined;
+								}
+							},
+							startAuthorityClose: () => {
+								authorityClosing ??= closeJournalSession(session);
+								if (!authorityCloseObserved) {
+									// Observe the close at creation: a rejected close must never
+									// float unhandled while the binding finalizer aggregates it.
+									authorityCloseObserved = true;
+									void authorityClosing.catch((error: unknown) => {
+										authorityCloseError = error;
+									});
+								}
+								return authorityClosing;
+							},
+							probeOwnerExclusiveAvailable,
+							ownerExclusiveDuringHold: undefined,
+						};
+						harnessRef = harness;
+						return body(harness);
+					});
+				},
+			);
+		} catch (error) {
+			bindingFailure = error;
+			bindingFailed = true;
+		}
+		if (scenarioResult === undefined) throw bindingFailure;
+		if (bindingFailed) {
+			// The binding finalizer re-reports the close's aggregated failures. The
+			// harness accepts that rejection only when it carries the exact error
+			// object the scenario's own close observation already recorded.
+			if (authorityCloseError === undefined || !errorIncludesCause(bindingFailure, authorityCloseError)) {
+				throw bindingFailure;
+			}
+		}
 		// AC-OL-02 counter-proof: once the binding has fully settled — with or
 		// without aggregated outer-work failures — the owner control lock must be
 		// exclusively acquirable again.
-		return { ...scenarioResult, ownerExclusiveAfterClose: probeOwnerExclusiveAvailable() };
+		return {
+			...scenarioResult,
+			...(harnessRef?.ownerExclusiveDuringHold !== undefined && scenarioResult.ownerExclusiveDuringHold === undefined
+				? { ownerExclusiveDuringHold: harnessRef.ownerExclusiveDuringHold }
+				: {}),
+			ownerExclusiveAfterClose: probeOwnerExclusiveAvailable(),
+		};
 	} finally {
 		try {
 			database.close();
