@@ -17,6 +17,11 @@
   rebinds do not register another owner or redirect root close/drain away from the
   original cell. Session use checks the reciprocal family mapping. Actual native
   consumer regressions cover ready and overlapping composition claims.
+- Before registering a resumed journal epoch, validate every historical owner/epoch
+  against adjacent schema 2 member/writer mappings read from the selected actual
+  root. Missing held-child or foreign-root history cannot become ready through
+  a fresh registration, and no mappings are backfilled. Genuine same-root resume
+  preserves historical epochs and entries while adding the new epoch.
 
 - Extended the existing journal execution identity checker with an optional genuine execution
   to compare the leaf's exact private family. This is a pure identity check, not readiness,

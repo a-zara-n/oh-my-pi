@@ -185,3 +185,85 @@ mac("actual File composition claims", () => {
 		});
 	}
 });
+
+mac("actual File historical composition mappings", () => {
+	for (const mode of ["same-root", "missing-first-epoch", "wrong-root", "legacy-held"] as const) {
+		test(`${mode} preserves history and requires every old epoch in the selected schema2 root`, async () => {
+			const fixture = new CompositionFixture();
+			try {
+				let rootFile: string | undefined;
+				let childFile: string | undefined;
+				// Two genuine epochs ensure validation cannot check only the latest.
+				for (let round = 0; round < 2; round++) {
+					const rootCell = fixture.open(rootFile);
+					await fixture.withBinding(rootCell, async binding => {
+						const root = await fixture.ready(binding, rootCell);
+						const child = await fixture.ready(binding, fixture.open(childFile), root);
+						rootFile = rootCell.getSessionFile();
+						childFile = child.cell.getSessionFile();
+						await appendJournalMetadata(child.session, child.execution, decision(child.cell, rootCell));
+						await closeJournalSession(root.session);
+						await Promise.all([...fixture.cells].reverse().map(cell => cell.close()));
+					});
+				}
+				if (!rootFile || !childFile) throw new Error("Missing actual historical files");
+				const historical = fixture.open(childFile);
+				const childHeader = historical.getHeader();
+				const childEntries = historical.getEntries();
+				const oldEpochs = childHeader.modelRequestJournal?.epochs;
+				if (!oldEpochs || oldEpochs.length !== 2) throw new Error("Missing actual historical epochs");
+				await historical.close();
+				if (mode === "missing-first-epoch" || mode === "legacy-held") {
+					const oldRoot = fixture.open(rootFile);
+					const header = oldRoot.getHeader();
+					const descriptor = header.modelRequestRegistry;
+					if (!descriptor) throw new Error("Missing actual historical registry");
+					const entries = oldRoot.getEntries();
+					await oldRoot.close();
+					let seq = 0;
+					const retained = entries.filter(entry => entry.type !== "model_request_registry" ||
+						entry.record.sessionId !== childHeader.id ||
+						(mode === "missing-first-epoch" && entry.record.journalEpoch !== oldEpochs[0]!.journalEpoch));
+					const rows = retained.map(entry => entry.type === "model_request_registry" ? { ...entry, seq: ++seq } : entry);
+					// A held child's descriptor alone is not a root mapping. Removing
+					// all its mappings simulates legacy history without backfilling.
+					const title = fs.readFileSync(rootFile, "utf8").split("\n")[0];
+					fs.writeFileSync(rootFile, `${title}\n${JSON.stringify(header)}\n${rows.map(entry => JSON.stringify(entry)).join("\n")}\n`);
+				}
+				const rootCell = mode === "wrong-root" ? fixture.open() : fixture.open(rootFile);
+				let checked = false;
+				try {
+					await fixture.withBinding(rootCell, async binding => {
+						const root = await fixture.ready(binding, rootCell);
+						const childCell = fixture.open(childFile);
+						const execution = fixture.execution(binding, root);
+						const rootBefore = fs.readFileSync(rootCell.getSessionFile(), "utf8");
+						const childBefore = fs.readFileSync(childCell.getSessionFile(), "utf8");
+						const pending = composeJournalSession({ cell: childCell, root: rootCell, binding, execution });
+						if (mode === "same-root") {
+							const session = await pending;
+							assertJournalExecutionReady(execution);
+							expect(childCell.getHeader().modelRequestJournal?.epochs.slice(0, 2)).toEqual(oldEpochs);
+							expect(childCell.getEntries()).toEqual(childEntries);
+							for (const entry of childEntries) expect(fs.readFileSync(childCell.getSessionFile(), "utf8")).toContain(`${JSON.stringify(entry)}\n`);
+							await appendJournalMetadata(session, execution, decision(childCell, rootCell));
+							await closeJournalSession(root.session);
+							await Promise.all([...fixture.cells].reverse().map(cell => cell.close()));
+						} else {
+							await expect(pending).rejects.toThrow();
+							expect(execution.journalState).not.toBe("required-ready");
+							expect(fs.readFileSync(rootCell.getSessionFile(), "utf8")).toBe(rootBefore);
+							expect(fs.readFileSync(childCell.getSessionFile(), "utf8")).toBe(childBefore);
+						}
+						checked = true;
+					});
+				} catch (error) {
+					// A failed verified lease invalidates its binding; a later exit
+					// verification is distinct from the observed compose rejection.
+					if (!checked) throw error;
+				}
+				expect(checked).toBe(true);
+			} finally { await fixture.close(); }
+		});
+	}
+});

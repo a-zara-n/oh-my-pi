@@ -2999,12 +2999,12 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 				const generation = this.#generation;
 				const rootGeneration = root.#generation;
 				if (!root.#header.modelRequestRegistry) {
-					if (root.#entries.some(sourceEntry)) unavailable();
+					if (this.#header.modelRequestJournal || root.#entries.some(sourceEntry)) unavailable();
 					await root.#publish({ ...root.#header, modelRequestRegistry: {
 						schemaVersion: 2, registryId: id, registryEpoch: randomUUID(), rootSessionId: root.getSessionId(),
 					} }, root.#entries);
 				}
-				const registry = root.#readRegistry();
+				const registry = root.#readRegistry(undefined, this.#header.modelRequestJournal);
 				if (root.#header.modelRequestRegistry?.schemaVersion !== 2 ||
 					registry.registryId !== id || registry.rootSessionId !== root.getSessionId()) unavailable();
 				const ownerId = randomUUID();
@@ -3078,23 +3078,46 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 		this.#assertLineage(receipt.family, receipt.root);
 	}
 
-	#readRegistry(expected?: Readonly<{ ownerId: string; writerOwnerId: string; sessionId: string; journalEpoch: string }>): {
+	#readRegistry(
+		expected?: Readonly<{ ownerId: string; writerOwnerId: string; sessionId: string; journalEpoch: string }>,
+		history?: ModelRequestJournalDescriptor,
+	): {
 		registryId: string; registryEpoch: string; rootSessionId: string; throughSeq: number;
 	} {
 		const file = strictFile(this.#storage.readTextSync(this.#sessionFile));
 		if (file.header.id !== this.#header.id ||
 			JSON.stringify(file.header.modelRequestRegistry) !== JSON.stringify(this.#header.modelRequestRegistry)) unavailable();
 		const registry = validateModelRequestRegistry(file.header, file.entries);
-		if (expected) {
+		if (expected || history) {
 			if (file.header.modelRequestRegistry?.schemaVersion !== 2) unavailable();
 			const rows = file.entries.filter((entry): entry is ModelRequestRegistryEntry => entry.type === "model_request_registry");
-			const memberIndex = rows.findIndex(entry => entry.record.event === "member-registered" &&
-				entry.record.ownerId === expected.ownerId && entry.record.sessionId === expected.sessionId &&
-				entry.record.journalEpoch === expected.journalEpoch);
-			const owner = rows[memberIndex + 1];
-			if (memberIndex < 0 || owner?.schemaVersion !== 2 || owner.record.event !== "owner-registered" ||
-				owner.record.ownerId !== expected.ownerId || owner.record.sessionId !== expected.sessionId ||
-				owner.record.journalEpoch !== expected.journalEpoch || owner.record.writerOwnerId !== expected.writerOwnerId) unavailable();
+			if (expected) {
+				const memberIndex = rows.findIndex(entry => entry.record.event === "member-registered" &&
+					entry.record.ownerId === expected.ownerId && entry.record.sessionId === expected.sessionId &&
+					entry.record.journalEpoch === expected.journalEpoch);
+				const owner = rows[memberIndex + 1];
+				if (memberIndex < 0 || owner?.schemaVersion !== 2 || owner.record.event !== "owner-registered" ||
+					owner.record.ownerId !== expected.ownerId || owner.record.sessionId !== expected.sessionId ||
+					owner.record.journalEpoch !== expected.journalEpoch || owner.record.writerOwnerId !== expected.writerOwnerId) unavailable();
+			}
+			if (history) {
+				// Historical writers may differ from today's authenticated writer,
+				// but every old owner/epoch must already belong to this actual root.
+				// Never manufacture missing mappings when publishing a new epoch.
+				const missing = new Map(history.epochs.map(epoch => [epoch.journalOwnerId, epoch.journalEpoch]));
+				for (let index = 0; index < rows.length; index++) {
+					const member = rows[index]!;
+					if (member.record.event !== "member-registered" ||
+						member.record.sessionId !== history.sessionId || member.record.journalRef !== history.sessionId ||
+						missing.get(member.record.ownerId) !== member.record.journalEpoch) continue;
+					const owner = rows[index + 1];
+					if (member.schemaVersion !== 2 || owner?.schemaVersion !== 2 || owner.record.event !== "owner-registered" ||
+						owner.record.ownerId !== member.record.ownerId || owner.record.sessionId !== history.sessionId ||
+						owner.record.journalEpoch !== member.record.journalEpoch) unavailable();
+					missing.delete(member.record.ownerId);
+				}
+				if (missing.size !== 0) unavailable();
+			}
 		}
 		return registry;
 	}
