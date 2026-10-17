@@ -17,6 +17,7 @@ import {
 	beginJournalBindingWork,
 	beginJournalExecutionWork,
 	beginJournalSend,
+	closeJournalSession,
 	composeJournalSession,
 	createJournalExecution,
 	endJournalSendStart,
@@ -297,16 +298,11 @@ mac("authority private binding lifetime with actual File principals", () => {
 		}
 	});
 
-	test("beginJournalExecutionWork returns undefined only for genuine untracked executions", async () => {
+	test("beginJournalExecutionWork registers genuine required-pending executions", async () => {
 		const fixture = new R11JournalFixture();
 		try {
 			const root = fixture.open();
 			await fixture.withBinding(root, async binding => {
-				const untracked = createJournalExecution({
-					agent: { id: randomUUID(), kind: "main", name: "untracked", depth: 0 },
-					purpose: "main",
-				});
-				expect(beginJournalExecutionWork(untracked)).toBeUndefined();
 				const pending = createJournalExecution({
 					binding,
 					agent: { id: randomUUID(), kind: "main", name: "pending", depth: 0 },
@@ -342,33 +338,103 @@ mac("authority private binding lifetime with actual File principals", () => {
 		}
 	});
 
-	test("unsettled outer work keeps authority alive and rejected child work survives a fulfilled sibling", async () => {
+	test("use return leaves outer work owning leases until an external end preserves rejected sibling failures", async () => {
 		const fixture = new R11JournalFixture();
-		const externalEnd = Promise.withResolvers<void>();
-		let operation: Promise<void> | undefined;
+		const handoff = Promise.withResolvers<{ work: JournalWorkHandle }>();
+		let operation: Promise<unknown> | undefined;
+		let settled = false;
 		const childFailure = new Error("child outer work rejected");
 		try {
 			const root = fixture.open();
 			operation = fixture.withBinding(root, async binding => {
+				await fixture.ready(binding, root);
 				const rejected = beginJournalBindingWork(binding);
 				const fulfilled = beginJournalBindingWork(binding);
 				endJournalWork(rejected, { type: "rejected", error: childFailure });
-				await externalEnd.promise;
-				endJournalWork(fulfilled, { type: "fulfilled" });
+				handoff.resolve({ work: fulfilled });
 			});
-			void operation.catch(() => {});
+			void operation.then(
+				() => {
+					settled = true;
+				},
+				() => {
+					settled = true;
+				},
+			);
+			const { work } = await handoff.promise;
 			await Promise.resolve();
+			expect(settled).toBe(false);
 			expect(closedSessions(root)).toEqual([]);
-			externalEnd.resolve();
-			await expect(operation).rejects.toBe(childFailure);
-			expect(closedSessions(root)).toEqual([root.getSessionId()]);
-		} finally {
-			externalEnd.resolve();
+			assertExclusiveLease(path.join(fixture.namespace, "owners", `${fixture.writerId}.lock`), true);
+			endJournalWork(work, { type: "fulfilled" });
+			let combined: unknown;
 			try {
 				await operation;
-			} finally {
-				await fixture.close();
+			} catch (error) {
+				combined = error;
 			}
+			expect(settled).toBe(true);
+			expect(combined).toBeInstanceOf(AggregateError);
+			if (!(combined instanceof AggregateError)) throw new Error("Expected outer drain aggregation");
+			const outerDrain = combined.errors.find(error => error instanceof AggregateError);
+			expect(outerDrain).toBeInstanceOf(AggregateError);
+			if (!(outerDrain instanceof AggregateError)) throw new Error("Expected nested outer work failures");
+			expect(outerDrain.errors).toContain(childFailure);
+			expect(closedSessions(root)).toEqual([root.getSessionId()]);
+		} finally {
+			handoff.resolve({ work: Object.freeze({}) as JournalWorkHandle });
+			await Promise.allSettled([operation]);
+			await fixture.close();
+		}
+	});
+
+	test("retired credentials still allow active outer work end while rejecting new journal I/O", async () => {
+		const fixture = new R11JournalFixture();
+		const handoff = Promise.withResolvers<{ work: JournalWorkHandle; execution: ModelRequestExecution }>();
+		let operation: Promise<unknown> | undefined;
+		try {
+			const root = fixture.open();
+			operation = fixture.withBinding(root, async binding => {
+				const principal = await fixture.ready(binding, root);
+				const work = beginJournalBindingWork(binding);
+				retireModelRequestWriterCredential(fixture.requester);
+				handoff.resolve({ work, execution: principal.execution });
+			});
+			const { work, execution } = await handoff.promise;
+			await Promise.resolve();
+			await expect(
+				prepareJournalSend(execution, Object.freeze({ attemptId: randomUUID() })),
+			).rejects.toThrow();
+			endJournalWork(work, { type: "fulfilled" });
+			await Promise.allSettled([operation]);
+			expect(closedSessions(root)).toEqual([root.getSessionId()]);
+		} finally {
+			await Promise.allSettled([operation]);
+			await fixture.close();
+		}
+	});
+
+	test("faulted execution families still allow active outer work end while rejecting new execution work", async () => {
+		const fixture = new R11JournalFixture();
+		const handoff = Promise.withResolvers<{ work: JournalWorkHandle; execution: ModelRequestExecution }>();
+		let operation: Promise<unknown> | undefined;
+		try {
+			const root = fixture.open();
+			operation = fixture.withBinding(root, async binding => {
+				const principal = await fixture.ready(binding, root);
+				const work = beginJournalBindingWork(binding);
+				await closeJournalSession(principal.session);
+				handoff.resolve({ work, execution: principal.execution });
+			});
+			const { work, execution } = await handoff.promise;
+			await Promise.resolve();
+			expect(() => beginJournalExecutionWork(execution)).toThrow();
+			endJournalWork(work, { type: "fulfilled" });
+			await Promise.allSettled([operation]);
+			expect(closedSessions(root)).toEqual([root.getSessionId()]);
+		} finally {
+			await Promise.allSettled([operation]);
+			await fixture.close();
 		}
 	});
 
@@ -393,11 +459,8 @@ mac("authority private binding lifetime with actual File principals", () => {
 			await operation;
 		} finally {
 			hold.resolve();
-			try {
-				await operation;
-			} finally {
-				await fixture.close();
-			}
+			await Promise.allSettled([operation]);
+			await fixture.close();
 		}
 	});
 
@@ -453,12 +516,8 @@ mac("authority private binding lifetime with actual File principals", () => {
 			assertExclusiveLease(ownerLock, false);
 		} finally {
 			externalEnd.resolve();
-			try {
-				await ending;
-				await operation;
-			} finally {
-				await fixture.close();
-			}
+			await Promise.allSettled([ending, operation]);
+			await fixture.close();
 		}
 	});
 });
