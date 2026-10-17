@@ -603,7 +603,7 @@ export class ModelRequestRuntime {
 		});
 		const outer = this.#createExecution(init("context-check-outer"));
 		const inner = this.#createExecution(init("context-check-inner"));
-		const sameAs = (expected: ModelRequestExecution | undefined) => this.currentExecution() === expected;
+		const sameAs = (expected: ModelRequestExecution | undefined) => this.#currentExecution() === expected;
 
 		if (!sameAs(undefined)) return false;
 
@@ -627,17 +627,17 @@ export class ModelRequestRuntime {
 		// A stored object the core did not mint is not a context.
 		const forged = await this.#als.run({ forged: true }, async () => {
 			await Promise.resolve();
-			return this.currentExecution() === undefined;
+			return this.#currentExecution() === undefined;
 		});
 		if (!forged) return false;
 
 		// EventEmitter listeners run in the context of the emit side, not of the registration side.
 		const emitter = new EventEmitter();
 		const seen: Array<ModelRequestExecution | undefined> = [];
-		this.runWith(outer, () => emitter.on("registered-inside", () => seen.push(this.currentExecution())));
+		this.runWith(outer, () => emitter.on("registered-inside", () => seen.push(this.#currentExecution())));
 		emitter.emit("registered-inside");
 		const registeredOutsideSeen: Array<ModelRequestExecution | undefined> = [];
-		emitter.on("registered-outside", () => registeredOutsideSeen.push(this.currentExecution()));
+		emitter.on("registered-outside", () => registeredOutsideSeen.push(this.#currentExecution()));
 		this.runWith(inner, () => emitter.emit("registered-outside"));
 		return seen.length === 1 && seen[0] === undefined && registeredOutsideSeen.length === 1 && registeredOutsideSeen[0] === inner;
 	}

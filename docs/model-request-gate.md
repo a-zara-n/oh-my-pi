@@ -239,6 +239,9 @@ execution into private attempt/scope construction. Its public `currentExecution`
 and `scopeOf` methods are facades, not callbacks that internal authorization
 reacquires. An alternating accessor cannot make the gate authorize one genuine
 context while the canonical dispatcher consumes another context's admission.
+The asynchronously started context/coverage self-check uses that private lookup
+too; it does not execute a caller's replacement public execution method while
+authorization is in flight.
 The non-exported map binds the original runtime, exact execution, attempt id,
 lease, admission and `authorized/prepared/begun/ended` state; entries are never
 deleted or revived.
