@@ -69,6 +69,9 @@ mac("authority private binding lifetime with actual File principals", () => {
 				const retained = retainVerifiedModelRequestJournalRoot(binding, "lifetime-use");
 				entered.resolve(retained);
 				await useSettlement.promise;
+				// This caller-owned root is not the File registry. End its real
+				// ownership before a different registry's logical-close acquisition.
+				retained.release();
 				return "settled";
 			});
 			void operation.catch(error => entered.reject(error));
@@ -94,7 +97,6 @@ mac("authority private binding lifetime with actual File principals", () => {
 		const fixture = new R11JournalFixture();
 		const failure = new Error("reject after actual queue admission");
 		const accepted: Promise<unknown>[] = [];
-		let retained: ModelRequestJournalRetainedRootScope | undefined;
 		try {
 			const root = fixture.open();
 			const child = fixture.open();
@@ -103,7 +105,7 @@ mac("authority private binding lifetime with actual File principals", () => {
 				const parent = await fixture.ready(binding, root);
 				const childPrincipal = await fixture.ready(binding, child, parent);
 				const descendant = await fixture.ready(binding, deep, childPrincipal, undefined, root);
-				retained = retainVerifiedModelRequestJournalRoot(binding, "lifetime-rejected-use");
+				assertExclusiveLease(path.join(fixture.namespace, "owners", `${fixture.writerId}.lock`), true);
 				for (const principal of [parent, childPrincipal, descendant]) {
 					const append = appendJournalMetadata(principal.session, principal.execution, {
 						schemaVersion: 1, event: "decision", coreAttemptId: randomUUID(), requestId: randomUUID(),
@@ -126,9 +128,10 @@ mac("authority private binding lifetime with actual File principals", () => {
 				expect(cell.getEntries().filter(entry => entry.type === "model_request_metadata")).toHaveLength(1);
 				expect(fs.readFileSync(cell.getSessionFile(), "utf8")).toContain('"event":"decision"');
 			}
-			expect(retained).toBeDefined();
-			expect(() => retained?.assertHeld()).toThrow();
-			assertExclusiveLease(path.join(fixture.namespace, "accounting/lifetime-rejected-use.lock"), false);
+			const registryId = root.getHeader().modelRequestRegistry?.registryId;
+			if (!registryId) throw new Error("Missing actual registry identity");
+			assertExclusiveLease(path.join(fixture.namespace, "accounting", `${registryId}.lock`), false);
+			assertExclusiveLease(path.join(fixture.namespace, "owners", `${fixture.writerId}.lock`), false);
 		} finally {
 			await Promise.allSettled(accepted);
 			await fixture.close();
@@ -148,6 +151,9 @@ mac("authority private binding lifetime with actual File principals", () => {
 					await fixture.ready(binding, fixture.open(), parent);
 					retained = retainVerifiedModelRequestJournalRoot(binding, "lifetime-retired");
 					retireModelRequestWriterCredential(fixture.requester);
+					// Do not substitute an unrelated retained-root order violation
+					// for the genuine retired-credential rejection during close.
+					retained.release();
 					throw failure;
 				});
 			} catch (error) { combined = error; }

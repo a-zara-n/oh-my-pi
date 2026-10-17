@@ -292,11 +292,13 @@ mac("r11 actual File logical principal ownership", () => {
 			const fixture = new R11JournalFixture();
 			try {
 				const cell = fixture.open();
-				await fixture.withBinding(cell, async binding => {
+				let changed: string | undefined;
+				let rejectionChecked = false;
+				const operation = fixture.withBinding(cell, async binding => {
 					const root = await fixture.ready(binding, cell);
 					const identity = attempt();
 					const admission = await prepareJournalSend(root.execution, identity);
-					const changed = rewriteRecords(fs.readFileSync(cell.getSessionFile(), "utf8"), record => {
+					changed = rewriteRecords(fs.readFileSync(cell.getSessionFile(), "utf8"), record => {
 						if (record.type !== "model_request_registry" || object(record.record).event !== "owner-registered") return;
 						if (mutation === "mixed-schema") record.schemaVersion = 1;
 						else if (mutation === "missing-writer") delete object(record.record).writerOwnerId;
@@ -308,7 +310,13 @@ mac("r11 actual File logical principal ownership", () => {
 					endJournalSendStart(admission);
 					await rejected(() => prepareJournalSend(root.execution, attempt()));
 					expect(fs.readFileSync(cell.getSessionFile(), "utf8")).toBe(changed);
+					rejectionChecked = true;
 				});
+				// The real finalizer must also reject corrupt history; it must not
+				// fabricate a logical-close acknowledgement or hide that failure.
+				await expect(operation).rejects.toBeInstanceOf(AggregateError);
+				expect(rejectionChecked).toBe(true);
+				expect(fs.readFileSync(cell.getSessionFile(), "utf8")).toBe(changed);
 			} finally { await fixture.close(); }
 		});
 	}
