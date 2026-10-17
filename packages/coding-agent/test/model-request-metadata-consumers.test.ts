@@ -25,7 +25,12 @@ import { readModelMentions } from "../src/session/model-mentions";
 import { anonymizeSessionTranscripts, SessionAnonymizer } from "../src/session/session-anonymizer";
 import { buildSessionContext, isTranscriptEntry } from "../src/session/session-context";
 import { formatSessionDumpText } from "../src/session/session-dump-format";
-import type { ModelRequestMetadataEntry, SessionEntry, SessionHeader } from "@oh-my-pi/pi-utils/session-entries";
+import type {
+	ModelRequestMetadataEntry,
+	ModelRequestRegistryEntry,
+	SessionEntry,
+	SessionHeader,
+} from "@oh-my-pi/pi-utils/session-entries";
 import { formatSessionHistoryMarkdown } from "../src/session/session-history-format";
 import { readSessionInfo } from "../src/session/session-listing";
 import { SessionManager } from "../src/session/session-manager";
@@ -265,18 +270,37 @@ describe("model-request metadata consumer cutover", () => {
 		}
 	});
 
-	test("tree metadata is hidden and unselectable even in all and labeled views", async () => {
+	test("tree metadata and registry rows are hidden and unselectable in every view", async () => {
 		await initTheme(false, undefined, undefined, "dark", "light");
 		const { entries, metadata } = fixture("/tmp");
-		for (const mode of ["default", "all", "labeled-only"] as const) {
-			const selected: string[] = [];
-			const selector = new TreeSelectorComponent(
-				[{ entry: entries[0], children: [], label: "conversation" }, { entry: metadata, children: [], label: "journal-canary" }],
-				metadata.id, 40, id => selected.push(id), () => selected.push("cancelled"), undefined, mode,
-			);
-			expect(selector.render(100).join("\n")).not.toContain("journal-canary");
-			selector.handleInput("\r");
-			expect(selected).not.toContain(metadata.id);
+		const registry: ModelRequestRegistryEntry = {
+			type: "model_request_registry", id: "registry2", parentId: null, timestamp,
+			schemaVersion: 2, registryId: journalId, registryEpoch: journalEpoch, seq: 1,
+			record: {
+				event: "owner-registered", ownerId: journalOwnerId, sessionId: "consumer-session",
+				journalEpoch, writerOwnerId: journalOwnerId,
+			},
+		};
+		const legacyRegistry: ModelRequestRegistryEntry = {
+			...registry, id: "registry1", schemaVersion: 1,
+			record: {
+				event: "owner-registered", ownerId: journalOwnerId, sessionId: "consumer-session", journalEpoch,
+			},
+		};
+		const bookkeeping = [metadata, legacyRegistry, registry];
+		expect(buildSessionContext([...entries, ...bookkeeping])).toEqual(buildSessionContext(entries));
+		expect([...entries, ...bookkeeping].filter(isTranscriptEntry)).toEqual(entries.filter(isTranscriptEntry));
+		for (const mode of ["default", "no-tools", "user-only", "all", "labeled-only"] as const) {
+			for (const entry of bookkeeping) {
+				const selected: string[] = [];
+				const selector = new TreeSelectorComponent(
+					[{ entry: entries[0], children: [], label: "conversation" }, { entry, children: [], label: "journal-canary" }],
+					entry.id, 40, id => selected.push(id), () => selected.push("cancelled"), undefined, mode,
+				);
+				expect(selector.render(100).join("\n")).not.toContain("journal-canary");
+				selector.handleInput("\r");
+				expect(selected).not.toContain(entry.id);
+			}
 		}
 	});
 });

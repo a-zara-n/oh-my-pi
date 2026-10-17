@@ -40,7 +40,7 @@ export type SessionTreeEntry = { id: string; parentId: string | null } & (
 	| { type: "mode_change"; mode: string }
 	| { type: "credential_pin"; provider: string }
 	| { type: "ttsr_injection"; injectedRules: string[] }
-	| { type: "session_init" | "reset_boundary" | "model_request_metadata" }
+	| { type: "session_init" | "reset_boundary" | "model_request_metadata" | "model_request_registry" }
 );
 
 /** Session tree shape consumed by the selector. */
@@ -384,7 +384,7 @@ class TreeList implements Component {
 		return node => {
 			const entry = node.entry;
 			// Canonical journal bookkeeping is never a navigation target, even in all mode.
-			if (entry.type === "model_request_metadata") return false;
+			if (entry.type === "model_request_metadata" || entry.type === "model_request_registry") return false;
 			const isCurrentLeaf = entry.id === leafId;
 
 			// Skip assistant messages with only tool calls (no text) unless error/aborted

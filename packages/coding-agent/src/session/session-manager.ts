@@ -2249,7 +2249,9 @@ export class SessionManager {
 					forcedSessionFile ??
 					path.join(this.#sessionDir, `${fileSafeTimestamp(timestamp)}_${this.#sessionId}.jsonl`);
 			}
-			this.#rememberBreadcrumb(this.#cwd, this.#sessionFile, true);
+			const sessionFile = cell?.getSessionFile() ?? this.#sessionFile;
+			if (sessionFile === undefined) journalUnavailable();
+			this.#rememberBreadcrumb(this.#cwd, sessionFile, true);
 		} else {
 			this.#sessionFile = undefined;
 		}

@@ -210,6 +210,33 @@ function rewindToolForSession(session: AgentSession): RewindTool {
 	);
 }
 
+function checkpointAgentTool(toolSession: ToolSession): AgentTool {
+	const tool = new CheckpointTool(toolSession);
+	return {
+		...tool,
+		intent(args) {
+			const value: unknown = args;
+			const goal = value && typeof value === "object" && "goal" in value && typeof value.goal === "string"
+				? value.goal
+				: undefined;
+			return tool.intent({ goal });
+		},
+		execute(toolCallId, params, signal, onUpdate, context) {
+			return tool.execute(toolCallId, tool.parameters.assert(params), signal, onUpdate, context);
+		},
+	};
+}
+
+function rewindAgentTool(toolSession: ToolSession): AgentTool {
+	const tool = new RewindTool(toolSession);
+	return {
+		...tool,
+		execute(toolCallId, params, signal, onUpdate, context) {
+			return tool.execute(toolCallId, tool.parameters.assert(params), signal, onUpdate, context);
+		},
+	};
+}
+
 async function expectNoActiveCheckpointError(session: AgentSession): Promise<void> {
 	await expect(rewindToolForSession(session).execute("repeat_rewind", { report: "retry" })).rejects.toThrow(
 		"No active checkpoint. Create a checkpoint before calling rewind.",
@@ -240,7 +267,7 @@ describe("AgentSession checkpoint rewind branch context", () => {
 					},
 					{ content: ["Unexpected continuation"], stopReason: "stop" },
 				],
-				[new RewindTool(toolSession)],
+				[rewindAgentTool(toolSession)],
 				{ fileBacked: true },
 			);
 			session = harness.session;
@@ -268,15 +295,20 @@ describe("AgentSession checkpoint rewind branch context", () => {
 
 	it("retains the persisted checkpoint and prior conversation when file storage clones tool results", async () => {
 		const report = "findings retained after exploration";
-		let session: AgentSession;
+		let session: AgentSession | undefined;
+		const getSession = (): AgentSession => {
+			if (!session) throw new Error("Expected the checkpoint harness to be initialized");
+			return session;
+		};
 		let persistedCheckpointId: string | undefined;
 		let checkpointResultWasCloned = false;
 		const toolSession = createToolSession({
-			getCheckpointState: () => session.getCheckpointState(),
-			getLastCompletedRewind: () => session.getLastCompletedRewind(),
+			getCheckpointState: () => getSession().getCheckpointState(),
+			getLastCompletedRewind: () => getSession().getLastCompletedRewind(),
 		});
 		const harness = await createHarness(
 			(async function* () {
+				const session = getSession();
 				yield { content: ["Prior answer"], stopReason: "stop" };
 				yield {
 					content: [
@@ -304,7 +336,7 @@ describe("AgentSession checkpoint rewind branch context", () => {
 				};
 				yield { content: ["After rewind"], stopReason: "stop" };
 			})() as MockResponseSource,
-			[new CheckpointTool(toolSession), new RewindTool(toolSession)],
+			[checkpointAgentTool(toolSession), rewindAgentTool(toolSession)],
 			{ fileBacked: true },
 		);
 		session = harness.session;

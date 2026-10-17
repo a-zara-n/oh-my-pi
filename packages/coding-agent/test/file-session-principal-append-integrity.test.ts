@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { loadModelRequestJournalFromFile, loadSessionFile } from "@oh-my-pi/pi-coding-agent/session/session-loader";
@@ -100,14 +101,14 @@ describe("File principal physical append integrity", () => {
 			const physical = physicalEntries(bytes);
 			const loaded = await loadSessionFile(file);
 			for (const entry of [foreign, staged, manager.getEntry(own)]) {
-				expect(entry).toBeDefined();
+				assert.ok(entry);
 				expect(physical).toContainEqual(entry);
 				expect(loaded.entries).toContainEqual(entry);
 			}
-			expect(loaded.entries.slice(1)).toEqual(cell.getEntries());
-			expect(manager.getEntries()).toEqual(cell.getEntries());
+			assert.deepEqual(loaded.entries.slice(1), cell.getEntries());
+			assert.deepEqual(manager.getEntries(), cell.getEntries());
 			expect(cell.getExpectedDiskSize()).toBe(Buffer.byteLength(bytes));
-			for (const entry of initial.slice(1)) expect(cell.getEntry(entry.id)).toEqual(entry);
+			for (const entry of initial.slice(1)) assert.deepEqual(cell.getEntry(entry.id), entry);
 			if (managed) {
 				const journal = await loadModelRequestJournalFromFile(file);
 				expect(journal.metadataEntries.map(entry => entry.id)).toEqual(["metadata1", "metadata2"]);
@@ -226,7 +227,7 @@ describe("File principal physical append integrity", () => {
 				await manager.rewriteEntries();
 				const loaded = await loadSessionFile(file);
 				expect(loaded.malformedRecords).toBe(0);
-				expect(loaded.entries.slice(1)).toEqual(cell.getEntries());
+				assert.deepEqual(loaded.entries.slice(1), cell.getEntries());
 				expect(manager.getLeafId()).toBe(leaf);
 				expect(cell.getExpectedDiskSize()).toBe(fs.statSync(file).size);
 			} finally {
@@ -246,7 +247,7 @@ describe("File principal physical append integrity", () => {
 			const row = kind === "invalid id" ? userEntry(kind) : { ...userEntry("injected"), type: kind };
 			await expect(new FileSessionStorage().writeTextAtomic(file, `${bytes}${JSON.stringify(row)}\n`)).rejects.toThrow(unavailable);
 			expect(await Bun.file(file).text()).toBe(bytes);
-			expect(cell.getEntries()).toEqual(entries.slice(1));
+			assert.deepEqual(cell.getEntries(), entries.slice(1));
 			expect(cell.getExpectedDiskSize()).toBe(Buffer.byteLength(bytes));
 		} finally { await closeCell(cell); }
 	});
