@@ -2826,23 +2826,10 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 	}
 
 	async #publish(header: SessionHeader, entries: readonly SessionEntry[]): Promise<void> {
-		this.#assertLive();
-		const body = serializeTitleSlot({ title: header.title, source: header.titleSource, updatedAt: this.#titleUpdatedAt ?? header.timestamp }) +
-			`${JSON.stringify(header)}\n${entries.map(entry => `${JSON.stringify(entry)}\n`).join("")}`;
-		const generation = this.#generation;
-		const filename = this.#sessionFile;
-		const pending = principalWriteContext.run({ principal: this, body, generation, targetFile: filename }, () => this.#storage.writeTextAtomic(filename, body, {
-			expectedSize: this.#expectedSize, requireAtomicReplace: true,
-			commitGuard: () => !this.#closed && (!this.#sealed || principalCloseContext.getStore() === this) &&
-				!this.#fault && this.#generation === generation && this.#sessionFile === filename,
-		}));
-		await pending;
-		await this.#storage.drain();
-		if (this.#generation !== generation || this.#sessionFile !== filename) unavailable();
-		const visible = strictFile(await this.#storage.readText(filename));
-		const expected = strictFile(body);
-		if (JSON.stringify(visible) !== JSON.stringify(expected)) unavailable();
-		this.#acceptCommitted({ ...visible, titleUpdatedAt: parseSessionContent(body).titleSlot?.updatedAt }, Buffer.byteLength(body));
+		// Ordinary File appendSync/flushSync writes cannot join an async queue.
+		// Keep every accepted canonical publication, including its snapshot and
+		// readback, in one synchronous segment using the existing File CAS.
+		this.#publishAcceptedSync(header, entries);
 	}
 
 	ensureOnDisk(): Promise<void> {
@@ -3270,11 +3257,7 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 			schemaVersion: 2, registryId: registry.registryId, registryEpoch: registry.registryEpoch, seq: ++seq, record,
 		}));
 		validateModelRequestRegistry(this.#header, [...this.#entries, ...entries]);
-		// A live root's ordinary appendSync/flushSync cannot join an async queue.
-		// Keep its close publication in one synchronous File publish segment so
-		// those cooperating writes cannot interleave with staging and its CAS.
-		if (principalCloseContext.getStore() === this) this.#publishAcceptedSync(this.#header, [...this.#entries, ...entries]);
-		else await this.#publish(this.#header, [...this.#entries, ...entries]);
+		await this.#publish(this.#header, [...this.#entries, ...entries]);
 		if (this.#readRegistry().throughSeq !== seq) unavailable();
 	}
 

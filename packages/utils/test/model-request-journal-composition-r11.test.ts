@@ -435,8 +435,8 @@ mac("r11 actual File logical principal ownership", () => {
 		});
 	}
 
-	for (const publisher of ["appendSync", "flushSync"] as const) {
-		test(`sibling closes preserve ordinary root ${publisher} writes accepted while the root is live`, async () => {
+	for (const publisher of ["appendSync", "flushSync"] as const) for (const canonical of ["metadata", "source"] as const) {
+		test(`sibling closes and accepted ${canonical} preserve ordinary root ${publisher} writes`, async () => {
 			const fixture = new R11JournalFixture();
 			try {
 				const rootCell = fixture.open();
@@ -450,6 +450,15 @@ mac("r11 actual File logical principal ownership", () => {
 					if (!writer.appendSync) throw new Error("Missing actual File appendSync");
 					const ordinary: CustomEntry[] = [];
 					const closes = siblings.map(sibling => closeJournalSession(sibling.session));
+					const source: ModelRequestSourceInput = { kind: "assistant", args: [{ role: "assistant",
+						content: [{ type: "text", text: "canonical source during ordinary root writes" }],
+						api: "openai-completions", provider: "openai", model: "fixture-model", stopReason: "stop", timestamp: 1,
+						usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
+							cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } }] };
+					const pending = canonical === "metadata"
+						? appendJournalMetadata(root.session, root.execution, decision(rootCell, rootCell))
+						: appendJournalSource(root.session, root.execution, source,
+							{ schemaVersion: 1, sourceKind: "assistant", resultId: null, provenance: { kind: "non-wire", reason: "local" } });
 					const writing = (async () => {
 						// Keep producing genuine synchronous File writes across the close
 						// queue's microtasks, without sealing or closing their live root.
@@ -463,7 +472,11 @@ mac("r11 actual File logical principal ownership", () => {
 							await Promise.resolve();
 						}
 					})();
-					await Promise.all([writing, ...closes]);
+					const [ack] = await Promise.all([pending, Promise.all([writing, ...closes])]);
+					assertAck(ack, rootCell, 1);
+					if (canonical === "source") {
+						expect(rootCell.getEntry(ack.sourceEntryId!)).toMatchObject({ type: "message", message: source.args[0] });
+					}
 					assertJournalExecutionReady(root.execution);
 					await rootCell.flush();
 					for (const sibling of siblings) {
@@ -475,6 +488,10 @@ mac("r11 actual File logical principal ownership", () => {
 					rootCell.seal();
 					await rootCell.close();
 					const durable = parseSessionContent(fs.readFileSync(rootCell.getSessionFile(), "utf8")).entries;
+					expect(durable.find(entry => entry.id === ack.metadataEntryId)).toEqual(metadata(rootCell)[0]);
+					if (canonical === "source") {
+						expect(durable.find(entry => entry.id === ack.sourceEntryId)).toEqual(rootCell.getEntry(ack.sourceEntryId!));
+					}
 					for (const entry of ordinary) {
 						expect(durable.find(candidate => candidate.id === entry.id)).toEqual(entry);
 						expect(rootCell.getEntry(entry.id)).toEqual(entry);
@@ -482,6 +499,9 @@ mac("r11 actual File logical principal ownership", () => {
 					validateModelRequestRegistry(rootCell.getHeader(), durable);
 					expect(durable.filter(entry => entry.type === "model_request_registry" &&
 						entry.record.event === "owner-closed")).toHaveLength(3);
+					expect(durable.find(entry => entry.type === "model_request_registry" &&
+						entry.record.event === "owner-closed" && entry.record.sessionId === rootCell.getSessionId()))
+						.toMatchObject({ record: { throughSeq: 1, outcome: "closed" } });
 					assertReleasedNow(rootLock(fixture, rootCell));
 				});
 			} finally { await fixture.close(); }
