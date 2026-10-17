@@ -1,14 +1,21 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import type { ModelRequestExecution } from "@oh-my-pi/pi-ai/model-request-execution";
+import type { ModelRequestJournalLeaseBinding } from "@oh-my-pi/pi-utils/model-request-journal-authority";
 import {
-	resolveModelRequestScope,
-	type ModelRequestExecution,
-} from "@oh-my-pi/pi-ai/model-request-execution";
-import {
-	type ModelRequestJournalLeaseBinding,
-	type ModelRequestJournalRootLeaseScope,
-	withVerifiedModelRequestJournalLeases,
-} from "@oh-my-pi/pi-utils/model-request-journal-authority";
+	assertJournalExecutionReady,
+	closeJournalSession,
+	composeJournalSession,
+	type FileJournalCell,
+	FileSessionStorage,
+	type JournalSession,
+	MemorySessionStorage,
+	type ModelRequestJournalOwner,
+	openFileJournalCell,
+	type SessionStorage,
+	type SessionStorageWriter,
+	SessionWriteConflictError,
+} from "@oh-my-pi/pi-utils/model-request-journal-composition";
 import type {
 	AssistantMessage,
 	ImageContent,
@@ -17,7 +24,7 @@ import type {
 	ServiceTierByFamily,
 	TextContent,
 	Usage,
-} from "@oh-my-pi/pi-ai";
+} from "@oh-my-pi/pi-utils/model-data";
 import { createSyntheticToolResultMessage } from "@oh-my-pi/pi-agent-core";
 import {
 	directoryIsEnterable,
@@ -35,25 +42,24 @@ import {
 	stringifyJson,
 	toError,
 } from "@oh-my-pi/pi-utils";
-import type { StructuredSubagentSchemaMode } from "@oh-my-pi/pi-tui/tools/task";
+import type {
+	BashExecutionMessage,
+	CustomMessage,
+	FileMentionMessage,
+	HookMessage,
+	PythonExecutionMessage,
+} from "@oh-my-pi/pi-utils/agent-messages";
 import { moveFileAcrossDevices } from "@oh-my-pi/pi-utils/atomic-file";
 import { ArtifactManager } from "./artifacts";
 import { type BlobPutOptions, type BlobPutResult, BlobStore, lazyImageDataSync } from "./blob-store";
-import type { CompactionMethod } from "./compaction-methods";
 import {
-	type BashExecutionMessage,
-	type CustomMessage,
-	type FileMentionMessage,
-	type HookMessage,
 	normalizeCustomMessagePayload,
-	type PythonExecutionMessage,
 	sanitizeRehydratedOpenAIResponsesAssistantMessage,
 	stripInternalDetailsFields,
 } from "./messages";
-import type { WorkPoolYieldItem } from "../task/workpool-yield";
-import type { RetryFallbackRole } from "./retry-fallback-chains";
 import { type BuildSessionContextOptions, buildSessionContext, type SessionContext } from "./session-context";
 import {
+	type CompactionMethod,
 	type BranchSummaryEntry,
 	type CompactionEntry,
 	type CredentialPinEntry,
@@ -67,9 +73,10 @@ import {
 	type ModelUsageEntry,
 	type ModelRequestJournalAck,
 	type ModelRequestLifecycleRecord,
-	type ModelRequestMetadataEntry,
 	type ModelRequestSourceLinkInput,
+	type ModelRequestSourceInput,
 	type NewSessionOptions,
+	type RetryFallbackRole,
 	type ResetBoundaryEntry,
 	type ServiceTierChangeEntry,
 	type SessionEntry,
@@ -77,13 +84,15 @@ import {
 	type SessionInitEntry,
 	type SessionMessageEntry,
 	type SessionTitleSource,
-	type SessionTreeNode,
 	type ThinkingLevelChangeEntry,
+	type StructuredSubagentSchemaMode,
 	TITLE_CHANGE_ENTRY_TYPE,
 	type TitleChangeEntry,
 	type TtsrInjectionEntry,
 	type UsageStatistics,
-} from "./session-entries";
+	type WorkPoolYieldItem,
+} from "@oh-my-pi/pi-utils/session-entries";
+import type { SessionTreeNode } from "./session-entries";
 import {
 	filterSessionsForPicker,
 	findMostRecentNonEmptySession,
@@ -114,26 +123,14 @@ import {
 } from "./session-paths";
 import { forgetExternalizedImages, prepareEntryForPersistence } from "./session-persistence";
 import { loadPinnedSessionIds, sortPinnedFirst } from "./session-pins";
-import {
-	FileSessionStorage,
-	MemorySessionStorage,
-	type SessionStorage,
-	type SessionStorageWriter,
-	SessionWriteConflictError,
-} from "./session-storage";
-import { type SessionTitleUpdate, serializeTitleSlot } from "./session-title-slot";
+import { type SessionTitleUpdate, serializeTitleSlot } from "@oh-my-pi/pi-utils/session-title-slot";
 import {
 	additionalWorkspaceDirectories,
 	normalizeSessionWorkspace,
 	normalizeWorkspaceDirectory,
 } from "./session-workspace";
 import { recordSessionRecap, recordSessionTitle } from "./session-index";
-import {
-	assertModelRequestLifecycleRecord,
-	assertModelRequestSourceLinkInput,
-	validateModelRequestJournal,
-	type ModelRequestJournalValidation,
-} from "./model-request-journal";
+import { validateModelRequestJournal } from "@oh-my-pi/pi-utils/model-request-journal";
 
 const JSONL_SUFFIX_LENGTH = ".jsonl".length;
 const DRAFT_ONLY_SESSION_MARKER = ".draft-only-session";
@@ -538,7 +535,7 @@ class SessionEntryIndex {
 		const isNew = !this.#entriesById.has(entry.id);
 		this.#entriesById.set(entry.id, entry);
 		// Journal metadata is addressable canonical history, never a tree node.
-		if (entry.type === "model_request_metadata") return;
+		if (entry.type === "model_request_metadata" || entry.type === "model_request_registry") return;
 		this.#leaf = entry.id;
 		this.#generation++;
 		const cache = this.#branchCache;
@@ -600,7 +597,8 @@ class SessionEntryIndex {
 	}
 
 	setLeaf(id: string | null): void {
-		if (id !== null && this.#entriesById.get(id)?.type === "model_request_metadata") {
+		const type = id === null ? undefined : this.#entriesById.get(id)?.type;
+		if (type === "model_request_metadata" || type === "model_request_registry") {
 			throw new Error("Model request journal metadata cannot be a branch leaf.");
 		}
 		if (this.#leaf === id) return;
@@ -660,9 +658,9 @@ class SessionEntryIndex {
 		const seen = new Set<string>();
 		let cursor = leaf ? this.#entriesById.get(leaf) : undefined;
 
-		if (cursor?.type === "model_request_metadata") return branch;
+		if (cursor?.type === "model_request_metadata" || cursor?.type === "model_request_registry") return branch;
 		while (cursor && !seen.has(cursor.id)) {
-			if (cursor.type === "model_request_metadata") break;
+			if (cursor.type === "model_request_metadata" || cursor.type === "model_request_registry") break;
 			seen.add(cursor.id);
 			branch.push(cursor);
 			cursor = cursor.parentId ? this.#entriesById.get(cursor.parentId) : undefined;
@@ -676,12 +674,12 @@ class SessionEntryIndex {
 		const roots: SessionTreeNode[] = [];
 
 		for (const entry of entries) {
-			if (entry.type === "model_request_metadata") continue;
+			if (entry.type === "model_request_metadata" || entry.type === "model_request_registry") continue;
 			nodes.set(entry.id, { entry, children: [], label: this.#labels.get(entry.id) });
 		}
 
 		for (const entry of entries) {
-			if (entry.type === "model_request_metadata") continue;
+			if (entry.type === "model_request_metadata" || entry.type === "model_request_registry") continue;
 			const node = nodes.get(entry.id)!;
 			const parentId = entry.parentId;
 			if (parentId === null || parentId === entry.id) {
@@ -851,149 +849,28 @@ export class ForkSourceNotFoundError extends Error {
 	}
 }
 
-declare const MODEL_REQUEST_JOURNAL_OWNER: unique symbol;
-
-/** An issued object identity, never an ID DTO or a deserialized capability. */
-export interface ModelRequestJournalOwner {
-	readonly [MODEL_REQUEST_JOURNAL_OWNER]: true;
-}
-
-class IssuedModelRequestJournalOwner implements ModelRequestJournalOwner {
-	declare readonly [MODEL_REQUEST_JOURNAL_OWNER]: true;
-}
-
-export type ModelRequestSourceInput =
-	| { kind: "assistant"; args: Parameters<SessionManager["appendMessage"]> }
-	| { kind: "model_usage"; args: Parameters<SessionManager["appendModelUsage"]> };
-
-/** Session-bound operations; neither the owner nor a rebinding operation escapes. */
-export interface ModelRequestJournal {
-	appendMetadata(record: ModelRequestLifecycleRecord): Promise<ModelRequestJournalAck>;
-	appendSource(source: ModelRequestSourceInput, link: ModelRequestSourceLinkInput): Promise<ModelRequestJournalAck>;
-}
-
 export type ModelRequestJournalCompositionHandoff = Readonly<{
 	execution: ModelRequestExecution;
 	rootManager: SessionManager;
 	leases: ModelRequestJournalLeaseBinding;
-	acceptJournal: (journal: ModelRequestJournal) => void;
 }>;
 
-// Only the real registry writer may populate this map after its strict reader ack.
-// ISS-049 owns that producer. A descriptor or a caller-provided DTO is not a receipt.
-type RegisteredJournalReceipt = Readonly<{
-	registryId: string;
-	registryEpoch: string;
-	registrationThroughSeq: number;
-	rootSessionId: string;
-	sessionId: string;
-	journalId: string;
-	journalOwnerId: string;
-	journalEpoch: string;
-	firstSeq: 1;
-}>;
-
-interface RegisteredJournalReceiptState {
-	readonly receipt: RegisteredJournalReceipt;
-	readonly rootManager: SessionManager;
-	readonly memberManager: SessionManager;
-	readonly rootGeneration: number;
-	readonly memberGeneration: number;
-	readonly persistenceOwner: SessionStorage;
-	readonly leases: ModelRequestJournalLeaseBinding;
-	readonly scope: ModelRequestJournalRootLeaseScope;
-}
-
-interface ModelRequestJournalOwnerState {
-	readonly manager: SessionManager;
-	readonly rootManager: SessionManager;
-	readonly rootGeneration: number;
-	readonly receipt: RegisteredJournalReceipt;
-	readonly leases: ModelRequestJournalLeaseBinding;
-	readonly generation: number;
-	readonly sessionFile: string;
-	readonly persistenceOwner: SessionStorage;
-	throughSeq: number;
-	closed: boolean;
-	journal?: ModelRequestJournal;
-	execution?: ModelRequestExecution;
-}
-
-interface ModelRequestJournalManagerAccess {
-	generation(): number;
-	assertWritable(): void;
-	issue(receipt: RegisteredJournalReceiptState): Promise<ModelRequestJournalOwner>;
-	invalidate(): void;
-}
-
-const modelRequestJournalManagers = new WeakMap<SessionManager, ModelRequestJournalManagerAccess>();
-const registeredJournalReceipts = new WeakMap<SessionManager, RegisteredJournalReceiptState>();
-const issuedModelRequestJournalOwners = new WeakMap<ModelRequestJournalOwner, ModelRequestJournalOwnerState>();
+// A facade resolves only its actual principal. It never mints ownership or registration.
+const fileJournalCells = new WeakMap<SessionManager, FileJournalCell>();
+// Lifetime accounting only; neither counts nor facades authenticate a journal operation.
+const filePrincipalReferences = new WeakMap<FileJournalCell, number>();
+const bindJournalComposition = Symbol("bindJournalComposition");
 
 function journalUnavailable(): never {
 	throw new Error("Model request journal capability is unavailable.");
 }
 
-/** The only owner minting function; deliberately not exported to SDK/readers. */
-async function issueModelRequestJournalOwner(manager: SessionManager): Promise<ModelRequestJournalOwner> {
-	const access = modelRequestJournalManagers.get(manager);
-	const registration = registeredJournalReceipts.get(manager);
-	if (!access || !registration) journalUnavailable();
-	return access.issue(registration);
-}
-
-/**
- * Internal composition boundary. Until the real registry writer has registered
- * this manager, this rejects rather than treating a File header as registration.
- */
 export async function bindModelRequestJournalComposition(
 	manager: SessionManager,
 	handoff: ModelRequestJournalCompositionHandoff,
 ): Promise<void> {
-	const access = modelRequestJournalManagers.get(manager);
-	const rootAccess = modelRequestJournalManagers.get(handoff.rootManager);
-	if (!access || !rootAccess) journalUnavailable();
-	access.assertWritable();
-	rootAccess.assertWritable();
-	const executionScope = resolveModelRequestScope(handoff.execution);
-	if (executionScope.sessionId !== manager.getSessionId() ||
-		executionScope.rootSessionId !== handoff.rootManager.getSessionId() ||
-		handoff.leases.rootSessionId !== executionScope.rootSessionId) journalUnavailable();
-	const registration = registeredJournalReceipts.get(manager);
-	if (!registration || registration.rootManager !== handoff.rootManager ||
-		registration.leases !== handoff.leases) journalUnavailable();
-	try {
-		await withVerifiedModelRequestJournalLeases(handoff.leases, registration.receipt.registryId, async scope => {
-			// ISS-049's real bootstrap/register producer runs in this exact scope;
-			// a receipt retained from a previous root critical section is invalid.
-			if (registeredJournalReceipts.get(manager)?.scope !== scope) journalUnavailable();
-			const owner = await issueModelRequestJournalOwner(manager);
-			const state = issuedModelRequestJournalOwners.get(owner);
-			if (!state || state.closed || (state.execution && state.execution !== handoff.execution)) journalUnavailable();
-			const journal = state.journal ?? Object.freeze({
-				appendMetadata: (record: ModelRequestLifecycleRecord) => manager.appendModelRequestMetadata(owner, record),
-				appendSource: (source: ModelRequestSourceInput, link: ModelRequestSourceLinkInput) =>
-					manager.appendModelRequestSource(owner, source, link),
-			});
-			state.journal = journal;
-			state.execution = handoff.execution;
-			handoff.acceptJournal(journal);
-			scope.assertActive();
-			access.assertWritable();
-			rootAccess.assertWritable();
-			const currentScope = resolveModelRequestScope(handoff.execution);
-			if (state.closed || state.generation !== access.generation() ||
-				registration.rootGeneration !== rootAccess.generation() ||
-				currentScope.sessionId !== state.receipt.sessionId ||
-				currentScope.rootSessionId !== state.receipt.rootSessionId ||
-				manager.getSessionId() !== state.receipt.sessionId ||
-				handoff.rootManager.getSessionId() !== state.receipt.rootSessionId) journalUnavailable();
-		});
-	} catch (error) {
-		// Also covers the fixed verifier's recheck after the consumer returns.
-		access.invalidate();
-		throw error;
-	}
+	if (!fileJournalCells.has(manager) || !fileJournalCells.has(handoff.rootManager)) journalUnavailable();
+	await manager[bindJournalComposition](handoff);
 }
 
 /**
@@ -1027,16 +904,39 @@ export class SessionManager {
 	#fallbackRuntimeOnly = false;
 	#sessionDir: string;
 	readonly #persist: boolean;
-	readonly #storage: SessionStorage;
+	#storage: SessionStorage;
+	#filePrincipalRetained = false;
 	readonly #blobs: BlobStore;
 
-	#sessionId = "";
+	#nonFileSessionId = "";
+	get #sessionId(): string {
+		return fileJournalCells.get(this)?.getSessionId() ?? this.#nonFileSessionId;
+	}
+	set #sessionId(value: string) {
+		const cell = fileJournalCells.get(this);
+		if (cell) {
+			if (cell.getSessionId() !== value) journalUnavailable();
+			return;
+		}
+		this.#nonFileSessionId = value;
+	}
 	#sessionName: string | undefined;
 	#titleSource: SessionTitleSource | undefined;
 	#titleRevision = 0;
 	/** Bumped by in-place entry updates, which a {@link SessionBodyStamp} cannot otherwise see. */
 	#bodyRevision = 0;
-	#sessionFile: string | undefined;
+	#nonFileSessionFile: string | undefined;
+	get #sessionFile(): string | undefined {
+		return fileJournalCells.get(this)?.getSessionFile() ?? this.#nonFileSessionFile;
+	}
+	set #sessionFile(value: string | undefined) {
+		const cell = fileJournalCells.get(this);
+		if (cell) {
+			if (cell.getSessionFile() !== value) journalUnavailable();
+			return;
+		}
+		this.#nonFileSessionFile = value;
+	}
 	#header!: SessionHeader;
 	#titleUpdatedAt = "";
 	#hasTitleSlot = true;
@@ -1058,10 +958,7 @@ export class SessionManager {
 		SessionManagerStateSnapshot,
 		{ sessionId: string; sessionFile: string | undefined; cwd: string; sessionDir: string }
 	>();
-	#modelRequestJournalGeneration = 0;
-	#modelRequestJournalOwner: ModelRequestJournalOwner | undefined;
-	/** Only newly created, still source-free sessions may receive their first descriptor. */
-	#modelRequestJournalFreshSession = false;
+	#journalSession: JournalSession | undefined;
 	/** Byte length this manager last loaded or durably wrote; `null` means the path was absent. */
 	#expectedDiskSize: number | null = null;
 	/**
@@ -1160,28 +1057,54 @@ export class SessionManager {
 	 */
 	#pendingArtifactCopy: { sessionFile: string; done: Promise<void> } | undefined;
 
-	private constructor(cwd: string, sessionDir: string, persist: boolean, storage: SessionStorage) {
+	private constructor(
+		cwd: string,
+		sessionDir: string,
+		persist: boolean,
+		storage: SessionStorage,
+		cell?: FileJournalCell,
+	) {
 		this.#cwd = cwd;
 		this.#sessionDir = sessionDir;
 		this.#persist = persist;
 		this.#storage = storage;
+		if (persist && (cell || storage instanceof FileSessionStorage)) {
+			this.#adoptFilePrincipal(cell ?? openFileJournalCell({ cwd, sessionDir }));
+		}
 		this.#blobs = new BlobStore(getBlobsDir());
 
 		if (persist && sessionDir) this.#storage.ensureDirSync(sessionDir);
-		// Construction registers private access only, never an owner or a receipt.
-		modelRequestJournalManagers.set(this, {
-			generation: () => this.#modelRequestJournalGeneration,
-			assertWritable: () => this.#assertModelRequestJournalWritable(),
-			issue: registration => this.#issueRegisteredModelRequestJournalOwner(registration),
-			invalidate: () => this.#invalidateModelRequestJournalOwner(),
-		});
+	}
+
+	#adoptFilePrincipal(cell: FileJournalCell): void {
+		const previous = fileJournalCells.get(this);
+		if (previous === cell && this.#filePrincipalRetained) return;
+		if (previous && this.#filePrincipalRetained) {
+			void this.#releaseFilePrincipal().catch(error => this.#noteDiskFailure(error));
+		}
+		fileJournalCells.set(this, cell);
+		filePrincipalReferences.set(cell, (filePrincipalReferences.get(cell) ?? 0) + 1);
+		this.#filePrincipalRetained = true;
+		this.#storage = cell;
+		this.#writer = undefined;
+	}
+
+	async #releaseFilePrincipal(): Promise<void> {
+		const cell = fileJournalCells.get(this);
+		if (!cell || !this.#filePrincipalRetained) return;
+		this.#filePrincipalRetained = false;
+		const remaining = (filePrincipalReferences.get(cell) ?? 1) - 1;
+		filePrincipalReferences.set(cell, remaining);
+		if (remaining === 0 || cell.getHeader().modelRequestJournal || cell.getHeader().modelRequestRegistry) {
+			await cell.close();
+		}
 	}
 
 	#rememberBreadcrumb(cwd: string, sessionFile: string, fresh = false): void {
 		this.#breadcrumbFresh = fresh;
 		if (this.#suppressBreadcrumb) return;
 		writeTerminalBreadcrumb(cwd, sessionFile, fresh, {
-			remoteStorage: !(this.#storage instanceof FileSessionStorage),
+			remoteStorage: !fileJournalCells.has(this) && !(this.#storage instanceof FileSessionStorage),
 		});
 	}
 
@@ -1219,7 +1142,7 @@ export class SessionManager {
 
 	#noteDiskFailure(errorLike: unknown): Error {
 		const error = toError(errorLike);
-		this.#invalidateModelRequestJournalOwner();
+		this.#revokeJournalSession();
 		if (!this.#diskFailure) this.#diskFailure = error;
 		// A line that failed to land leaves its blob refs unreferenced on disk,
 		// so the next persist must re-check those blobs instead of trusting the memo.
@@ -1252,6 +1175,7 @@ export class SessionManager {
 	 * once the owner closed the session or exited.
 	 */
 	#claimSession(): void {
+		if (fileJournalCells.has(this)) return;
 		const sessionId = this.#sessionId;
 		const sessionFile = this.#sessionFile;
 		if (!this.#persist || !sessionFile || !this.#storage.claimSession) return;
@@ -1334,6 +1258,7 @@ export class SessionManager {
 			adopted++;
 		}
 		this.#index.setLeaf(leaf);
+		this.#synchronizePrincipalLeaf();
 		this.#expectedDiskSize = diskSize;
 		if (adopted > 0)
 			logger.warn("Kept session entries another writer added", { sessionFile: this.#sessionFile, adopted });
@@ -1416,9 +1341,19 @@ export class SessionManager {
 		this.#refuseManagedJournalMutation();
 		const from = this.#sessionFile as string;
 		const previousSessionId = this.#sessionId;
-		const timestamp = nowIso();
-		this.#sessionId = mintSessionId();
-		const to = path.join(path.dirname(from), `${fileSafeTimestamp(timestamp)}_${this.#sessionId}.jsonl`);
+		let cell = fileJournalCells.get(this);
+		let to: string;
+		let timestamp: string;
+		if (cell) {
+			cell = openFileJournalCell({ cwd: this.#cwd, sessionDir: path.dirname(from) });
+			this.#adoptFilePrincipal(cell);
+			to = cell.getSessionFile();
+			timestamp = cell.getHeader().timestamp;
+		} else {
+			timestamp = nowIso();
+			this.#sessionId = mintSessionId();
+			to = path.join(path.dirname(from), `${fileSafeTimestamp(timestamp)}_${this.#sessionId}.jsonl`);
+		}
 		this.#header = {
 			...this.#header,
 			id: this.#sessionId,
@@ -1441,6 +1376,8 @@ export class SessionManager {
 	}
 
 	#scheduleDiskWork(work: () => Promise<void>, options: DiskQueueOptions = {}): Promise<void> {
+		const cell = fileJournalCells.get(this);
+		if (cell && !this.#filePrincipalRetained && !this.#released) this.#adoptFilePrincipal(cell);
 		const epoch = options.epoch ?? this.#diskEpoch;
 		const scheduled = this.#diskTail
 			.catch(() => undefined)
@@ -1498,7 +1435,7 @@ export class SessionManager {
 
 	#latchIndeterminate(operationError: Error, recoveryErrors: readonly Error[]): SessionPersistenceIndeterminateError {
 		const error = new SessionPersistenceIndeterminateError(operationError, recoveryErrors);
-		this.#invalidateModelRequestJournalOwner();
+		this.#revokeJournalSession();
 		this.#diskFailure = error;
 		forgetExternalizedImages(this.#blobs);
 		if (!this.#diskFailureLogged) {
@@ -1655,6 +1592,8 @@ export class SessionManager {
 
 	#appendWriter(): SessionStorageWriter {
 		if (!this.#sessionFile) throw new Error("Cannot open a session writer before a session file exists");
+		const cell = fileJournalCells.get(this);
+		if (cell && !this.#filePrincipalRetained && !this.#released) this.#adoptFilePrincipal(cell);
 
 		if (this.#writer?.isOpen()) return this.#writer;
 
@@ -1674,6 +1613,7 @@ export class SessionManager {
 			this.#assertModelRequestJournalHistory(this.#header, this.#entries);
 			this.#protectModelRequestJournalHistory();
 		}
+		this.#synchronizePrincipalLeaf();
 	}
 
 	#recordFullRewrite(bytes: number): void {
@@ -1682,6 +1622,7 @@ export class SessionManager {
 			this.#assertModelRequestJournalHistory(this.#header, this.#entries);
 			this.#protectModelRequestJournalHistory();
 		}
+		this.#synchronizePrincipalLeaf();
 	}
 
 	/**
@@ -1789,6 +1730,8 @@ export class SessionManager {
 	#rewriteSynchronously(): void {
 		if (this.#released) return;
 		if (!this.#persist || !this.#shouldHaveSessionFile()) return;
+		const cell = fileJournalCells.get(this);
+		if (cell && !this.#filePrincipalRetained) this.#adoptFilePrincipal(cell);
 		let targetPath = this.#liveRelocationWritePath() ?? this.#sessionFile;
 		if (!targetPath) return;
 
@@ -2151,8 +2094,7 @@ export class SessionManager {
 	}
 
 	#resetToNewSession(options?: NewSessionOptions, forcedSessionFile?: string): string | undefined {
-		this.#invalidateModelRequestJournalOwner();
-		this.#modelRequestJournalFreshSession = true;
+		this.#revokeJournalSession();
 		this.#modelRequestJournalHistory = undefined;
 		this.#diskTail = Promise.resolve();
 		this.#clearDiskError();
@@ -2160,15 +2102,24 @@ export class SessionManager {
 		this.#reconcileSessionDirForFallback();
 		if (options?.sessionDir && this.#persist) {
 			this.#sessionDir = path.resolve(options.sessionDir);
-			this.#storage.ensureDirSync(this.#sessionDir);
+			if (!fileJournalCells.has(this)) this.#storage.ensureDirSync(this.#sessionDir);
 		}
-		this.#sessionId = mintSessionId();
+		let cell = fileJournalCells.get(this);
+		if (cell) {
+			if (this.#header !== undefined) {
+				cell = openFileJournalCell({ cwd: this.#cwd, sessionDir: this.#sessionDir });
+				this.#adoptFilePrincipal(cell);
+			}
+			if (forcedSessionFile !== undefined) cell.resetToNewSession(options, forcedSessionFile, this.#cwd);
+		} else {
+			this.#sessionId = mintSessionId();
+		}
 		this.#sessionName = undefined;
 		this.#titleSource = undefined;
 		this.#titleUpdatedAt = "";
 		this.#hasTitleSlot = true;
 
-		const timestamp = nowIso();
+		const timestamp = cell?.getHeader().timestamp ?? nowIso();
 		this.#header = {
 			type: "session",
 			version: CURRENT_SESSION_VERSION,
@@ -2206,9 +2157,11 @@ export class SessionManager {
 		this.#inMemoryArtifactCounter = 0;
 
 		if (this.#persist) {
-			this.#sessionFile =
-				forcedSessionFile ??
-				path.join(this.#sessionDir, `${fileSafeTimestamp(timestamp)}_${this.#sessionId}.jsonl`);
+			if (!cell) {
+				this.#sessionFile =
+					forcedSessionFile ??
+					path.join(this.#sessionDir, `${fileSafeTimestamp(timestamp)}_${this.#sessionId}.jsonl`);
+			}
 			this.#rememberBreadcrumb(this.#cwd, this.#sessionFile, true);
 		} else {
 			this.#sessionFile = undefined;
@@ -2217,255 +2170,83 @@ export class SessionManager {
 		return this.#sessionFile;
 	}
 
-	#invalidateModelRequestJournalOwner(): void {
-		this.#modelRequestJournalGeneration++;
-		const state = this.#modelRequestJournalOwner && issuedModelRequestJournalOwners.get(this.#modelRequestJournalOwner);
-		if (state) state.closed = true;
+	#revokeJournalSession(): void {
+		if (!this.#journalSession) return;
+		void closeJournalSession(this.#journalSession).catch(error => {
+			logger.warn("Failed to close model request journal", { error: toError(error).message });
+		});
+		this.#journalSession = undefined;
 	}
 
-	#assertModelRequestJournalWritable(): void {
-		if (!this.#persist || !this.#sessionFile || this.#released || this.#entriesReleased ||
-			this.#diskFailure || this.#loadedMalformedRecords !== 0 || this.#storage.defersSyncPublish ||
-			!(this.#storage instanceof FileSessionStorage) ||
-			this.#storage.modelRequestJournal !== "process-crash-reader-visible") {
-			journalUnavailable();
-		}
+	async [bindJournalComposition](handoff: ModelRequestJournalCompositionHandoff): Promise<void> {
+		const cell = fileJournalCells.get(this);
+		const root = fileJournalCells.get(handoff.rootManager);
+		if (!cell || !root) journalUnavailable();
+		await this.ensureOnDisk();
+		if (handoff.rootManager !== this) await handoff.rootManager.ensureOnDisk();
+		this.#synchronizePrincipalLeaf();
+		if (handoff.rootManager !== this) handoff.rootManager.#synchronizePrincipalLeaf();
+		this.#journalSession = await composeJournalSession({
+			cell,
+			root,
+			binding: handoff.leases,
+			execution: handoff.execution,
+		});
+		this.#refreshPrincipalEntries();
+		if (handoff.rootManager !== this) handoff.rootManager.#refreshPrincipalEntries();
+		assertJournalExecutionReady(handoff.execution);
 	}
 
-	#assertRegisteredModelRequestJournal(registration: RegisteredJournalReceiptState): void {
-		this.#assertModelRequestJournalWritable();
-		const rootAccess = modelRequestJournalManagers.get(registration.rootManager);
-		const receipt = registration.receipt;
-		registration.scope.assertActive();
-		rootAccess?.assertWritable();
-		if (registeredJournalReceipts.get(this) !== registration || registration.memberManager !== this ||
-			registration.memberGeneration !== this.#modelRequestJournalGeneration ||
-			registration.persistenceOwner !== this.#storage || !rootAccess ||
-			registration.rootGeneration !== rootAccess.generation() ||
-			registration.rootManager.getSessionId() !== receipt.rootSessionId ||
-			this.#sessionId !== receipt.sessionId || registration.leases.rootSessionId !== receipt.rootSessionId ||
-			registration.scope.rootSessionId !== receipt.rootSessionId ||
-			registration.scope.registryId !== receipt.registryId ||
-			!Number.isSafeInteger(receipt.registrationThroughSeq) || receipt.registrationThroughSeq < 1 ||
-			receipt.firstSeq !== 1) journalUnavailable();
+	#refreshPrincipalEntries(): void {
+		const cell = fileJournalCells.get(this);
+		if (!cell) return;
+		const leaf = cell.getLeafId();
+		const entries = [...cell.getEntries()];
+		resolveBlobRefsInEntriesSync(entries, this.#blobs);
+		this.#applyEntries(cell.getHeader(), entries);
+		if (leaf === null || this.#index.has(leaf)) this.#index.setLeaf(leaf);
+		this.#synchronizePrincipalLeaf();
+		const sessionFile = cell.getSessionFile();
+		this.#expectedDiskSize = this.#storage.statSync(sessionFile).size;
+		this.#fileIsCurrent = true;
+		this.#rewriteRequired = false;
 	}
 
-	/** Publish the source descriptor only after an authentic registration ack. */
-	async #issueRegisteredModelRequestJournalOwner(
-		registration: RegisteredJournalReceiptState,
-	): Promise<ModelRequestJournalOwner> {
-		this.#assertRegisteredModelRequestJournal(registration);
-		const existing = this.#modelRequestJournalOwner;
-		const state = existing && issuedModelRequestJournalOwners.get(existing);
-		if (existing && state && !state.closed) {
-			if (state.generation !== this.#modelRequestJournalGeneration ||
-				state.leases !== registration.leases || state.receipt !== registration.receipt) journalUnavailable();
-			return existing;
-		}
-		const receipt = registration.receipt;
-		try {
-			await this.#withAtomicPersistenceLock(async () => {
-				this.#assertRegisteredModelRequestJournal(registration);
-				const descriptor = this.#header.modelRequestJournal;
-				if (!descriptor && (!this.#modelRequestJournalFreshSession || this.#entries.some(entry =>
-					entry.type === "model_usage" || (entry.type === "message" && entry.message.role === "assistant")))) {
-					// Never backfill an epoch onto unknown legacy or copied source history.
-					journalUnavailable();
-				}
-				if (descriptor && descriptor.journalId !== receipt.journalId) journalUnavailable();
-				if (descriptor?.epochs.some(epoch =>
-					epoch.journalOwnerId === receipt.journalOwnerId || epoch.journalEpoch === receipt.journalEpoch)) {
-					// A reopened descriptor does not revive a previous owner.
-					journalUnavailable();
-				}
-				this.#assertModelRequestJournalHistory(this.#header, this.#entries);
-				this.#header.modelRequestJournal = {
-					schemaVersion: 1,
-					journalId: receipt.journalId,
-					sessionId: this.#sessionId,
-					epochs: [...(descriptor?.epochs ?? []), {
-						journalOwnerId: receipt.journalOwnerId,
-						journalEpoch: receipt.journalEpoch,
-					}],
-				};
-				// Only this receipt-checked path extends the protected descriptor.
-				this.#protectModelRequestJournalHistory();
-				this.#forceFileCreation = true;
-				await this.#rewriteAtomically();
-				await this.flush();
-				this.#assertRegisteredModelRequestJournal(registration);
-				const visible = await this.#readModelRequestJournal();
-				if (JSON.stringify(visible.descriptor) !== JSON.stringify(this.#header.modelRequestJournal) ||
-					visible.throughSeqByEpoch.get(receipt.journalEpoch) !== 0) journalUnavailable();
-			});
-			this.#assertRegisteredModelRequestJournal(registration);
-			const owner: ModelRequestJournalOwner = Object.freeze(new IssuedModelRequestJournalOwner());
-			const sessionFile = this.#sessionFile;
-			if (!sessionFile) journalUnavailable();
-			issuedModelRequestJournalOwners.set(owner, {
-				manager: this,
-				rootManager: registration.rootManager,
-				rootGeneration: registration.rootGeneration,
-				receipt,
-				leases: registration.leases,
-				generation: this.#modelRequestJournalGeneration,
-				sessionFile,
-				persistenceOwner: this.#storage,
-				throughSeq: 0,
-				closed: false,
-			});
-			this.#modelRequestJournalOwner = owner;
-			return owner;
-		} catch (error) {
-			this.#invalidateModelRequestJournalOwner();
-			throw error;
-		}
-	}
-
-	async #readModelRequestJournal(): Promise<ModelRequestJournalValidation> {
-		const sessionFile = this.#sessionFile;
-		if (!sessionFile) journalUnavailable();
-		const loaded = parseSessionContent(await this.#storage.readText(sessionFile));
-		return validateModelRequestJournal(loaded.entries, loaded);
-	}
-
-	#requireModelRequestJournalOwner(owner: ModelRequestJournalOwner): ModelRequestJournalOwnerState {
-		const state = issuedModelRequestJournalOwners.get(owner);
-		this.#assertModelRequestJournalWritable();
-		const descriptor = this.#header.modelRequestJournal;
-		const epoch = descriptor?.epochs.at(-1);
-		if (!state || state.closed || state.manager !== this || owner !== this.#modelRequestJournalOwner ||
-			state.generation !== this.#modelRequestJournalGeneration || state.persistenceOwner !== this.#storage ||
-			state.sessionFile !== this.#sessionFile || state.receipt.sessionId !== this.#sessionId ||
-			descriptor?.journalId !== state.receipt.journalId ||
-			epoch?.journalOwnerId !== state.receipt.journalOwnerId || epoch.journalEpoch !== state.receipt.journalEpoch) {
-			journalUnavailable();
-		}
-		const rootAccess = modelRequestJournalManagers.get(state.rootManager);
-		if (!rootAccess || rootAccess.generation() !== state.rootGeneration ||
-			state.rootManager.getSessionId() !== state.receipt.rootSessionId || !state.execution) journalUnavailable();
-		rootAccess.assertWritable();
-		const scope = resolveModelRequestScope(state.execution);
-		if (scope.sessionId !== state.receipt.sessionId || scope.rootSessionId !== state.receipt.rootSessionId) {
-			state.closed = true;
-			journalUnavailable();
-		}
-		return state;
-	}
-
-	/** Owner-fixed non-leaf lifecycle append with a separately re-read ack. */
+	/** The principal alone validates the opaque owner and acknowledges the durable append. */
 	async appendModelRequestMetadata(
 		owner: ModelRequestJournalOwner,
 		record: ModelRequestLifecycleRecord,
 	): Promise<ModelRequestJournalAck> {
-		const state = this.#requireModelRequestJournalOwner(owner);
-		const snapshot: unknown = structuredClone(record);
-		assertModelRequestLifecycleRecord(snapshot, state.receipt.sessionId, state.receipt.journalOwnerId);
-		if (snapshot.event !== "logical-result" && snapshot.rootSessionId !== state.receipt.rootSessionId) {
-			journalUnavailable();
-		}
-		return this.#appendModelRequestJournal(owner, () => ({ record: snapshot, sourceEntryId: null }));
+		const cell = fileJournalCells.get(this);
+		if (!cell) journalUnavailable();
+		const ack = await cell.appendModelRequestMetadata(owner, record);
+		this.#refreshPrincipalEntries();
+		return ack;
 	}
 
-	/** Generate the real source ID and its link inside the very same batch. */
 	async appendModelRequestSource(
 		owner: ModelRequestJournalOwner,
 		source: ModelRequestSourceInput,
 		link: ModelRequestSourceLinkInput,
 	): Promise<ModelRequestJournalAck> {
-		this.#requireModelRequestJournalOwner(owner);
-		const snapshot: unknown = structuredClone(link);
-		assertModelRequestSourceLinkInput(snapshot);
-		const sourceSnapshot = structuredClone(source);
-		if (!sourceSnapshot || snapshot.sourceKind !== sourceSnapshot.kind ||
-			(sourceSnapshot.kind !== "assistant" && sourceSnapshot.kind !== "model_usage") ||
-			!Array.isArray(sourceSnapshot.args) ||
-			(sourceSnapshot.kind === "assistant" ?
-				sourceSnapshot.args.length !== 1 || sourceSnapshot.args[0]?.role !== "assistant" :
-				sourceSnapshot.args.length !== 2)) journalUnavailable();
-		return this.#appendModelRequestJournal(owner, () => {
-			const sourceEntryId = sourceSnapshot.kind === "assistant" ?
-				this.appendMessage(...sourceSnapshot.args) : this.appendModelUsage(...sourceSnapshot.args);
-			if (!sourceEntryId || !this.#index.has(sourceEntryId)) journalUnavailable();
-			return {
-				record: {
-					...snapshot,
-					sourceSessionId: this.#sessionId,
-					sourceEntryId,
-				},
-				sourceEntryId,
-			};
-		});
-	}
-
-	async #appendModelRequestJournal(
-		owner: ModelRequestJournalOwner,
-		append: () => {
-			record: ModelRequestMetadataEntry["record"];
-			sourceEntryId: string | null;
-		},
-	): Promise<ModelRequestJournalAck> {
-		const state = this.#requireModelRequestJournalOwner(owner);
-		try {
-			return await withVerifiedModelRequestJournalLeases(state.leases, state.receipt.registryId, async scope =>
-				this.#withAtomicPersistenceLock(async () => {
-					this.#requireModelRequestJournalOwner(owner);
-					scope.assertActive();
-					if (state.throughSeq >= Number.MAX_SAFE_INTEGER) journalUnavailable();
-					const throughSeq = state.throughSeq + 1;
-					let batchEpoch = this.#diskEpoch;
-					const published = await this.#appendEntriesAtomicallyLocked(() => {
-						this.#requireModelRequestJournalOwner(owner);
-						scope.assertActive();
-						batchEpoch = this.#diskEpoch;
-						const source = append();
-						const metadata: ModelRequestMetadataEntry = {
-							type: "model_request_metadata",
-							id: generateId(this.#index),
-							parentId: null,
-							timestamp: nowIso(),
-							schemaVersion: 1,
-							journalId: state.receipt.journalId,
-							sessionId: state.receipt.sessionId,
-							journalOwnerId: state.receipt.journalOwnerId,
-							journalEpoch: state.receipt.journalEpoch,
-							seq: throughSeq,
-							record: source.record,
-						};
-						this.#recordEntry(metadata);
-						return { metadata, sourceEntryId: source.sourceEntryId };
-					});
-					await this.flush();
-					this.#requireModelRequestJournalOwner(owner);
-					scope.assertActive();
-					if (this.#diskEpoch !== batchEpoch) journalUnavailable();
-					const visible = await this.#readModelRequestJournal();
-					this.#requireModelRequestJournalOwner(owner);
-					scope.assertActive();
-					if (this.#diskEpoch !== batchEpoch ||
-						visible.throughSeqByEpoch.get(state.receipt.journalEpoch) !== throughSeq ||
-						!visible.metadataEntries.some(entry => entry.id === published.metadata.id &&
-							JSON.stringify(entry) === JSON.stringify(published.metadata))) journalUnavailable();
-					state.throughSeq = throughSeq;
-					return Object.freeze({
-						schemaVersion: 1,
-						journalId: state.receipt.journalId,
-						sessionId: state.receipt.sessionId,
-						journalOwnerId: state.receipt.journalOwnerId,
-						journalEpoch: state.receipt.journalEpoch,
-						throughSeq,
-						metadataEntryId: published.metadata.id,
-						sourceEntryId: published.sourceEntryId,
-					});
-				}));
-		} catch (error) {
-			this.#invalidateModelRequestJournalOwner();
-			throw error;
+		const cell = fileJournalCells.get(this);
+		if (!cell) journalUnavailable();
+		const ack = await cell.appendModelRequestSource(owner, source, link);
+		this.#refreshPrincipalEntries();
+		if (ack.sourceEntryId !== null) {
+			const entry = this.#index.get(ack.sourceEntryId);
+			if (entry) {
+				this.#notifyEntryAppended(entry);
+			}
 		}
+		return ack;
 	}
 
 	#refuseManagedJournalMutation(): void {
-		if (this.#modelRequestJournalHistory || this.#header.modelRequestJournal || this.#entries.some(entry => entry.type === "model_request_metadata")) {
+		const canonical = fileJournalCells.get(this)?.getHeader();
+		if (canonical?.modelRequestJournal || canonical?.modelRequestRegistry ||
+			this.#modelRequestJournalHistory || this.#header.modelRequestJournal || this.#header.modelRequestRegistry ||
+			this.#entries.some(entry => entry.type === "model_request_metadata" || entry.type === "model_request_registry")) {
 			throw new Error("Managed model request journal history cannot be copied, moved, or discarded.");
 		}
 	}
@@ -2513,7 +2294,6 @@ export class SessionManager {
 	}
 
 	#applyEntries(header: SessionHeader, entries: SessionEntry[]): void {
-		this.#modelRequestJournalFreshSession = false;
 		if (header.modelRequestJournal || entries.some(entry => entry.type === "model_request_metadata")) {
 			validateModelRequestJournal([header, ...entries]);
 		}
@@ -2527,6 +2307,7 @@ export class SessionManager {
 		if (repairedUsage > 0) logger.warn("Loaded assistant messages with incomplete usage", { count: repairedUsage });
 		this.#index.rebuild(entries);
 		this.#protectModelRequestJournalHistory();
+		this.#synchronizePrincipalLeaf();
 	}
 
 	#freshEntryFields(): { id: string; parentId: string | null; timestamp: string } {
@@ -2537,8 +2318,16 @@ export class SessionManager {
 		};
 	}
 
+	#synchronizePrincipalLeaf(): void {
+		const cell = fileJournalCells.get(this);
+		const leaf = this.#index.leafId();
+		// Lazy ordinary entries remain staged until the actual principal commits them.
+		if (cell && (leaf === null || cell.getEntry(leaf) !== undefined)) cell.branch(leaf);
+	}
+
 	#setLeaf(id: string | null): void {
 		this.#index.setLeaf(id);
+		this.#synchronizePrincipalLeaf();
 		const batch = this.#atomicEntryBatch;
 		if (batch && !batch.collecting) {
 			batch.externalLeafChanged = true;
@@ -2561,7 +2350,7 @@ export class SessionManager {
 		this.#index.insert(entry);
 		const batch = this.#atomicEntryBatch;
 		if (batch?.collecting) batch.entryIds.add(entry.id);
-		if (batch && !batch.collecting && entry.type !== "model_request_metadata") {
+		if (batch && !batch.collecting && entry.type !== "model_request_metadata" && entry.type !== "model_request_registry") {
 			batch.externalLeafChanged = true;
 			batch.externalLeafId = entry.id;
 		}
@@ -2581,12 +2370,15 @@ export class SessionManager {
 		};
 		const retained = this.#entries.filter(entry => !batch.entryIds.has(entry.id));
 		for (const entry of retained) {
-			if (entry.type !== "model_request_metadata") entry.parentId = retainedAncestor(entry.parentId);
+			if (entry.type !== "model_request_metadata" && entry.type !== "model_request_registry") {
+				entry.parentId = retainedAncestor(entry.parentId);
+			}
 		}
 		const restoredLeaf = retainedAncestor(batch.externalLeafChanged ? batch.externalLeafId : batch.preBatchLeafId);
 		this.#entries = retained;
 		this.#index.rebuild(retained);
 		this.#index.setLeaf(restoredLeaf && this.#index.has(restoredLeaf) ? restoredLeaf : null);
+		this.#synchronizePrincipalLeaf();
 	}
 
 	#draftPath(): string | null {
@@ -2690,7 +2482,8 @@ export class SessionManager {
 			header: structuredClone(this.#header),
 			entries: [...this.#entries],
 		};
-		if (this.#modelRequestJournalHistory) {
+		const canonical = fileJournalCells.get(this)?.getHeader();
+		if (this.#modelRequestJournalHistory || canonical?.modelRequestJournal || canonical?.modelRequestRegistry) {
 			this.#modelRequestJournalCaptures.set(snapshot, {
 				sessionId: this.#sessionId,
 				sessionFile: this.#sessionFile,
@@ -2703,14 +2496,17 @@ export class SessionManager {
 
 	/**
 	 * Create an independent manager for the current logical session and branch.
-	 * The clone shares the storage backend but owns its entry index and writer, so
-	 * callers can finish session-owned work after this manager switches elsewhere.
+	 * A File clone shares the existing principal and its writer, retaining its own
+	 * tree projection so work can finish after this manager switches elsewhere.
 	 * Set `persist` false when the original session is intentionally being dropped.
 	 */
 	cloneCurrentSession(options?: { persist?: boolean }): SessionManager {
 		this.#refuseManagedJournalMutation();
 		const persist = options?.persist ?? this.#persist;
-		const clone = new SessionManager(this.#cwd, this.#sessionDir, persist, this.#storage);
+		const clone = new SessionManager(
+			this.#cwd, this.#sessionDir, persist, this.#storage,
+			persist ? fileJournalCells.get(this) : undefined,
+		);
 		clone.#suppressBreadcrumb = true;
 		clone.restoreState(this.captureState());
 		if (!persist) {
@@ -2725,9 +2521,10 @@ export class SessionManager {
 
 	restoreState(snapshot: SessionManagerStateSnapshot): void {
 		if (snapshot.sessionId !== this.#sessionId || snapshot.sessionFile !== this.#sessionFile) {
-			this.#invalidateModelRequestJournalOwner();
+			this.#revokeJournalSession();
 		}
-		if (snapshot.header.modelRequestJournal || snapshot.entries.some(entry => entry.type === "model_request_metadata")) {
+		if (snapshot.header.modelRequestJournal || snapshot.header.modelRequestRegistry ||
+			snapshot.entries.some(entry => entry.type === "model_request_metadata" || entry.type === "model_request_registry")) {
 			const captured = this.#modelRequestJournalCaptures.get(snapshot);
 			if (!captured || captured.sessionId !== snapshot.sessionId || captured.sessionFile !== snapshot.sessionFile ||
 				captured.cwd !== snapshot.cwd || captured.sessionDir !== snapshot.sessionDir) {
@@ -2738,6 +2535,17 @@ export class SessionManager {
 			this.#assertModelRequestJournalHistory(snapshot.header, snapshot.entries);
 		} else if (snapshot.header.modelRequestJournal || snapshot.entries.some(entry => entry.type === "model_request_metadata")) {
 			validateModelRequestJournal([snapshot.header, ...snapshot.entries]);
+		}
+		if (fileJournalCells.has(this) &&
+			(snapshot.sessionId !== this.#sessionId || snapshot.sessionFile !== this.#sessionFile)) {
+			if (snapshot.sessionFile === undefined) journalUnavailable();
+			const cell = openFileJournalCell({
+				cwd: snapshot.cwd,
+				sessionDir: path.dirname(snapshot.sessionFile),
+				sessionFile: snapshot.sessionFile,
+				sessionId: snapshot.sessionId,
+			});
+			this.#adoptFilePrincipal(cell);
 		}
 		this.#closeWriterEventually();
 		this.#diskTail = Promise.resolve();
@@ -2813,7 +2621,7 @@ export class SessionManager {
 		loadedSession?: SessionLoadResult,
 		options?: { throwIfMissing?: boolean; newSession?: NewSessionOptions },
 	): Promise<void> {
-		this.#invalidateModelRequestJournalOwner();
+		this.#revokeJournalSession();
 		await this.#drainAndCloseWriter();
 		this.#clearDiskError();
 		this.#draftOnlySessionCleanupArmed = false;
@@ -2843,8 +2651,6 @@ export class SessionManager {
 			);
 		}
 
-		this.#sessionFile = resolvedSessionFile;
-		this.#rememberBreadcrumb(this.#cwd, resolvedSessionFile);
 
 		const { entries: fileEntries, titleSlot } = loaded;
 		if (fileEntries.length === 0) {
@@ -2862,6 +2668,16 @@ export class SessionManager {
 			this.#fileIsCurrent = true;
 			return;
 		}
+		if (fileJournalCells.has(this)) {
+			const cell = openFileJournalCell({
+				cwd: this.#cwd, sessionDir: path.dirname(resolvedSessionFile), sessionFile: resolvedSessionFile,
+			});
+			this.#adoptFilePrincipal(cell);
+		} else {
+			this.#sessionFile = resolvedSessionFile;
+		}
+		this.#rememberBreadcrumb(this.#cwd, resolvedSessionFile);
+
 
 		const migrated = migrateToCurrentVersion(fileEntries);
 		await resolveBlobRefsInEntries(fileEntries, this.#blobs);
@@ -2914,6 +2730,7 @@ export class SessionManager {
 	 */
 	async newSession(options?: NewSessionOptions): Promise<string | undefined> {
 		await this.#drainAndCloseWriter();
+		if (fileJournalCells.has(this)) await this.#releaseFilePrincipal();
 		const sessionFile = this.#resetToNewSession(options);
 		await this.ensureOnDisk();
 		return sessionFile;
@@ -2924,13 +2741,17 @@ export class SessionManager {
 		if (this.#sessionFile && path.resolve(sessionPath) === path.resolve(this.#sessionFile)) {
 			this.#refuseManagedJournalMutation();
 		}
-		const onDisk = await loadSessionFile(sessionPath, this.#storage);
-		if (onDisk.entries.some(entry => entry.type === "model_request_metadata" || (entry.type === "session" && entry.modelRequestJournal))) {
+		const storage = fileJournalCells.has(this) &&
+			path.resolve(sessionPath) !== path.resolve(this.#sessionFile ?? "")
+			? new FileSessionStorage() : this.#storage;
+		const onDisk = await loadSessionFile(sessionPath, storage);
+		if (onDisk.entries.some(entry => entry.type === "model_request_metadata" || entry.type === "model_request_registry" ||
+			(entry.type === "session" && (entry.modelRequestJournal || entry.modelRequestRegistry)))) {
 			throw new Error("Managed model request journal history cannot be deleted.");
 		}
 		await this.#drainAndCloseWriter();
 		try {
-			await this.#storage.deleteSessionWithArtifacts(sessionPath);
+			await storage.deleteSessionWithArtifacts(sessionPath);
 		} catch (err) {
 			if (!isEnoent(err)) throw err;
 		}
@@ -2950,9 +2771,17 @@ export class SessionManager {
 		this.#clearDiskError();
 		this.#reconcileSessionDirForFallback();
 
-		const timestamp = nowIso();
-		this.#sessionId = mintSessionId();
-		this.#sessionFile = path.join(this.#sessionDir, `${fileSafeTimestamp(timestamp)}_${this.#sessionId}.jsonl`);
+		let cell = fileJournalCells.get(this);
+		let timestamp: string;
+		if (cell) {
+			cell = openFileJournalCell({ cwd: this.#cwd, sessionDir: this.#sessionDir });
+			this.#adoptFilePrincipal(cell);
+			timestamp = cell.getHeader().timestamp;
+		} else {
+			timestamp = nowIso();
+			this.#sessionId = mintSessionId();
+			this.#sessionFile = path.join(this.#sessionDir, `${fileSafeTimestamp(timestamp)}_${this.#sessionId}.jsonl`);
+		}
 		this.#expectedDiskSize = null;
 		this.#header = {
 			type: "session",
@@ -3036,7 +2865,8 @@ export class SessionManager {
 				);
 			}
 		};
-		if (this.#persist && this.#sessionFile && this.#storage.claimSession) {
+		const cell = fileJournalCells.get(this);
+		if (!cell && this.#persist && this.#sessionFile && this.#storage.claimSession) {
 			// Every persisted move rewrites the journal (at least its header cwd),
 			// even when the path stays the same.
 			await assertSourceIsOurs(this.#sessionFile);
@@ -3065,7 +2895,7 @@ export class SessionManager {
 
 		try {
 			if (this.#persist && this.#sessionFile) {
-				this.#storage.ensureDirSync(nextSessionDir);
+				if (!cell) this.#storage.ensureDirSync(nextSessionDir);
 				await this.#drainAndCloseWriter();
 				this.#clearDiskError();
 
@@ -3083,7 +2913,10 @@ export class SessionManager {
 				let artifactsRenamed = false;
 
 				try {
-					if (sessionFileExisted && sessionPathChanged) {
+					if (cell) {
+						await cell.moveTo(resolvedCwd, nextSessionDir);
+						sessionMoved = sessionFileExisted && sessionPathChanged;
+					} else if (sessionFileExisted && sessionPathChanged) {
 						// The drain awaited: re-check that both paths still hold the
 						// sessions we checked.
 						await assertSourceIsOurs(oldSessionFile);
@@ -3125,11 +2958,15 @@ export class SessionManager {
 
 					if (sessionMoved) {
 						try {
-							try {
-								await fs.promises.rename(newSessionFile, oldSessionFile);
-							} catch (error) {
-								if (!isFsError(error) || error.code !== "EXDEV") throw error;
-								await moveFileAcrossDevices(newSessionFile, oldSessionFile);
+							if (cell) {
+								await cell.moveTo(this.#cwd, path.dirname(oldSessionFile));
+							} else {
+								try {
+									await fs.promises.rename(newSessionFile, oldSessionFile);
+								} catch (error) {
+									if (!isFsError(error) || error.code !== "EXDEV") throw error;
+									await moveFileAcrossDevices(newSessionFile, oldSessionFile);
+								}
 							}
 						} catch (rollbackErr) {
 							throw new Error(
@@ -3401,7 +3238,7 @@ export class SessionManager {
 
 	/** Flush, then close the append writer. */
 	async close(): Promise<void> {
-		this.#invalidateModelRequestJournalOwner();
+		this.#revokeJournalSession();
 		if (!this.#persist) return;
 		// Closing gives up this process's ownership claim; a later write reclaims it.
 		const claim = this.#sessionClaim;
@@ -3452,6 +3289,7 @@ export class SessionManager {
 				{ ignorePriorError: true },
 			).catch(() => undefined);
 		}
+		if (fileJournalCells.has(this)) await this.#releaseFilePrincipal();
 		if (this.#diskFailure) throw this.#diskFailure;
 	}
 
@@ -3471,8 +3309,11 @@ export class SessionManager {
 	 */
 	seal(): void {
 		if (this.#released) return;
-		this.#invalidateModelRequestJournalOwner();
+		this.#revokeJournalSession();
 		this.#released = true;
+		const cell = fileJournalCells.get(this);
+		if (cell && ((filePrincipalReferences.get(cell) ?? 0) <= (this.#filePrincipalRetained ? 1 : 0) ||
+			cell.getHeader().modelRequestJournal || cell.getHeader().modelRequestRegistry)) cell.seal();
 		this.#diskEpoch++;
 	}
 
@@ -3494,6 +3335,9 @@ export class SessionManager {
 	 */
 	releaseRetainedEntries(): void {
 		this.seal();
+		const cell = fileJournalCells.get(this);
+		if (cell && ((filePrincipalReferences.get(cell) ?? 0) <= (this.#filePrincipalRetained ? 1 : 0) ||
+			cell.getHeader().modelRequestJournal || cell.getHeader().modelRequestRegistry)) cell.releaseRetainedEntries();
 		this.#entries = [];
 		this.#index.clear();
 		this.#inMemoryArtifacts = null;
@@ -3657,7 +3501,7 @@ export class SessionManager {
 	}
 
 	getSessionDir(): string {
-		return this.#sessionDir;
+		return fileJournalCells.get(this)?.getSessionDir() ?? this.#sessionDir;
 	}
 
 	getSessionId(): string {
@@ -3866,7 +3710,7 @@ export class SessionManager {
 		await this.#persistTitleChangeEntry(entry, { title, source, updatedAt: timestamp });
 		// Keep the recent-sessions title index current so welcome-screen lookups
 		// never have to content-scan this session's file.
-		if (this.#persist && this.#storage instanceof FileSessionStorage) {
+		if (this.#persist && (fileJournalCells.has(this) || this.#storage instanceof FileSessionStorage)) {
 			recordSessionTitle(this.#sessionId, title);
 		}
 
@@ -3879,7 +3723,7 @@ export class SessionManager {
 	 * the session file or LLM context; in-memory sessions are not journaled.
 	 */
 	recordRecap(recap: string): void {
-		if (this.#persist && this.#storage instanceof FileSessionStorage) {
+		if (this.#persist && (fileJournalCells.has(this) || this.#storage instanceof FileSessionStorage)) {
 			recordSessionRecap(this.#sessionId, this.#cwd, recap);
 		}
 	}
@@ -3889,7 +3733,7 @@ export class SessionManager {
 	 * `id`/`parentId`. Used by collab guests to mirror the host session.
 	 */
 	ingestReplicatedEntry(entry: SessionEntry): void {
-		if (entry.type === "model_request_metadata") {
+		if (entry.type === "model_request_metadata" || entry.type === "model_request_registry") {
 			throw new Error("Model request journal metadata cannot be ingested from a replica.");
 		}
 		this.#recordEntry(entry);
@@ -3901,12 +3745,14 @@ export class SessionManager {
 	 * returned view and must serialize it synchronously before a rewrite runs.
 	 */
 	snapshotForReplication(): { header: SessionHeader; entries: readonly SessionEntry[] } {
-		if (!this.#header.modelRequestJournal) return { header: this.#header, entries: this.#entries };
-		const header = { ...this.#header };
+		const canonical = fileJournalCells.get(this)?.getHeader() ?? this.#header;
+		if (!canonical.modelRequestJournal && !canonical.modelRequestRegistry) return { header: canonical, entries: this.#entries };
+		const header = { ...canonical };
 		delete header.modelRequestJournal;
+		delete header.modelRequestRegistry;
 		return {
 			header,
-			entries: this.#entries.filter(entry => entry.type !== "model_request_metadata"),
+			entries: this.#entries.filter(entry => entry.type !== "model_request_metadata" && entry.type !== "model_request_registry"),
 		};
 	}
 
@@ -3957,6 +3803,7 @@ export class SessionManager {
 		this.#index.detachBranchView();
 		this.#recordEntry(entry);
 		this.#index.setLeaf(activeLeafId);
+		this.#synchronizePrincipalLeaf();
 		return entry.id;
 	}
 
@@ -3981,6 +3828,7 @@ export class SessionManager {
 		};
 		this.#recordEntry(entry);
 		if (activeLeafId !== owner.parentId) this.#index.setLeaf(activeLeafId);
+		this.#synchronizePrincipalLeaf();
 		return entry.id;
 	}
 
@@ -4241,7 +4089,8 @@ export class SessionManager {
 	 */
 	appendLabelChange(targetId: string, label: string | undefined): string {
 		if (!this.#index.has(targetId)) throw new Error(`Entry ${targetId} not found`);
-		if (this.#index.get(targetId)?.type === "model_request_metadata") {
+		const type = this.#index.get(targetId)?.type;
+		if (type === "model_request_metadata" || type === "model_request_registry") {
 			throw new Error("Model request journal metadata cannot be labeled as a tree node.");
 		}
 
@@ -4295,7 +4144,7 @@ export class SessionManager {
 	}
 
 	getHeader(): SessionHeader | null {
-		return this.#header;
+		return fileJournalCells.get(this)?.getHeader() ?? this.#header;
 	}
 
 	/** All session entries (excludes header). Returns a shallow copy. */
@@ -4397,10 +4246,17 @@ export class SessionManager {
 			if (keptIds.has(targetId)) labelsToCarry.push({ targetId, label });
 		}
 
-		const timestamp = nowIso();
-		const newSessionId = mintSessionId();
+		let cell = fileJournalCells.get(this);
+		if (cell) {
+			this.#reconcileSessionDirForFallback();
+			cell = openFileJournalCell({ cwd: this.#cwd, sessionDir: this.#sessionDir });
+			this.#adoptFilePrincipal(cell);
+		}
+		const timestamp = cell?.getHeader().timestamp ?? nowIso();
+		const newSessionId = cell?.getSessionId() ?? mintSessionId();
 		this.#reconcileSessionDirForFallback();
-		const newSessionFile = path.join(this.#sessionDir, `${fileSafeTimestamp(timestamp)}_${newSessionId}.jsonl`);
+		const newSessionFile = cell?.getSessionFile() ??
+			path.join(this.#sessionDir, `${fileSafeTimestamp(timestamp)}_${newSessionId}.jsonl`);
 		const header: SessionHeader = {
 			type: "session",
 			version: CURRENT_SESSION_VERSION,
@@ -4489,6 +4345,13 @@ export class SessionManager {
 	 */
 	static createEmptySessionFile(cwd: string, storage: SessionStorage = new FileSessionStorage()): string {
 		const sessionDir = SessionManager.getDefaultSessionDir(cwd, undefined, storage);
+		if (storage instanceof FileSessionStorage) {
+			const cell = openFileJournalCell({ cwd, sessionDir });
+			cell.flushSync();
+			cell.seal();
+			void cell.close().catch(error => logger.warn("Failed to close empty session", { error: toError(error).message }));
+			return cell.getSessionFile();
+		}
 		const id = mintSessionId();
 		const timestamp = nowIso();
 		const header: SessionHeader = {
@@ -4542,7 +4405,8 @@ export class SessionManager {
 		await resolveBlobRefsInEntries(sourceEntries, manager.#blobs);
 
 		const sourceHeader = sourceEntries.find(entry => entry.type === "session") as SessionHeader | undefined;
-		if (sourceHeader?.modelRequestJournal || sourceEntries.some(entry => entry.type === "model_request_metadata")) {
+		if (sourceHeader?.modelRequestJournal || sourceHeader?.modelRequestRegistry ||
+			sourceEntries.some(entry => entry.type === "model_request_metadata" || entry.type === "model_request_registry")) {
 			throw new Error("Managed model request journals cannot be forked or imported.");
 		}
 		const history = sourceEntries.filter(entry => entry.type !== "session") as SessionEntry[];

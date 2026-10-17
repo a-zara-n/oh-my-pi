@@ -30,7 +30,6 @@ import type { Dialect } from "@oh-my-pi/pi-ai/dialect";
 import {
 	deriveModelRequestExecution,
 	type ModelRequestRootSource,
-	resolveModelRequestScope,
 	runWithModelRequestExecution,
 } from "@oh-my-pi/pi-ai/model-request-execution";
 import { prewarmOpenAICodexResponses } from "@oh-my-pi/pi-ai/providers/openai-codex-responses";
@@ -44,6 +43,7 @@ import {
 	type ModelRequestJournalLeaseBinding,
 	modelRequestJournalAuthorityRuntimeIdentity,
 } from "@oh-my-pi/pi-utils/model-request-journal-authority";
+import { assertJournalExecutionReady } from "@oh-my-pi/pi-utils/model-request-journal-composition";
 import * as logger from "@oh-my-pi/pi-utils/logger";
 import * as postmortem from "@oh-my-pi/pi-utils/postmortem";
 import * as prompt from "@oh-my-pi/pi-utils/prompt";
@@ -217,7 +217,7 @@ import {
 } from "./session/retry-fallback-chains";
 import { describeUsageFallback } from "./session/retry-fallback-reason";
 import { getRestorableSessionModels } from "./session/session-context";
-import { bindModelRequestJournalComposition, type ModelRequestJournal, SessionManager } from "./session/session-manager";
+import { bindModelRequestJournalComposition, SessionManager } from "./session/session-manager";
 import {
 	collectMountedMCPToolRoutes,
 	projectMountedMCPXdevGuidance,
@@ -2262,11 +2262,9 @@ async function createAgentSessionScoped(
 	const evalKernelOwnerId = `agent-session:${Snowflake.next()}`;
 
 	try {
-		// The session's one request context. Its session id is read from the session manager on every request, so
-		// `/new`, resume and fork keep this same object while the id it reports follows the live session.
+		// Ordinary requests keep the live session-id projection across `/new`, resume, and fork.
+		// Managed identity and readiness come only from the composed File principal.
 		const journalBinding = modelRequestRootSource.modelRequestJournalLeaseBinding;
-		const journalConnection = journalBinding === undefined ? undefined : Promise.withResolvers<ModelRequestJournal>();
-		void journalConnection?.promise.catch(() => {});
 		const modelRequestExecution = createSessionModelRequestExecution({
 			getSessionId: () => sessionManager.getSessionId(),
 			agent: {
@@ -2277,56 +2275,40 @@ async function createAgentSessionScoped(
 				...(options.parentAgentId ? { parentId: options.parentAgentId } : {}),
 			},
 			root: modelRequestRootSource,
-			journalConnection: journalConnection?.promise,
 		});
-		if (journalBinding !== undefined && journalConnection !== undefined) {
-			try {
-				if (
-					typeof journalBinding !== "object" ||
-					journalBinding === null ||
-					journalBinding.runtimeIdentity !== modelRequestJournalAuthorityRuntimeIdentity
-				) {
-					throw new Error("model request journal binding belongs to a different authority runtime");
-				}
-				const scope = resolveModelRequestScope(modelRequestExecution);
-				if (scope.rootSessionId === undefined || scope.rootSessionId !== journalBinding.rootSessionId) {
-					throw new Error("model request journal binding does not match the execution root");
-				}
-				let rootManager: SessionManager | undefined;
-				if (scope.rootSessionId === sessionManager.getSessionId()) {
-					rootManager = sessionManager;
-				} else {
-					for (const ref of agentRegistry.list()) {
-						const candidate = ref.session?.sessionManager;
-						if (candidate?.getSessionId() !== scope.rootSessionId) continue;
-						if (rootManager !== undefined && rootManager !== candidate) {
-							throw new Error("model request journal root resolves to multiple session managers");
-						}
-						rootManager = candidate;
-					}
-				}
-				if (rootManager === undefined) throw new Error("model request journal root manager is unavailable");
-				let journal: ModelRequestJournal | undefined;
-				// The manager owns fixed authority verification under the actual registry lock. Its successful
-				// return requires the durable registry/header receipt; accepting the callback alone is not readiness.
-				await bindModelRequestJournalComposition(sessionManager, {
-					execution: modelRequestExecution,
-					rootManager,
-					leases: journalBinding,
-					acceptJournal: accepted => {
-						if (journal !== undefined && journal !== accepted) {
-							throw new Error("model request execution journal cannot be replaced");
-						}
-						journal = accepted;
-					},
-				});
-				if (journal === undefined) throw new Error("model request journal composition did not supply a journal");
-				journalConnection.resolve(journal);
-				await journalConnection.promise;
-			} catch (error) {
-				journalConnection.reject(error);
-				throw error;
+		if (journalBinding !== undefined) {
+			if (
+				typeof journalBinding !== "object" ||
+				journalBinding === null ||
+				journalBinding.runtimeIdentity !== modelRequestJournalAuthorityRuntimeIdentity
+			) {
+				throw new Error("model request journal binding belongs to a different authority runtime");
 			}
+			const rootSessionId = journalBinding.rootSessionId;
+			if (modelRequestRootSource.kind === "inherited" &&
+				modelRequestRootSource.rootSessionId !== rootSessionId) {
+				throw new Error("model request journal binding does not match the execution root");
+			}
+			let rootManager: SessionManager | undefined;
+			if (rootSessionId === sessionManager.getSessionId()) {
+				rootManager = sessionManager;
+			} else {
+				for (const ref of agentRegistry.list()) {
+					const candidate = ref.session?.sessionManager;
+					if (candidate?.getSessionId() !== rootSessionId) continue;
+					if (rootManager !== undefined && rootManager !== candidate) {
+						throw new Error("model request journal root resolves to multiple session managers");
+					}
+					rootManager = candidate;
+				}
+			}
+			if (rootManager === undefined) throw new Error("model request journal root manager is unavailable");
+			await bindModelRequestJournalComposition(sessionManager, {
+				execution: modelRequestExecution,
+				rootManager,
+				leases: journalBinding,
+			});
+			assertJournalExecutionReady(modelRequestExecution);
 		}
 		const getActiveModelString = (): string | undefined => {
 			const activeModel = agent?.state.model;

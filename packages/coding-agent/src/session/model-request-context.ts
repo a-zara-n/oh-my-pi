@@ -1,9 +1,9 @@
 /**
  * Coding-agent side of the core model-request execution context.
  *
- * The pi-ai runtime owns the context (see `@oh-my-pi/pi-ai/model-request-execution`); this module only builds the
- * identity a session hands it and offers the small helpers the session boundaries share. Nothing here carries a
- * policy concept: it states who is asking (session, root, agent) and why (purpose).
+ * The pi-ai runtime owns the ambient context; the canonical journal leaf owns managed identity and readiness.
+ * This module builds the session context and offers the small helpers the session boundaries share.
+ * It states who is asking (session, root, agent) and why (purpose), never a caller-issued readiness proof.
  *
  * @internal
  */
@@ -17,11 +17,9 @@ import {
 	resolveModelRequestScope,
 	runWithModelRequestExecution,
 } from "@oh-my-pi/pi-ai/model-request-execution";
-import type { ModelRequestAgent, ModelRequestPurpose } from "@oh-my-pi/pi-ai/model-request-gate";
+import type { ModelRequestAgent, ModelRequestPurpose } from "@oh-my-pi/pi-utils/model-request-data";
 import type { ModelRequestJournalLeaseBinding } from "@oh-my-pi/pi-utils/model-request-journal-authority";
-import type { ModelRequestJournal } from "./session-manager";
-
-const executionJournals = new WeakMap<ModelRequestExecution, { journal: ModelRequestJournal | undefined }>();
+import { assertJournalExecutionReady } from "@oh-my-pi/pi-utils/model-request-journal-composition";
 
 /**
  * Hand-over of the root session id from a spawning session to a child session, passed as
@@ -83,36 +81,22 @@ export interface SessionModelRequestExecutionInit {
 	 * drift between where it is made and where it is used.
 	 */
 	readonly root: ModelRequestRootSource;
-	/** Only transports the SDK's private sink slot; never passed to ai as trusted readiness. */
-	readonly journalConnection?: Promise<ModelRequestJournal>;
 }
 
 /** Mint the context of a session being created. */
 export function createSessionModelRequestExecution(init: SessionModelRequestExecutionInit): ModelRequestExecution {
-	const journalSlot: { journal: ModelRequestJournal | undefined } | undefined =
-		init.journalConnection === undefined ? undefined : { journal: undefined };
-	const journalConnection = init.journalConnection?.then(journal => {
-		if (journalSlot === undefined) throw new Error("model request execution journal slot is unavailable");
-		journalSlot.journal = journal;
-	});
-	// A failed composition is also awaited by the SDK; do not leave an unobserved rejection on the execution.
-	void journalConnection?.catch(() => {});
 	const execution = createModelRequestSessionExecution({
 		sessionId: init.getSessionId,
 		root: init.root,
 		agent: init.agent,
 		purpose: init.agent.kind === "main" ? "main" : "subagent",
 	});
-	if (journalSlot !== undefined) executionJournals.set(execution, journalSlot);
 	return execution;
 }
 
 /** The root assignment a session gives to a child it spawns, resolved as of now. */
 export function childModelRequestRootOf(execution: ModelRequestExecution): ModelRequestRootAssignment {
-	const journalSlot = executionJournals.get(execution);
-	if (journalSlot !== undefined && journalSlot.journal === undefined) {
-		throw new Error("model request execution journal is not connected");
-	}
+	assertJournalExecutionReady(execution);
 	return {
 		kind: "child",
 		rootSessionId: resolveModelRequestScope(execution).rootSessionId,
@@ -130,7 +114,5 @@ export function withModelRequestExecution(
 	purpose?: ModelRequestPurpose,
 ): StreamFn {
 	const scoped = purpose === undefined ? execution : deriveModelRequestExecution(execution, { purpose });
-	const journalSlot = executionJournals.get(execution);
-	if (journalSlot !== undefined && scoped !== execution) executionJournals.set(scoped, journalSlot);
 	return (model, context, options) => runWithModelRequestExecution(scoped, () => streamFn(model, context, options));
 }
