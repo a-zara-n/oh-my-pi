@@ -239,7 +239,9 @@ static int ompSqliteClose(sqlite3_file *id){
   if( p==s->walFile ) s->walFile = 0;
   if( p==s->journalFile ) s->journalFile = 0;
   rc = base->xClose(id);
-  if( rc!=SQLITE_OK && s->backupSource ) (void)ompSqliteFault(s);
+  /* sqlite3OsClose discards xClose's rc: preserve failure in live ownership
+  ** state (and a retained backup source) before releasing any references. */
+  if( rc!=SQLITE_OK ) (void)ompSqliteFault(s);
   sqlite3_mutex_leave(s->mutex);
   ompSqliteRelease(s);
   return invalid==SQLITE_OK ? rc : invalid;

@@ -70,10 +70,7 @@ export function patchAmalgamation(canonical: string): string {
       int guard=sqlite3OsFileControl(pWal->pWalFd,OMP_SQLITE_DELETE_CONTROL,0);
       if( rc==SQLITE_OK ) rc=guard;
     }
-    {
-      int closed=sqlite3OsClose(pWal->pWalFd);
-      if( rc==SQLITE_OK ) rc=closed;
-    }`);
+    sqlite3OsClose(pWal->pWalFd);`);
 	replace("      osUnlink(pShmNode->zFilename);", "      if( ompSqliteShmCheck(pDbFd,pShmNode)==SQLITE_OK )\n        osUnlink(pShmNode->zFilename);");
 	// VACUUM INTO is a core-owned, non-authoritative output, not a JS factory
 	// registration. Authenticate source before output creation; force O_EXCL.

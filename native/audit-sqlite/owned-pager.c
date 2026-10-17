@@ -10,9 +10,6 @@ static int ompSqliteDeleteJournal(Pager *pPager, int syncDirectory){
   }
   rc=sqlite3OsFileControl(pPager->jfd,OMP_SQLITE_DELETE_CONTROL,&syncDirectory);
   /* Once unlinked this file only permits close, so always close it here. */
-  {
-    int closed=sqlite3OsClose(pPager->jfd);
-    if( rc==SQLITE_OK ) rc=closed;
-  }
+  sqlite3OsClose(pPager->jfd);
   return rc;
 }

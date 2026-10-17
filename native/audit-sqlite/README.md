@@ -241,3 +241,11 @@ Patch maintenance: the shared-memory pre-lock guard is anchored to the complete
 (`os_unix.c:4689–4690`) and is deliberately not an admissible single-occurrence
 preimage. This preserves that diagnostic while guarding the real DMS lifecycle
 function (`:4850–4852`) before its first lock operation.
+
+Close API contract: canonical `src/os.h:176` and `src/os.c:82–86` declare
+`sqlite3OsClose` as void and discard the concrete xClose result. Journal/WAL
+cleanup therefore calls it unconditionally without assigning a return value.
+The owned concrete xClose wrapper latches any underlying close error in its
+shared connection state, propagates it to a retained backup source, and only
+then releases references. Subsequent fallible I/O/control or source
+post-backup inspection rejects that sticky error; cleanup is never skipped.
