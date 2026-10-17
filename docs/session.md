@@ -155,6 +155,17 @@ File writers before the authority releases retained roots and the writer-owner s
 Sibling logical-close batches use that same actual root queue after their accepted subtree
 drains, retaining private close context through queue execution instead of competing for
 the root registry lease. The drains themselves are not enqueued behind work they must join.
+All accepted canonical principal publications share a synchronous atomic File CAS/rename
+commit body, including registry, metadata and source publication. Snapshot construction,
+replacement and strict readback do not yield to a legitimate same-principal synchronous
+append halfway through that commit. Public asynchronous signatures and the existing root
+queue remain; ordinary `SessionStorage` asynchronous operations are not converted. A real
+foreign size conflict is still an error, not permission to retry or overwrite it.
+
+This commit body performs synchronous filesystem I/O and can block the main JavaScript
+event loop for the full snapshot write and readback. Latency and scale have not been
+qualified against approved budget NFR-4; no nonblocking guarantee, numerical threshold
+or operational-performance acceptance is claimed by the correctness fix.
 Failures remain failures, and a failed close does not become a durable closed acknowledgement.
 The five internal lifecycle operations are not package exports or caller registration hooks.
 Their implementation is published under the package's `internal/` directory, outside the

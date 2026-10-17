@@ -87,6 +87,10 @@
 
 ### Fixed
 
+- Keep every accepted canonical principal publication in one synchronous atomic CAS/rename
+  commit body, so a legitimate same-principal synchronous append cannot interleave with
+  staged snapshots. Public async signatures, root queues and conflict rejection remain;
+  synchronous filesystem work can block the event loop and has no latency qualification.
 - Serialize sibling logical-close batches on the actual root queue after accepted subtree
   drains, preserving private close context, generation checks and genuine lease validation.
 - Emit package-root declarations into a generated staging tree, then retain the existing
