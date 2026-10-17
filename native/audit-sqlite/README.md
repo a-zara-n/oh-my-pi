@@ -41,8 +41,8 @@ probe, and the source build remain inside the output directory, not Git.
 `artifact-manifest.json` is emitted last. Do not load a partial output directory.
 
 No build, tests, linter, formatter, loader probe, or runtime smoke was executed by
-the native implementation worker. Parent integration must establish those
-results; this document does not claim acceptance from source inspection alone.
+the native implementation worker. The parent's exercised named-VFS results are
+recorded below; source inspection alone is not acceptance.
 
 ## Ordinary and named-owned SQLite
 
@@ -145,8 +145,33 @@ stickiness and close propagation. It does not replace JS private-registry or
 controlled fault acceptance. Parent must also retain unsupported/foreign/
 unregistered diagnostics, exact managed close-only/output I/O/close faults,
 same-snapshot/generation checks and cold/cached RO recovery byte-preservation
-with legitimate RW recovery. No fixture/build/test/diagnostic run is claimed here.
+with legitimate RW recovery. The parent's exercised subset is recorded below.
 
+
+### Limited parent observations after named-VFS integration
+
+On integration `8a1fe76`, the parent reported these actual results on the pinned
+Bun 1.4.2/Darwin 25.2 arm64 host. They are not worker executions or a claim that
+every acceptance condition has passed.
+
+| Parent run | Exercised result |
+| --- | --- |
+| bg449 | Fresh native build succeeded; the prior build is retained as `build-before-named-vfs-f75ee2c` |
+| bg452 | Unchanged D37 body: both plain-selected and owned-selected report `failed:false`; run/exec/prepared table/index DDL and sqlite_master reads succeed with SQLite 3.54.1 |
+| bg455 | Actual clang-linked `ordinary-compat.c` ordinary/named fixture passed |
+| bg454 | Authority/control/raw-lease suites: 33 passed, 199 expectations |
+| bg453 | Eight suites including metadata/AuthStorage: 148 passed, 1,210 expectations; the previous fresh-DDL authorization failure is resolved |
+| bg456 | Initial contention returned SQLITE_PROTOCOL, not BUSY; retry committed with live control. Reader-first SELECT and subsequent RW UPDATE succeeded |
+| bg457 | Cold/prior-read cached-fixture RO recovery rejected with errno 264; main, WAL, complete shm and header bytes stayed unchanged; legitimate RW recovery succeeded |
+| bg458 | Rename-before-close still rejects; ordinary AUTH denials leave control live and normal close succeeds |
+
+The earlier ordinary CREATE failure and rejected lazy-enrollment candidate remain
+historical failures, not accepted workarounds. These results do not establish an
+xClose-only race, authority callback misissuance, power-loss durability, complete
+Store/SDK smoke, outer-producer drain or full principal C acceptance. The cached
+fixture still infers prior mapping from its successful same-connection read; it
+does not instrument SQLite's internal mapping lifetime. Type/lint fixes and final
+Store/SDK acceptance are separate from the exercised results above.
 
 ## Canonical provenance and license
 
@@ -415,9 +440,9 @@ unmodified SHA3, patch SHA256 (ordered filename + NUL + bytes + NUL across
 `owned-close.c`), patched-source
 SHA256, **live** sorted `sqlite3_compileoption_get` strings, separate compiler
 flags, dylib filename and post-sign SHA256, control ABI/word count, verified
-ad-hoc signature, and canonical manifest root/file count. No artifact hash or
-signature is claimed until the parent successfully runs the build. The loader
-must pin the resulting manifest/dylib as a pair and independently validate live
+ad-hoc signature, and canonical manifest root/file count. Parent bg449 completed
+the fresh signed build and paired manifest; no hash values are inferred here.
+The loader must pin that manifest/dylib pair and independently validate live
 SQLite identity/options/control, not equate compiler macros to live options.
 
 Patch maintenance: the shared-memory pre-lock guard is anchored to the complete
@@ -477,14 +502,14 @@ false/undefined, to surface close failure before acknowledgment. Normal
 unmanaged factories are not altered. Deferred close/foreign outstanding C
 backup handles are not successful authority-close acknowledgment paths.
 
-Parent acceptance should cover rename after the last successful RO inspect
-but before close, for each caller argument undefined/false/true; each managed
-close must throw and invalidate the registry. The observed broad
-rename-before-close counterexample establishes propagation failure, not an
-observed xClose-only swap window or authority callback false acknowledgment.
-Also cover ordinary successful close, sticky-fault cleanup, repeated Bun
-close/GC after an error, and reader-first RO/RW coexistence plus DMS release/
-retry on the same connection. No execution of these checks is claimed here.
+Parent bg454 passed the factory rename-after-inspect close regression for each
+caller argument undefined/false/true; the separate bg458 rename-before-close
+probe also rejected. The earlier erroneous close acknowledgment is retained as
+historical evidence: this establishes propagation, not an observed xClose-only
+swap window or authority callback false acknowledgment. Bg456 also completed
+reader-first RO/RW use and contention/retry with live control. Ordinary close and
+sticky cleanup are covered by the passing real C fixture. This does not establish
+every delayed-GC/foreign-backup lifetime or controlled close-only fault scenario.
 
 ### Read-only WAL recovery boundary
 
