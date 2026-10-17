@@ -2,6 +2,12 @@ import type { Database } from "bun:sqlite";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync } from "node:fs";
 import { isAbsolute } from "node:path";
+import {
+	beginClosingBindingLifetime,
+	finishBindingLifetime,
+	initializeBindingLifetime,
+	joinBindingPrincipalDrains,
+} from "./internal/model-request-journal-binding-lifetime";
 import { retainRawModelRequestJournalRoot, withRawModelRequestJournalLeases, type RawModelRequestJournalLeaseScope, type RawModelRequestJournalRetainedRootScope } from "./model-request-journal-leases";
 import { assertModelRequestJournalDatabase, openModelRequestJournalDatabase } from "./model-request-journal-sqlite-control";
 
@@ -325,24 +331,33 @@ export async function withVerifiedModelRequestJournalBinding<T>(request: Readonl
 	const resources: ModelRequestJournalAuthorityResources = Object.freeze({...request.resources});
 	return withRawModelRequestJournalLeases({storeId: resources.storeId, control: "shared", maintenance: "shared", ownerId: stored.credential.writerId}, async raw => {
 		const state: BindingState = {resources, requester: request.requester, mode: request.mode, rootSessionId: request.rootSessionId, generation: stored.generation, raw, record: recordAt(raw), retained: new Set(), open: true};
-		let failed = false;
-		let failure: unknown;
+		let binding: ModelRequestJournalLeaseBinding | undefined;
+		const failures: unknown[] = [];
 		try {
 			verify(state);
-			const binding: ModelRequestJournalLeaseBinding = Object.freeze({[bindingBrand]: true, runtimeIdentity: modelRequestJournalAuthorityRuntimeIdentity, rootSessionId: request.rootSessionId});
-			bindings.set(binding, state);
-			const result = await use(binding);
+			const verifiedBinding: ModelRequestJournalLeaseBinding = Object.freeze({[bindingBrand]: true, runtimeIdentity: modelRequestJournalAuthorityRuntimeIdentity, rootSessionId: request.rootSessionId});
+			bindings.set(verifiedBinding, state);
+			initializeBindingLifetime(verifiedBinding);
+			binding = verifiedBinding;
+			const result = await use(verifiedBinding);
 			verify(state);
 			return result;
 		} catch (error) {
-			failed = true;
-			failure = error;
+			failures.push(error);
 			throw error;
 		} finally {
-			try { releaseRetainedRoots(state); } catch (error) {
-				if (failed) throw new AggregateError([failure, error], "Journal binding operation and retained release failed");
-				throw error;
+			if (binding !== undefined) {
+				try { beginClosingBindingLifetime(binding); } catch (error) { failures.push(error); }
+				// Keep genuine authority and the outer native leases alive for accepted
+				// continuations and logical close; closing rejects new work privately.
+				try { await joinBindingPrincipalDrains(binding); } catch (error) { failures.push(error); }
 			}
+			try { releaseRetainedRoots(state); } catch (error) { failures.push(error); }
+			if (binding !== undefined) {
+				try { finishBindingLifetime(binding); } catch (error) { failures.push(error); }
+			}
+			if (failures.length === 1) throw failures[0];
+			if (failures.length > 1) throw new AggregateError(failures, "Journal binding operation and cleanup failed");
 		}
 	});
 }
