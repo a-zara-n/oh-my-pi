@@ -28,7 +28,7 @@ import type { Setting } from "../config/registry";
 import { BLOB_HASH_RE, BLOB_STAGING_RE, blobStagingPath } from "../session/blob-store";
 import { listSessionsReadOnly, type SessionInfo, type SessionStatus } from "../session/session-listing";
 import { parseTerminalBreadcrumb } from "../session/session-paths";
-import { readSessionHeaderId } from "../session/session-loader";
+import { readSessionHeaderId } from "@oh-my-pi/pi-utils/session-file-reader";
 import { FileSessionStorage, tryAcquireSessionLease } from "@oh-my-pi/pi-utils/model-request-journal-composition";
 import {
 	cfgGcArchive,

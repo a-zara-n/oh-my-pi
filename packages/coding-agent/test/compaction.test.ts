@@ -26,8 +26,8 @@ import type { CompactionEntry,
 	SessionEntry,
 	SessionMessageEntry,
 	ThinkingLevelChangeEntry, } from "@oh-my-pi/pi-utils/session-entries";
-import { parseSessionEntries } from "@oh-my-pi/pi-coding-agent/session/session-loader";
-import { migrateSessionEntries } from "@oh-my-pi/pi-coding-agent/session/session-migrations";
+import { parseSessionEntries } from "@oh-my-pi/pi-utils/session-file-reader";
+import { migrateSessionEntries } from "@oh-my-pi/pi-utils/session-migrations";
 import { mockFetch } from "./helpers/fetch-mock";
 import { e2eApiKey } from "./utilities";
 

@@ -101,18 +101,16 @@ import {
 	listSessions,
 	type SessionInfo,
 } from "./session-listing";
+import { parseSessionContent, readSessionHeaderId, type SessionLoadResult } from "@oh-my-pi/pi-utils/session-file-reader";
 import {
 	loadEntriesFromFile,
 	loadSessionFile,
 	normalizeAssistantUsage,
-	parseSessionContent,
-	readSessionHeaderId,
 	resolveBlobRefsInEntries,
 	resolveBlobRefsInEntriesSync,
-	type SessionLoadResult,
 	visitEntriesFromFile,
 } from "./session-loader";
-import { generateId, migrateToCurrentVersion } from "./session-migrations";
+import { generateId, migrateToCurrentVersion } from "@oh-my-pi/pi-utils/session-migrations";
 import {
 	computeDefaultSessionDir,
 	hasPositiveMovedProjectEvidence,

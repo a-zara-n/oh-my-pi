@@ -6,10 +6,10 @@ import type { AgentEvent } from "@oh-my-pi/pi-agent-core";
 import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import { Effort } from "@oh-my-pi/pi-ai";
 import type { AssistantMessage, TextContent } from "@oh-my-pi/pi-utils/model-data";
+import { parseSessionEntries } from "@oh-my-pi/pi-utils/session-file-reader";
 import {
 	type CompactionEntry,
 	type FileEntry,
-	parseSessionEntries,
 	type SessionMessageEntry,
 } from "@oh-my-pi/pi-coding-agent";
 import { RpcClient } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-client";

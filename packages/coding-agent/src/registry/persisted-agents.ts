@@ -6,7 +6,7 @@ import { ADVISOR_TRANSCRIPT_FILENAME, isAdvisorTranscriptName } from "../advisor
 import { resolveExplicitModelRole } from "../config/model-resolver";
 import { assistantTurnProducedOutput } from "../session/messages";
 import { EPHEMERAL_MODEL_CHANGE_ROLE } from "@oh-my-pi/pi-utils/session-entries";
-import { visitEntriesFromFileStream } from "../session/session-loader";
+import { visitEntriesFromFileStream } from "@oh-my-pi/pi-utils/session-file-reader";
 import { loadBundledAgents } from "../task/agents";
 import { isReadOnlyAgent } from "../task/read-only-policy";
 import { persistedVibeChildIds } from "../vibe/lifecycle";

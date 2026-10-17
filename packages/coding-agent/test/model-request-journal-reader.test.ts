@@ -13,14 +13,14 @@ import type { FileEntry,
 	ModelRequestMetadataEntry,
 	SessionHeader,
 	SessionMessageEntry, } from "@oh-my-pi/pi-utils/session-entries";
+import { loadEntriesFromFileStream } from "@oh-my-pi/pi-utils/session-file-reader";
 import {
 	loadEntriesFromFile,
-	loadEntriesFromFileStream,
 	loadModelRequestJournalFromFile,
 	loadSessionFile,
 	resolveBlobRefsInEntries,
 } from "@oh-my-pi/pi-coding-agent/session/session-loader";
-import { migrateSessionEntries } from "@oh-my-pi/pi-coding-agent/session/session-migrations";
+import { migrateSessionEntries } from "@oh-my-pi/pi-utils/session-migrations";
 import { prepareEntryForPersistence } from "@oh-my-pi/pi-coding-agent/session/session-persistence";
 import { serializeTitleSlot } from "@oh-my-pi/pi-utils/session-title-slot";
 import { TempDir } from "@oh-my-pi/pi-utils";

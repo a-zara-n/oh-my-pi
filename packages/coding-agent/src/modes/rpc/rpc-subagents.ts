@@ -3,7 +3,7 @@ import { isEnoent } from "@oh-my-pi/pi-utils";
 import { type AgentRef, AgentRegistry } from "../../registry/agent-registry";
 import type { AgentSession } from "../../session/agent-session";
 import type { FileEntry, SessionMessageEntry } from "@oh-my-pi/pi-utils/session-entries";
-import { parseSessionEntries } from "../../session/session-loader";
+import { parseSessionEntries } from "@oh-my-pi/pi-utils/session-file-reader";
 import { type AgentProgress } from "@oh-my-pi/pi-tui/tools/task";
 import {
 	type SubagentEventPayload,

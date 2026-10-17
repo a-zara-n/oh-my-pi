@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { readSessionHeaderId } from "@oh-my-pi/pi-coding-agent/session/session-loader";
+import { readSessionHeaderId } from "@oh-my-pi/pi-utils/session-file-reader";
 import { SessionManager, type SessionPersistenceNotice } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { FileSessionStorage, tryAcquireSessionLease } from "@oh-my-pi/pi-utils/model-request-journal-composition";
 import { TempDir } from "@oh-my-pi/pi-utils";

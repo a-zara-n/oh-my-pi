@@ -55,6 +55,9 @@
   These are parent observations, not worker reruns; Store A0, principal C, trusted dispatch and
   readonly backup remain unproved.
 
+- Relocated the existing session JSONL content/stream readers and migrations to
+  `@oh-my-pi/pi-utils/session-file-reader` and `@oh-my-pi/pi-utils/session-migrations`,
+  preserving title slots, malformed-record diagnostics, bounded streaming, and missing-file handling.
 - Relocated atomic file replacement and cross-device move helpers to `@oh-my-pi/pi-utils/atomic-file`
   without changing publication, rollback, or source-removal behavior.
 - `fetchWithRetry` and `isRetryableError` no longer retry an error that declares `retryable: false`.

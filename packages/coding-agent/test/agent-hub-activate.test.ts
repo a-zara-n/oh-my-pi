@@ -16,7 +16,7 @@ import { initTheme } from "@oh-my-pi/pi-tui/theme";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
-import { visitEntriesFromFileStream } from "@oh-my-pi/pi-coding-agent/session/session-loader";
+import { visitEntriesFromFileStream } from "@oh-my-pi/pi-utils/session-file-reader";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { getBundledAgent } from "@oh-my-pi/pi-coding-agent/task/agents";
 import { TempDir } from "@oh-my-pi/pi-utils";

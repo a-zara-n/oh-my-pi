@@ -15,7 +15,8 @@ import { IrcBus } from "../irc/bus";
 import { AgentLifecycleManager } from "../registry/agent-lifecycle";
 import { type AgentRef, AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
 import { registerPersistedSubagents, sessionFileBelongsToRoot } from "../registry/persisted-agents";
-import { normalizeAssistantUsage, parseSessionEntries } from "../session/session-loader";
+import { parseSessionEntries } from "@oh-my-pi/pi-utils/session-file-reader";
+import { normalizeAssistantUsage } from "../session/session-loader";
 
 /** Filesystem and parser used by local and host-backed transcript viewers. */
 export const agentTranscriptSource: AgentTranscriptSource = {

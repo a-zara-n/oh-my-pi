@@ -3,7 +3,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { FileEntry } from "@oh-my-pi/pi-utils/session-entries";
-import * as sessionLoader from "@oh-my-pi/pi-coding-agent/session/session-loader";
+import * as sessionLoader from "@oh-my-pi/pi-utils/session-file-reader";
+import { visitEntriesFromFile } from "@oh-my-pi/pi-coding-agent/session/session-loader";
 import { serializeTitleSlot } from "@oh-my-pi/pi-utils/session-title-slot";
 
 // Parity contract for the ≥8MiB streaming loader (now Bun.JSONL-based): it must
@@ -110,7 +111,7 @@ describe("loadEntriesFromFileStream (Bun.JSONL parity)", () => {
 		let visited = 0;
 		let headerTitle: string | undefined;
 		let headerTitleSource: string | undefined;
-		await sessionLoader.visitEntriesFromFile(file, entry => {
+		await visitEntriesFromFile(file, entry => {
 			visited++;
 			if (entry.type === "session") {
 				headerTitle = entry.title;

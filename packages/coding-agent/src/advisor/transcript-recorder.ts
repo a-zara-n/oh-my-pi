@@ -3,7 +3,7 @@ import * as path from "node:path";
 import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import type { Message, UserMessage } from "@oh-my-pi/pi-utils/model-data";
 import { logger } from "@oh-my-pi/pi-utils";
-import { visitEntriesFromFileStream } from "../session/session-loader";
+import { visitEntriesFromFileStream } from "@oh-my-pi/pi-utils/session-file-reader";
 import { SessionManager } from "../session/session-manager";
 import { fingerprintMessage } from "./message-fingerprint";
 
