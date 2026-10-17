@@ -34,7 +34,7 @@ const patchedPath = join(scratch, "sqlite3-owned.c");
 writeFileSync(patchedPath, patched, { flag: "wx", mode: 0o600 });
 const fragmentDirectory = resolve(import.meta.dir, "../native/audit-sqlite");
 const patchHash = createHash("sha256");
-for (const file of ["apply-patch.ts", "owned-types.h", "owned-vfs.c", "owned-core.c", "owned-pager.c"]) {
+for (const file of ["apply-patch.ts", "owned-types.h", "owned-vfs.c", "owned-core.c", "owned-pager.c", "owned-close.c"]) {
 	patchHash.update(file).update("\0").update(readFileSync(join(fragmentDirectory, file))).update("\0");
 }
 const compilerFlags = [

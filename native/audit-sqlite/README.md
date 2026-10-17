@@ -141,6 +141,13 @@ read, write, truncate, sync, size, lock/reserved-lock, file-control/size-hint,
 sector/capability, shm-map/lock/barrier/unmap, fetch/unfetch, close and reopen.
 Main mmap is disabled at compilation. Mutating calls require an armed writer;
 read-only shm never implicitly creates, extends, truncates or rebuilds a file.
+An actual read-only main connection may open an **existing** shm with O_RDWR
+(without O_CREAT), as upstream uses shared writable mappings/readmarks even for
+read transactions. Shared-node capability is not main write permission or an
+authorizer grant. This prevents a reader-first open from publishing a global
+O_RDONLY-only node that would prevent later legitimate writers. Existing
+readonly-shm fallback stays intact; no descriptor is replaced/upgraded, and
+per-connection guards still prohibit RO creation/rebuild/truncate/extension.
 Cleanup unlock/unmap/close still release resources after sticky faults but
 cannot return a live proof. The void shm barrier and integer capability callbacks
 latch faults; the next fallible I/O/control rejects them, and JS must re-inspect
@@ -152,6 +159,17 @@ connection mapping reference, and refcount lifetime distinguish shared nodes,
 lazy association, close/reopen and address/fd reuse. No heap-shm substitute is
 accepted. Reopened WAL/shm cannot silently change inode within the same native
 transaction generation.
+
+Before publication, node stat/generation checks only validate. The connection
+commits its node reference/generation only once `pDbFd->pShm` actually points to
+that node. In canonical `src/os_unix.c:5052–5083`, a transient DMS BUSY can purge
+an unreferenced, unpublished node. Retaining it would leave a stale pointer and
+turn a later legitimate retry into sticky AUTH. `src/wal.c:2751–2768`,
+`:3182–3190` and `:3493–3495` explain why this may already appear as the first
+exposed SQL error: xShmMap BUSY, with no page mapped, becomes WAL_RETRY and the
+same SQL call tries again internally. This patch preserves upstream retry
+semantics, including SQLITE_PROTOCOL on a persistently held DMS lock after the
+retry limit (`:3131–3137`); it does not promise the first public error is BUSY.
 
 All output proof values originate in `fstat` of the existing exact owned file
 or shm fd. Directory descriptors and `fstatat(..., AT_SYMLINK_NOFOLLOW)` are
@@ -230,7 +248,8 @@ binding, and verify source post-operation inspection catches output failure.
 
 Schema 1 fixes platform/arch, deployment floor, Bun revision, SQLite identity,
 unmodified SHA3, patch SHA256 (ordered filename + NUL + bytes + NUL across
-`apply-patch.ts`, `owned-types.h`, `owned-vfs.c`, `owned-core.c`, `owned-pager.c`), patched-source
+`apply-patch.ts`, `owned-types.h`, `owned-vfs.c`, `owned-core.c`, `owned-pager.c`,
+`owned-close.c`), patched-source
 SHA256, **live** sorted `sqlite3_compileoption_get` strings, separate compiler
 flags, dylib filename and post-sign SHA256, control ABI/word count, verified
 ad-hoc signature, and canonical manifest root/file count. No artifact hash or
@@ -245,10 +264,53 @@ Patch maintenance: the shared-memory pre-lock guard is anchored to the complete
 preimage. This preserves that diagnostic while guarding the real DMS lifecycle
 function (`:4850–4852`) before its first lock operation.
 
-Close API contract: canonical `src/os.h:176` and `src/os.c:82–86` declare
-`sqlite3OsClose` as void and discard the concrete xClose result. Journal/WAL
-cleanup therefore calls it unconditionally without assigning a return value.
-The owned concrete xClose wrapper latches any underlying close error in its
-shared connection state, propagates it to a retained backup source, and only
-then releases references. Subsequent fallible I/O/control or source
-post-backup inspection rejects that sticky error; cleanup is never skipped.
+### Terminal close acknowledgment and pinned-consumer contract
+
+Canonical `src/os.h:176` and `src/os.c:82–86` declare `sqlite3OsClose` as void
+and discard the concrete xClose result. Journal/WAL cleanup therefore calls it
+unconditionally without assigning a return value. The owned concrete xClose
+wrapper records the first guard/underlying-close failure in its shared state,
+propagates underlying close failures to a retained backup source, and then
+releases references. Cleanup is never skipped.
+The private `robust_close` error path (`src/os_unix.c:1453–1456`) also records
+SQLITE_IOERR_CLOSE in the actual owning state before its normal diagnostic;
+upstream otherwise logs this syscall failure without returning it from xClose.
+
+`owned-close.c` privately retains only the already-owned per-main states across
+an immediate `sqlite3Close` teardown. It does not retain sqlite3, Btree, Pager,
+unixFile, or a pointer into the collector's stack. Before the core releases its
+db mutex, the hook uses the same `connectionIsBusy` predicate as
+`sqlite3LeaveMutexAndCloseZombie` (`src/main.c:1273–1281`, `:1404–1407`). Only
+an immediate close captures state. All native files and the database then
+undergo their original complete cleanup/free, after which the hook reads the
+retained close result, releases those state references, and returns the error.
+No read of the freed sqlite3 object is performed. An intentionally invalidated
+normal closed lifetime is not itself an error; actual pre-close guard/close
+failures are recorded separately. A deferred close_v2 zombie captures nothing:
+no stack collector or additional reference survives its return.
+
+This error-after-complete-cleanup contract is **specific to the pinned Bun
+consumer**, not a general SQLite C drop-in guarantee that an error leaves db
+alive for sqlite3_errmsg/re-close. At Bun revision
+`744846f844374847c902b5e7fd59b4342a51ef99`,
+[`src/jsc/bindings/sqlite/JSSQLStatement.cpp:1833–1900`](https://github.com/oven-sh/bun/blob/744846f844374847c902b5e7fd59b4342a51ef99/src/jsc/bindings/sqlite/JSSQLStatement.cpp#L1833-L1900)
+finalizes its statements for force=true, calls sqlite3_close, unconditionally
+sets `versionDB->db=nullptr`, and formats an error using **sqlite3_errstr(rc)**,
+not sqlite3_errmsg(db). Thus an error cannot make that consumer re-read or
+re-close the freed pointer; subsequent close/GC sees a null handle. Preserving
+a SICK database instead would leak it because Bun has already dropped its
+pointer. The JS entry is
+[`src/js/bun/sqlite.ts:505–509`](https://github.com/oven-sh/bun/blob/744846f844374847c902b5e7fd59b4342a51ef99/src/js/bun/sqlite.ts#L505-L509).
+The managed factory must always call close(true), even if its caller supplies
+false/undefined, to surface close failure before acknowledgment. Normal
+unmanaged factories are not altered. Deferred close/foreign outstanding C
+backup handles are not successful authority-close acknowledgment paths.
+
+Parent acceptance should cover rename after the last successful RO inspect
+but before close, for each caller argument undefined/false/true; each managed
+close must throw and invalidate the registry. The observed broad
+rename-before-close counterexample establishes propagation failure, not an
+observed xClose-only swap window or authority callback false acknowledgment.
+Also cover ordinary successful close, sticky-fault cleanup, repeated Bun
+close/GC after an error, and reader-first RO/RW coexistence plus DMS release/
+retry on the same connection. No execution of these checks is claimed here.

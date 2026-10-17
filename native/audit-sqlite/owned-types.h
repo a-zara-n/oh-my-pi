@@ -33,8 +33,10 @@ struct OmpSqliteState {
   int references;
   int armed;
   int fault;
+  int closeError;
   int readonly;
   int transactionState;
   char *parentPath;
 };
 static int ompSqliteShmCheck(struct unixFile*, struct unixShmNode*);
+static void ompSqliteCloseFailure(struct unixFile*);

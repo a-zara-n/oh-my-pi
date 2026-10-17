@@ -16,6 +16,7 @@ export function patchAmalgamation(canonical: string): string {
 	replace("struct unixShmNode {\n", "struct unixShmNode {\n  sqlite3_uint64 ompGeneration;\n  struct stat ompStat;\n");
 	// The implementation is below all real callbacks, above the methods table.
 	replace("#define IOMETHODS(FINDER,METHOD,VERSION,CLOSE,LOCK,UNLOCK,CKLOCK,SHMMAP)", `${fragment("owned-vfs.c")}\n#define IOMETHODS(FINDER,METHOD,VERSION,CLOSE,LOCK,UNLOCK,CKLOCK,SHMMAP)`);
+	replace("static void robust_close(unixFile *pFile, int h, int lineno){\n  if( osClose(h) ){", "static void robust_close(unixFile *pFile, int h, int lineno){\n  if( osClose(h) ){\n    ompSqliteCloseFailure(pFile);");
 	// Reject alternate locking implementations before their first open.
 	replace("  memset(p, 0, sizeof(unixFile));\n\n#ifdef SQLITE_ASSERT_NO_FILES", `  memset(p, 0, sizeof(unixFile));
   if( strcmp(pVfs->zName,"unix")!=0 ) return SQLITE_CANTOPEN;
@@ -34,7 +35,14 @@ export function patchAmalgamation(canonical: string): string {
 #ifdef SQLITE_ASSERT_NO_FILES`);
 	replace("open_finished:\n  if( rc!=SQLITE_OK ){\n    sqlite3_free(p->pPreallocatedUnused);\n  }\n  return rc;", "open_finished:\n  if( rc==SQLITE_OK ){\n    rc=ompSqliteAttach(p,zPath,flags);\n    if( rc!=SQLITE_OK ){\n      p->pMethod->xClose(pFile);\n      return rc;\n    }\n  }else{\n    sqlite3_free(p->pPreallocatedUnused);\n  }\n  return rc;");
 	// A read-only connection never creates/repairs/rebuilds shm implicitly.
-	replace("if( 0==sqlite3_uri_boolean(pDbFd->zPath, \"readonly_shm\", 0) ){", "if( !pDbFd->ompState->readonly && 0==sqlite3_uri_boolean(pDbFd->zPath, \"readonly_shm\", 0) ){");
+	replace("      if( 0==sqlite3_uri_boolean(pDbFd->zPath, \"readonly_shm\", 0) ){\n        pShmNode->hShm = robust_open(zShm, O_RDWR|O_CREAT|O_NOFOLLOW,\n                                     (sStat.st_mode&0777));\n      }", `      if( 0==sqlite3_uri_boolean(pDbFd->zPath, "readonly_shm", 0) ){
+        int capabilities=O_RDWR|O_NOFOLLOW;
+        /* RO may share an existing writable shm capability/readmarks, never
+        ** create one. Per-connection guards still prohibit repair/extension. */
+        if( !pDbFd->ompState->readonly ) capabilities|=O_CREAT;
+        pShmNode->hShm = robust_open(zShm, capabilities,
+                                     (sStat.st_mode&0777));
+      }`);
 	replace("      robustFchown(pShmNode->hShm, sStat.st_uid, sStat.st_gid);", "      rc=ompSqliteShmCheck(pDbFd,pShmNode);\n      if( rc!=SQLITE_OK ) goto shm_open_err;\n      robustFchown(pShmNode->hShm, sStat.st_uid, sStat.st_gid);");
 	replace("  /* Make the new connection a child of the unixShmNode */", "  rc=ompSqliteShmCheck(pDbFd,pShmNode);\n  if( rc!=SQLITE_OK ) goto shm_open_err;\n\n  /* Make the new connection a child of the unixShmNode */");
 	replace("  sqlite3_mutex_enter(pShmNode->pShmMutex);\n  if( pShmNode->isUnlocked ){", "  sqlite3_mutex_enter(pShmNode->pShmMutex);\n  rc=ompSqliteShmCheck(pDbFd,pShmNode);\n  if( rc!=SQLITE_OK ) goto shmpage_out;\n  if( pDbFd->ompState->readonly && bExtend && pShmNode->nRegion<=iRegion ){\n    rc=SQLITE_READONLY_CANTINIT; goto shmpage_out;\n  }\n  if( pShmNode->isUnlocked ){");
@@ -125,6 +133,16 @@ export function patchAmalgamation(canonical: string): string {
 }
 \n${beginTail}`);
 	replace("    p->inTrans = TRANS_NONE;\n    unlockBtreeIfUnused(pBt);\n  }\n\n  btreeIntegrity(p);", "    p->inTrans = TRANS_NONE;\n    unlockBtreeIfUnused(pBt);\n  }\n  {\n    sqlite3_file *fd=sqlite3PagerFile(pBt->pPager);\n    int next=p->inTrans;\n    if( fd && fd->pMethods ) (void)sqlite3OsFileControl(fd,OMP_SQLITE_TX_CONTROL,&next);\n  }\n\n  btreeIntegrity(p);");
+	replace("static int sqlite3Close(sqlite3 *db, int forceZombie){", `${fragment("owned-close.c")}\nstatic int sqlite3Close(sqlite3 *db, int forceZombie){\n  OmpSqliteCloseContext ompClose;`);
+	replace("  db->eOpenState = SQLITE_STATE_ZOMBIE;\n  sqlite3LeaveMutexAndCloseZombie(db);\n  return SQLITE_OK;", `  ompClose.count=0;
+  ompClose.result=SQLITE_OK;
+  /* The db mutex is held; no callback or unlock separates this test from
+  ** CloseZombie's matching busy test. Never retain stack state on a zombie. */
+  if( !connectionIsBusy(db) ) ompSqliteCloseCapture(db,&ompClose);
+  db->eOpenState = SQLITE_STATE_ZOMBIE;
+  sqlite3LeaveMutexAndCloseZombie(db);
+  /* db may now be freed: inspect retained owned state only, never db. */
+  return ompSqliteCloseResult(&ompClose);`);
 	replace("SQLITE_API int sqlite3_file_control(sqlite3 *db, const char *zDbName, int op, void *pArg){", `${fragment("owned-core.c")}\nSQLITE_API int sqlite3_file_control(sqlite3 *db, const char *zDbName, int op, void *pArg){`);
 	replace("    if( op==SQLITE_FCNTL_FILE_POINTER ){\n      *(sqlite3_file**)pArg = fd;", "    if( op==OMP_SQLITE_CONTROL ){\n      rc=ompSqliteCoreControl(db,pBtree,fd,pArg);\n    }else if( op==SQLITE_FCNTL_FILE_POINTER ){\n      *(sqlite3_file**)pArg = fd;");
 	return source;

@@ -16,6 +16,14 @@ static int ompSqliteFault(OmpSqliteState *s){
   }
   return SQLITE_IOERR_AUTH;
 }
+static void ompSqliteCloseFailure(unixFile *p){
+  OmpSqliteState *s=p ? p->ompState : 0;
+  if( !s ) return; /* Open-error cleanup before owned attachment. */
+  sqlite3_mutex_enter(s->mutex);
+  if( s->closeError==SQLITE_OK ) s->closeError=SQLITE_IOERR_CLOSE;
+  (void)ompSqliteFault(s);
+  sqlite3_mutex_leave(s->mutex);
+}
 static void ompSqliteRelease(OmpSqliteState *s){
   int release;
   OmpSqliteState *parent;
@@ -146,7 +154,10 @@ static int ompSqliteShmCheck(unixFile *p, unixShmNode *node){
     node->ompStat = now;
   }
   if( !ompSqliteSame(&now, &node->ompStat) ) return ompSqliteFault(s);
-  if( s->shmNode!=node || s->shmGeneration!=node->ompGeneration ){
+  /* Validation before publication must not retain a node that upstream may
+  ** purge on transient DMS BUSY. Commit only the actual published reference. */
+  if( p->pShm && p->pShm->pShmNode==node
+      && (s->shmNode!=node || s->shmGeneration!=node->ompGeneration) ){
     /* A previously used mapping may only be replaced after xShmUnmap cleared
     ** this connection's reference. Reuse of an address is not identity. */
     if( s->shmNode!=0 ) return ompSqliteFault(s);
@@ -232,6 +243,7 @@ static int ompSqliteClose(sqlite3_file *id){
   int rc, invalid;
   sqlite3_mutex_enter(s->mutex);
   invalid = ompSqliteCheck(p->ompDeleted && s->mainFile ? s->mainFile : p);
+  if( invalid!=SQLITE_OK && s->closeError==SQLITE_OK ) s->closeError=invalid;
   /* Cleanup must run even after a sticky fault. No successful proof survives. */
   if( p==s->mainFile ){
     s->mainFile = 0; s->fault = 1; s->shmNode = 0;
@@ -241,7 +253,10 @@ static int ompSqliteClose(sqlite3_file *id){
   rc = base->xClose(id);
   /* sqlite3OsClose discards xClose's rc: preserve failure in live ownership
   ** state (and a retained backup source) before releasing any references. */
-  if( rc!=SQLITE_OK ) (void)ompSqliteFault(s);
+  if( rc!=SQLITE_OK ){
+    if( s->closeError==SQLITE_OK ) s->closeError=rc;
+    (void)ompSqliteFault(s);
+  }
   sqlite3_mutex_leave(s->mutex);
   ompSqliteRelease(s);
   return invalid==SQLITE_OK ? rc : invalid;
