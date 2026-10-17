@@ -1,11 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
 import { type } from "@oh-my-pi/omptype";
-import {
-	Agent,
-	type AgentTool,
-	type AgentTurnEndContext,
-	type StreamFn,
-} from "@oh-my-pi/pi-agent-core";
+import { Agent, type AgentTool, type AgentTurnEndContext, type StreamFn } from "@oh-my-pi/pi-agent-core";
 import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import type { Context } from "@oh-my-pi/pi-ai";
 import type { AssistantMessage, ToolResultMessage } from "@oh-my-pi/pi-utils/model-data";

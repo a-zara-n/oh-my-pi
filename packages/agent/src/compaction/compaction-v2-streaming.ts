@@ -10,7 +10,11 @@
 import type { CodexCompactionContext, FetchImpl, Model, ProviderSessionState } from "@oh-my-pi/pi-ai";
 import type { Api } from "@oh-my-pi/pi-utils/model-data";
 import * as AIError from "@oh-my-pi/pi-ai/error";
-import { gateFetch, getModelRequestExecution, runWithModelRequestLineage } from "@oh-my-pi/pi-ai/model-request-execution";
+import {
+	gateFetch,
+	getModelRequestExecution,
+	runWithModelRequestLineage,
+} from "@oh-my-pi/pi-ai/model-request-execution";
 import { createOpenAICodexCompactionRequestContext } from "@oh-my-pi/pi-ai/providers/openai-codex-compaction";
 import { applyCodexResponsesLiteShape } from "@oh-my-pi/pi-ai/providers/openai-codex/request-transformer";
 import {

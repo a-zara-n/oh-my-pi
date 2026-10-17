@@ -3,10 +3,7 @@ import { describe, expect, it } from "bun:test";
 import { wrapInbandToolStream } from "../src/dialect/owned-stream";
 import type { AssistantMessageEvent } from "../src/types";
 import type { AssistantMessage, ThinkingContent, ToolCall, Usage } from "@oh-my-pi/pi-utils/model-data";
-import {
-	isCursorExecResolved,
-	kCursorExecResolved,
-} from "../src/utils/block-symbols";
+import { isCursorExecResolved, kCursorExecResolved } from "../src/utils/block-symbols";
 import { AssistantMessageEventStream } from "../src/utils/event-stream";
 
 const TOOLS = [

@@ -14,11 +14,7 @@ import { logger, structuredCloneJSON } from "@oh-my-pi/pi-utils";
 import { resolvePromptCacheKey } from "../auth-gateway/http";
 import type { AuthGatewayStreamControl, AuthGatewayParsedRequest as ParsedRequest } from "../auth-gateway/types";
 import * as AIError from "../error";
-import type {
-	AssistantMessageEventStream,
-	Context,
-	Tool,
-} from "../types";
+import type { AssistantMessageEventStream, Context, Tool } from "../types";
 import type {
 	AssistantMessage,
 	ComputerAction,

@@ -6,13 +6,7 @@
  */
 
 import * as AIError from "./error";
-import type {
-	AssistantMessageEventStream,
-	Context,
-	Model,
-	SimpleStreamOptions,
-	StreamOptions,
-} from "./types";
+import type { AssistantMessageEventStream, Context, Model, SimpleStreamOptions, StreamOptions } from "./types";
 import type { Api, KnownApi } from "@oh-my-pi/pi-utils/model-data";
 
 const BUILTIN_API_IDS = [

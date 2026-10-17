@@ -1,5 +1,23 @@
-import type { BashExecutionMessage, CustomMessage, CustomMessageContent, CustomMessagePayload, FileMentionMessage, HookMessage, NormalizedCustomMessagePayload, PythonExecutionMessage } from "@oh-my-pi/pi-utils/agent-messages";
-export type { BashExecutionMessage, CustomMessage, CustomMessageContent, CustomMessagePayload, FileMentionMessage, HookMessage, NormalizedCustomMessagePayload, PythonExecutionMessage } from "@oh-my-pi/pi-utils/agent-messages";
+import type {
+	BashExecutionMessage,
+	CustomMessage,
+	CustomMessageContent,
+	CustomMessagePayload,
+	FileMentionMessage,
+	HookMessage,
+	NormalizedCustomMessagePayload,
+	PythonExecutionMessage,
+} from "@oh-my-pi/pi-utils/agent-messages";
+export type {
+	BashExecutionMessage,
+	CustomMessage,
+	CustomMessageContent,
+	CustomMessagePayload,
+	FileMentionMessage,
+	HookMessage,
+	NormalizedCustomMessagePayload,
+	PythonExecutionMessage,
+} from "@oh-my-pi/pi-utils/agent-messages";
 import type { AssistantMessage, ImageContent, MessageAttribution, TextContent } from "@oh-my-pi/pi-utils/model-data";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { COLLAB_PROMPT_MESSAGE_TYPE } from "@oh-my-pi/pi-wire";
@@ -23,7 +41,6 @@ export const DEFAULT_CUSTOM_MESSAGE_TYPE = "custom-message";
 
 /** Custom message carrying a coding request delegated by the live voice model. */
 export const LIVE_DELEGATION_MESSAGE_TYPE = "live-delegation";
-
 
 /** Details persisted on a `/tan` background-dispatch breadcrumb. */
 export interface BackgroundTanDispatchDetails {
@@ -163,9 +180,6 @@ export function normalizeCustomMessagePayload<T = unknown>(
 		attribution: normalizeCustomMessageAttribution(payload.attribution),
 	};
 }
-
-
-
 
 /** True for a `/skill:<name>` prompt the user invoked directly (attribution `user`), as opposed to an agent/autoload injection. */
 export function isUserInvokedSkillPrompt(message: CustomMessage): boolean {

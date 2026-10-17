@@ -12,7 +12,10 @@ import {
 	resolveImageDataUrlSync,
 } from "./blob-store";
 import { buildSessionContext } from "./session-context";
-import { validateModelRequestJournal, type ModelRequestJournalValidation } from "@oh-my-pi/pi-utils/model-request-journal";
+import {
+	validateModelRequestJournal,
+	type ModelRequestJournalValidation,
+} from "@oh-my-pi/pi-utils/model-request-journal";
 import { validateModelRequestRegistry } from "@oh-my-pi/pi-utils/model-request-registry";
 import type { FileEntry, SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
 import { migrateToCurrentVersion } from "@oh-my-pi/pi-utils/session-migrations";
@@ -125,9 +128,16 @@ export async function loadSessionFile(
 		const header = loaded.entries.find(entry => entry.type === "session");
 		if (header?.modelRequestJournal || loaded.entries.some(entry => entry.type === "model_request_metadata")) {
 			validateModelRequestJournal(loaded.entries, loaded);
-		} else if (header?.modelRequestRegistry || loaded.entries.some(entry => entry.type === "model_request_registry")) {
-			if (!header || loaded.invalidHeader || loaded.malformedRecords > 0) throw new Error("Invalid model request registry");
-			validateModelRequestRegistry(header, loaded.entries.filter(entry => entry.type !== "session"));
+		} else if (
+			header?.modelRequestRegistry ||
+			loaded.entries.some(entry => entry.type === "model_request_registry")
+		) {
+			if (!header || loaded.invalidHeader || loaded.malformedRecords > 0)
+				throw new Error("Invalid model request registry");
+			validateModelRequestRegistry(
+				header,
+				loaded.entries.filter(entry => entry.type !== "session"),
+			);
 		}
 		return { ...loaded, sourceSize };
 	} catch (err) {

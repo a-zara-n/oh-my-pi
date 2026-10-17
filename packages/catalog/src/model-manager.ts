@@ -5,13 +5,7 @@ import { applyCatalogMetrics, CatalogMetricsIndex } from "./identity/metrics";
 import { readModelCache, writeModelCache } from "./model-cache";
 import { type GeneratedProvider, getBundledModels } from "./models";
 import { isTimeBasedCost } from "./pricing";
-import {
-	type Model,
-	type ModelCost,
-	modelKind,
-	type ModelSpec,
-	type TokenCost,
-} from "./types";
+import { type Model, type ModelCost, modelKind, type ModelSpec, type TokenCost } from "./types";
 import type { Api, Provider } from "@oh-my-pi/pi-utils/model-data";
 import { isRecord } from "./utils";
 

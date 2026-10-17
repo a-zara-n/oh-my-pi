@@ -51,12 +51,7 @@ import {
 	readToolSupersedeKey,
 } from "@oh-my-pi/pi-agent-core/compaction/pruning";
 import type { ProtectedToolMatcher } from "@oh-my-pi/pi-agent-core/compaction/tool-protection";
-import type {
-	CodexCompactionContext,
-	Context,
-	Model,
-	ProviderSessionState,
-} from "@oh-my-pi/pi-ai";
+import type { CodexCompactionContext, Context, Model, ProviderSessionState } from "@oh-my-pi/pi-ai";
 import type { AssistantMessage, Message } from "@oh-my-pi/pi-utils/model-data";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { createModelRequestRetryChain, runInModelRequestRetryChain } from "@oh-my-pi/pi-ai/model-request-execution";

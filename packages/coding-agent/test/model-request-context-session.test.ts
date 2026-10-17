@@ -1,11 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as path from "node:path";
-import {
-	type Context,
-	type Model,
-	type SimpleStreamOptions,
-	streamSimple,
-} from "@oh-my-pi/pi-ai";
+import { type Context, type Model, type SimpleStreamOptions, streamSimple } from "@oh-my-pi/pi-ai";
 import type { Api, AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import {
 	deriveModelRequestExecution,
@@ -79,51 +74,74 @@ function sessionIdOf(session: AgentSession): string {
 describe("managed model request context isolation", () => {
 	const cases = [
 		["foreign-runtime", "refuses a foreign-runtime binding before a session or provider request is published"],
-		["fake-authority", "does not grant readiness to a copied authority-shaped object with the correct runtime and root"],
-		["binding-propagation", "retains the same candidate and rejects a distinct binding without publishing a pending child root"],
+		[
+			"fake-authority",
+			"does not grant readiness to a copied authority-shaped object with the correct runtime and root",
+		],
+		[
+			"binding-propagation",
+			"retains the same candidate and rejects a distinct binding without publishing a pending child root",
+		],
 		["rejected-promise", "keeps a managed child root unavailable before and after a caller promise rejects"],
 		["resolved-promise", "does not grant readiness when a caller promise resolves to a readiness-shaped DTO"],
 		["fake-execution", "does not accept a readiness-shaped execution DTO as canonical identity"],
-		["genuine-parent", "composes distinct same-family handovers and rejects cross-family, fake, missing and revoked parents"],
-		["warm-parent", "revives a parked managed sibling under its captured genuine parent without relaxing family identity"],
+		[
+			"genuine-parent",
+			"composes distinct same-family handovers and rejects cross-family, fake, missing and revoked parents",
+		],
+		[
+			"warm-parent",
+			"revives a parked managed sibling under its captured genuine parent without relaxing family identity",
+		],
 	] as const;
 
 	for (const [scenario, title] of cases) {
 		const native = scenario === "genuine-parent" || scenario === "warm-parent";
 		const test = native && process.platform !== "darwin" ? it.skip : it;
-		test(title, async () => {
-			const child = Bun.spawn(
-				[process.execPath, path.join(import.meta.dir, scenario === "warm-parent"
-					? "fixtures/model-request-warm-parent-process.ts"
-					: "fixtures/model-request-context-journal-probe.ts"), scenario],
-				{
-					cwd: path.resolve(import.meta.dir, "../../.."),
-					stdin: "ignore",
-					stdout: "pipe",
-					stderr: "pipe",
-				},
-			);
-			const watchdog = setTimeout(() => child.kill("SIGKILL"), 30_000);
-			try {
-				const [exitCode, stdout, stderr] = await Promise.all([
-					child.exited,
-					new Response(child.stdout).text(),
-					new Response(child.stderr).text(),
-				]);
-				if (exitCode !== 0) {
-					throw new Error(`Model request context probe ${scenario} exited ${exitCode}:\n${stdout}\n${stderr}`);
+		test(
+			title,
+			async () => {
+				const child = Bun.spawn(
+					[
+						process.execPath,
+						path.join(
+							import.meta.dir,
+							scenario === "warm-parent"
+								? "fixtures/model-request-warm-parent-process.ts"
+								: "fixtures/model-request-context-journal-probe.ts",
+						),
+						scenario,
+					],
+					{
+						cwd: path.resolve(import.meta.dir, "../../.."),
+						stdin: "ignore",
+						stdout: "pipe",
+						stderr: "pipe",
+					},
+				);
+				const watchdog = setTimeout(() => child.kill("SIGKILL"), 30_000);
+				try {
+					const [exitCode, stdout, stderr] = await Promise.all([
+						child.exited,
+						new Response(child.stdout).text(),
+						new Response(child.stderr).text(),
+					]);
+					if (exitCode !== 0) {
+						throw new Error(`Model request context probe ${scenario} exited ${exitCode}:\n${stdout}\n${stderr}`);
+					}
+					expect(stdout.trim().split("\n")).toContain(
+						scenario === "warm-parent" ? "model-request-warm-parent:ok" : `model-request-context:${scenario}:ok`,
+					);
+				} finally {
+					clearTimeout(watchdog);
+					if (child.exitCode === null) {
+						child.kill("SIGKILL");
+						await child.exited;
+					}
 				}
-				expect(stdout.trim().split("\n")).toContain(scenario === "warm-parent"
-					? "model-request-warm-parent:ok"
-					: `model-request-context:${scenario}:ok`);
-			} finally {
-				clearTimeout(watchdog);
-				if (child.exitCode === null) {
-					child.kill("SIGKILL");
-					await child.exited;
-				}
-			}
-		}, 35_000);
+			},
+			35_000,
+		);
 	}
 });
 
@@ -305,7 +323,9 @@ describe("model request context of an AgentSession", () => {
 		});
 		const derived = deriveModelRequestExecution(parent, { purpose: "advisor" });
 		expect(resolveModelRequestScope(derived)).toMatchObject({
-			sessionId: "ordinary-rootless", rootSessionId: undefined, purpose: "advisor",
+			sessionId: "ordinary-rootless",
+			rootSessionId: undefined,
+			purpose: "advisor",
 		});
 		const handover = childModelRequestRootOf(derived);
 		expect(handover.parentExecution).toBe(derived);
@@ -341,7 +361,9 @@ describe("model request context of an AgentSession", () => {
 
 	it("gives a session created inside another session's context without a hand-over no root", async () => {
 		const parent = await createSession({ agentId: ROOT_AGENT_ID });
-		const orphan = await parent.runInModelRequestContext(() => createSession({ agentId: "OrphanAgent", taskDepth: 1 }));
+		const orphan = await parent.runInModelRequestContext(() =>
+			createSession({ agentId: "OrphanAgent", taskDepth: 1 }),
+		);
 
 		await orphan.prompt("work");
 		await orphan.waitForIdle();
@@ -502,8 +524,12 @@ describe("model request context of an AgentSession", () => {
 			const scope = execution === undefined ? undefined : resolveModelRequestScope(execution);
 			hookRuns.push({ hook, sessionId: scope?.sessionId, purpose: scope?.purpose });
 		};
-		vi.spyOn(MnemopiSessionState.prototype, "maybeRecallOnAgentStart").mockImplementation(async () => observe("recall"));
-		vi.spyOn(MnemopiSessionState.prototype, "maybeRetainOnAgentEnd").mockImplementation(async () => observe("retain"));
+		vi.spyOn(MnemopiSessionState.prototype, "maybeRecallOnAgentStart").mockImplementation(async () =>
+			observe("recall"),
+		);
+		vi.spyOn(MnemopiSessionState.prototype, "maybeRetainOnAgentEnd").mockImplementation(async () =>
+			observe("retain"),
+		);
 		await Promise.all([loadMnemopi(), loadMnemopiCore()]);
 		const settings = Settings.isolated({
 			"memory.backend": "mnemopi",

@@ -2,14 +2,7 @@ import { afterEach, describe, expect, it, vi } from "bun:test";
 import { streamOpenAICompletions } from "@oh-my-pi/pi-ai/providers/openai-completions";
 import { streamOpenAIResponses } from "@oh-my-pi/pi-ai/providers/openai-responses";
 import { streamSimple } from "@oh-my-pi/pi-ai/stream";
-import type {
-	Context,
-	FetchImpl,
-	Model,
-	ModelSpec,
-	OpenAICompat,
-	StreamOptions,
-} from "@oh-my-pi/pi-ai/types";
+import type { Context, FetchImpl, Model, ModelSpec, OpenAICompat, StreamOptions } from "@oh-my-pi/pi-ai/types";
 import type { AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { Effort } from "@oh-my-pi/pi-catalog/effort";

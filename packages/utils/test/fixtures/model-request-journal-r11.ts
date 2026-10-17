@@ -52,10 +52,14 @@ export class R11JournalFixture {
 		const token = randomBytes(32);
 		const hash = createHash("sha256").update(token).digest("hex");
 		retainModelRequestWriterCredential(this.requester, {
-			writerId: this.writerId, token, role: "operator-command", capabilities: [],
+			writerId: this.writerId,
+			token,
+			role: "operator-command",
+			capabilities: [],
 		});
 		const physicalBindingId = randomUUID();
-		const common = "seq INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL UNIQUE,tx_seq INTEGER NOT NULL,created_at_ms INTEGER NOT NULL";
+		const common =
+			"seq INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL UNIQUE,tx_seq INTEGER NOT NULL,created_at_ms INTEGER NOT NULL";
 		this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA application_id=1330856277; PRAGMA user_version=20;
 			CREATE TABLE store_meta(singleton INTEGER PRIMARY KEY,store_id TEXT) STRICT;
 			CREATE TABLE tx_log(tx_seq INTEGER PRIMARY KEY,writer_id TEXT,op_name TEXT,sealed INTEGER) STRICT;
@@ -63,24 +67,46 @@ export class R11JournalFixture {
 			CREATE TABLE writer_event(${common},writer_id TEXT NOT NULL,event TEXT NOT NULL,reason TEXT) STRICT;
 			CREATE TABLE store_config_event(${common},key TEXT NOT NULL,value_json TEXT NOT NULL,approval_id TEXT,writer_id TEXT NOT NULL) STRICT;`);
 		this.db.query("INSERT INTO store_meta VALUES(1,?)").run(this.storeId);
-		this.db.query("INSERT INTO tx_log VALUES(1,?,'store.init',1),(2,?,'bootstrapModelRequestJournalAuthority',1),(3,?,'registerWriter',1)")
+		this.db
+			.query(
+				"INSERT INTO tx_log VALUES(1,?,'store.init',1),(2,?,'bootstrapModelRequestJournalAuthority',1),(3,?,'registerWriter',1)",
+			)
 			.run(epochWriterId, epochWriterId, epochWriterId);
-		this.db.query("INSERT INTO writer(id,tx_seq,created_at_ms,role,capabilities_json,token_hash) VALUES(?,1,1,'operator-command','[]',?),(?,3,3,'operator-command','[]',?)")
+		this.db
+			.query(
+				"INSERT INTO writer(id,tx_seq,created_at_ms,role,capabilities_json,token_hash) VALUES(?,1,1,'operator-command','[]',?),(?,3,3,'operator-command','[]',?)",
+			)
 			.run(epochWriterId, createHash("sha256").update(randomBytes(32)).digest("hex"), this.writerId, hash);
-		this.db.query("INSERT INTO store_config_event(id,tx_seq,created_at_ms,key,value_json,approval_id,writer_id) VALUES('epoch-1',2,2,'budget_authority_epoch',?,NULL,?)")
+		this.db
+			.query(
+				"INSERT INTO store_config_event(id,tx_seq,created_at_ms,key,value_json,approval_id,writer_id) VALUES('epoch-1',2,2,'budget_authority_epoch',?,NULL,?)",
+			)
 			.run(JSON.stringify({ schemaVersion: 1, authorityEpoch: 1, physicalBindingId }), epochWriterId);
-		withRawModelRequestJournalLeases({ storeId: this.storeId, control: "exclusive", maintenance: "exclusive" }, raw => {
-			this.namespace = raw.namespacePath;
-			const stat = fs.statSync(databasePath);
-			fs.writeFileSync(raw.recordPath, JSON.stringify({
-				schemaVersion: 1, storeId: this.storeId, authorityEpoch: 1, physicalBindingId,
-				dbDevice: stat.dev, dbInode: stat.ino, state: "active",
-			}), { mode: 0o600 });
-		});
+		withRawModelRequestJournalLeases(
+			{ storeId: this.storeId, control: "exclusive", maintenance: "exclusive" },
+			raw => {
+				this.namespace = raw.namespacePath;
+				const stat = fs.statSync(databasePath);
+				fs.writeFileSync(
+					raw.recordPath,
+					JSON.stringify({
+						schemaVersion: 1,
+						storeId: this.storeId,
+						authorityEpoch: 1,
+						physicalBindingId,
+						dbDevice: stat.dev,
+						dbInode: stat.ino,
+						state: "active",
+					}),
+					{ mode: 0o600 },
+				);
+			},
+		);
 	}
 
 	open(sessionFile?: string): FileJournalCell {
-		const cell = openFileJournalCell({ cwd: this.directory,
+		const cell = openFileJournalCell({
+			cwd: this.directory,
 			sessionDir: sessionFile === undefined ? this.directory : path.dirname(sessionFile),
 			...(sessionFile === undefined ? {} : { sessionFile }),
 		});
@@ -89,14 +115,28 @@ export class R11JournalFixture {
 	}
 
 	withBinding<T>(root: FileJournalCell, use: (binding: ModelRequestJournalLeaseBinding) => Promise<T>): Promise<T> {
-		return withVerifiedModelRequestJournalBinding({ resources: this.resources, requester: this.requester,
-			mode: "resume", rootSessionId: root.getSessionId() }, use);
+		return withVerifiedModelRequestJournalBinding(
+			{ resources: this.resources, requester: this.requester, mode: "resume", rootSessionId: root.getSessionId() },
+			use,
+		);
 	}
 
-	async ready(binding: ModelRequestJournalLeaseBinding, cell: FileJournalCell, parent?: ReadyPrincipal,
-		agent: ModelRequestAgent = { id: randomUUID(), kind: parent ? "sub" : "main", name: "r11", depth: parent ? 1 : 0 },
-		root: FileJournalCell = parent?.cell ?? cell): Promise<ReadyPrincipal> {
-		const execution = createJournalExecution({ binding, agent, purpose: "main",
+	async ready(
+		binding: ModelRequestJournalLeaseBinding,
+		cell: FileJournalCell,
+		parent?: ReadyPrincipal,
+		agent: ModelRequestAgent = {
+			id: randomUUID(),
+			kind: parent ? "sub" : "main",
+			name: "r11",
+			depth: parent ? 1 : 0,
+		},
+		root: FileJournalCell = parent?.cell ?? cell,
+	): Promise<ReadyPrincipal> {
+		const execution = createJournalExecution({
+			binding,
+			agent,
+			purpose: "main",
 			...(parent === undefined ? {} : { parentExecution: parent.execution }),
 		});
 		const session = await composeJournalSession({ cell, root, binding, execution });
@@ -107,8 +147,10 @@ export class R11JournalFixture {
 		// Fault/revocation cases intentionally leave cells unable to publish a close.
 		// Still settle every real queue/descriptor before removing scratch data.
 		await Promise.allSettled([...this.cells].reverse().map(cell => cell.close()));
-		try { retireModelRequestWriterCredential(this.requester); this.db.close(); }
-		finally {
+		try {
+			retireModelRequestWriterCredential(this.requester);
+			this.db.close();
+		} finally {
 			fs.rmSync(this.directory, { recursive: true, force: true });
 			if (this.namespace) fs.rmSync(this.namespace, { recursive: true, force: true });
 		}

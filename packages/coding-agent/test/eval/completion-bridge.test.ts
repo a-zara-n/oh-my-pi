@@ -293,7 +293,12 @@ describe("runEvalCompletion", () => {
 			const spy = vi
 				.spyOn(ai, "completeSimple")
 				.mockResolvedValueOnce(
-					assistant({ stopReason: "error", errorMessage: flattened.message, errorStatus: flattened.status, errorId: flattened.id }),
+					assistant({
+						stopReason: "error",
+						errorMessage: flattened.message,
+						errorStatus: flattened.status,
+						errorId: flattened.id,
+					}),
 				)
 				.mockResolvedValueOnce(assistant({ text: "fallback answer" }));
 

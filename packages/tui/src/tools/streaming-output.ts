@@ -35,7 +35,6 @@ const ELLIPSIS = "…";
 // Interfaces
 // =============================================================================
 
-
 /** Captured output with inline truncation and artifact storage metadata. */
 export interface OutputSummary {
 	output: string;

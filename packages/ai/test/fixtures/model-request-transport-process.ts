@@ -105,6 +105,10 @@ async function authorizeTimeout(): Promise<object> {
 
 const scenario = process.argv[2];
 const result =
-	scenario === "unregistered" ? await unregistered() : scenario === "authorize-timeout" ? await authorizeTimeout() : undefined;
+	scenario === "unregistered"
+		? await unregistered()
+		: scenario === "authorize-timeout"
+			? await authorizeTimeout()
+			: undefined;
 if (result === undefined) throw new Error(`unknown scenario: ${String(scenario)}`);
 console.log(JSON.stringify(result));

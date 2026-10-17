@@ -44,29 +44,73 @@ const journalEpoch = "33333333-3333-4333-8333-333333333333";
 const promptCanary = "PROMPT_CANARY_DO_NOT_DUPLICATE";
 const keyCanary = "KEY_CANARY_DO_NOT_DUPLICATE";
 
-function fixture(cwd: string, id = "consumer-session"): {
+function fixture(
+	cwd: string,
+	id = "consumer-session",
+): {
 	header: SessionHeader;
 	entries: SessionEntry[];
 	metadata: ModelRequestMetadataEntry;
 } {
 	const header: SessionHeader = {
-		type: "session", version: 3, id, timestamp, cwd,
+		type: "session",
+		version: 3,
+		id,
+		timestamp,
+		cwd,
 		modelRequestJournal: { schemaVersion: 1, journalId, sessionId: id, epochs: [{ journalOwnerId, journalEpoch }] },
 	};
 	const entries: SessionEntry[] = [
-		{ type: "message", id: "user0001", parentId: null, timestamp,
-			message: { role: "user", content: promptCanary, timestamp: 1 } },
-		{ type: "message", id: "asst0001", parentId: "user0001", timestamp,
-			message: { role: "assistant", content: [{ type: "text", text: keyCanary }],
-				api: "openai-completions", provider: "openai", model: "gpt-4o-mini", stopReason: "stop", timestamp: 2,
-				usage: { input: 10, output: 2, cacheRead: 0, cacheWrite: 0, totalTokens: 12,
-					cost: { input: 0.01, output: 0.02, cacheRead: 0, cacheWrite: 0, total: 0.03 } } } },
+		{
+			type: "message",
+			id: "user0001",
+			parentId: null,
+			timestamp,
+			message: { role: "user", content: promptCanary, timestamp: 1 },
+		},
+		{
+			type: "message",
+			id: "asst0001",
+			parentId: "user0001",
+			timestamp,
+			message: {
+				role: "assistant",
+				content: [{ type: "text", text: keyCanary }],
+				api: "openai-completions",
+				provider: "openai",
+				model: "gpt-4o-mini",
+				stopReason: "stop",
+				timestamp: 2,
+				usage: {
+					input: 10,
+					output: 2,
+					cacheRead: 0,
+					cacheWrite: 0,
+					totalTokens: 12,
+					cost: { input: 0.01, output: 0.02, cacheRead: 0, cacheWrite: 0, total: 0.03 },
+				},
+			},
+		},
 	];
 	const metadata: ModelRequestMetadataEntry = {
-		type: "model_request_metadata", id: "meta0001", parentId: null, timestamp,
-		schemaVersion: 1, journalId, sessionId: id, journalOwnerId, journalEpoch, seq: 1,
-		record: { schemaVersion: 1, sourceKind: "assistant", sourceSessionId: id, sourceEntryId: "asst0001",
-			resultId: null, provenance: { kind: "non-wire", reason: "local" } },
+		type: "model_request_metadata",
+		id: "meta0001",
+		parentId: null,
+		timestamp,
+		schemaVersion: 1,
+		journalId,
+		sessionId: id,
+		journalOwnerId,
+		journalEpoch,
+		seq: 1,
+		record: {
+			schemaVersion: 1,
+			sourceKind: "assistant",
+			sourceSessionId: id,
+			sourceEntryId: "asst0001",
+			resultId: null,
+			provenance: { kind: "non-wire", reason: "local" },
+		},
 	};
 	return { header, entries, metadata };
 }
@@ -104,18 +148,50 @@ describe("model-request metadata consumer cutover", () => {
 		expect(fullHistory).not.toContain("model_request_metadata");
 		expect(fullHistory).not.toContain(journalOwnerId);
 		const messages = buildSessionContext(canonical).messages;
-		expect(formatSessionHistoryMarkdown(messages)).toEqual(formatSessionHistoryMarkdown(buildSessionContext(entries).messages));
-		expect(formatSessionDumpText({ messages })).toEqual(formatSessionDumpText({ messages: buildSessionContext(entries).messages }));
+		expect(formatSessionHistoryMarkdown(messages)).toEqual(
+			formatSessionHistoryMarkdown(buildSessionContext(entries).messages),
+		);
+		expect(formatSessionDumpText({ messages })).toEqual(
+			formatSessionDumpText({ messages: buildSessionContext(entries).messages }),
+		);
 	});
 
 	test("custom/message state readers ignore appended metadata rather than changing latest state", () => {
 		const { entries, metadata } = fixture("/tmp");
 		const states: SessionEntry[] = [
 			...entries,
-			{ type: "custom", id: "control1", parentId: "asst0001", timestamp, customType: "autoresearch-control", data: { mode: "on", goal: "retain goal" } },
-			{ type: "custom", id: "notes001", parentId: "control1", timestamp, customType: "experimental_context_notes", data: { version: 1, text: "retain notebook" } },
-			{ type: "custom", id: "mention1", parentId: "notes001", timestamp, customType: "model_mention", data: { agent: "m1", selector: "openai/gpt-4o-mini", name: "mini" } },
-			{ type: "custom", id: "todos001", parentId: "mention1", timestamp, customType: "user_todo_edit", data: { phases: [{ name: "retain phase", tasks: [{ content: "retain task", status: "pending" }] }] } },
+			{
+				type: "custom",
+				id: "control1",
+				parentId: "asst0001",
+				timestamp,
+				customType: "autoresearch-control",
+				data: { mode: "on", goal: "retain goal" },
+			},
+			{
+				type: "custom",
+				id: "notes001",
+				parentId: "control1",
+				timestamp,
+				customType: "experimental_context_notes",
+				data: { version: 1, text: "retain notebook" },
+			},
+			{
+				type: "custom",
+				id: "mention1",
+				parentId: "notes001",
+				timestamp,
+				customType: "model_mention",
+				data: { agent: "m1", selector: "openai/gpt-4o-mini", name: "mini" },
+			},
+			{
+				type: "custom",
+				id: "todos001",
+				parentId: "mention1",
+				timestamp,
+				customType: "user_todo_edit",
+				data: { phases: [{ name: "retain phase", tasks: [{ content: "retain task", status: "pending" }] }] },
+			},
 		];
 		const canonical = [...states, metadata];
 		expect(reconstructControlState(canonical)).toEqual(reconstructControlState(states));
@@ -137,13 +213,29 @@ describe("model-request metadata consumer cutover", () => {
 		if (assistant.type !== "message" || assistant.message.role !== "assistant") throw new Error("Expected assistant");
 		const pending: SessionEntry[] = [
 			entries[0],
-			{ ...assistant, message: { ...assistant.message, stopReason: "toolUse", content: [{ type: "toolCall", id: "pending-tool", name: "read", arguments: { path: "/tmp/input" } }] } },
-			{ type: "custom", id: "exit0001", parentId: assistant.id, timestamp, customType: "session_exit", data: { reason: "SIGTERM", kind: "signal", recordedAt: timestamp } },
+			{
+				...assistant,
+				message: {
+					...assistant.message,
+					stopReason: "toolUse",
+					content: [{ type: "toolCall", id: "pending-tool", name: "read", arguments: { path: "/tmp/input" } }],
+				},
+			},
+			{
+				type: "custom",
+				id: "exit0001",
+				parentId: assistant.id,
+				timestamp,
+				customType: "session_exit",
+				data: { reason: "SIGTERM", kind: "signal", recordedAt: timestamp },
+			},
 		];
 		expect(collectPendingToolCalls(pending)).toHaveLength(1);
 		expect(collectPendingToolCalls([...pending, metadata])).toEqual(collectPendingToolCalls(pending));
 		expect(createInterruptedTurnAbortMessage(pending)?.stopReason).toBe("aborted");
-		expect(createInterruptedTurnAbortMessage([...pending, metadata])).toEqual(createInterruptedTurnAbortMessage(pending));
+		expect(createInterruptedTurnAbortMessage([...pending, metadata])).toEqual(
+			createInterruptedTurnAbortMessage(pending),
+		);
 	});
 
 	test("foreign import rejects descriptor or metadata before converting to a new unmanaged identity", async () => {
@@ -154,7 +246,16 @@ describe("model-request metadata consumer cutover", () => {
 			const body = `${records.map(record => JSON.stringify(record)).join("\n")}\n`;
 			await Bun.write(file, body);
 			for (const store of [new ClaudeSessionStore(dir.path()), new CodexSessionStore(dir.path())]) {
-				await expect(store.load({ source: store.source, id: "foreign", path: file, cwd: dir.path(), created: new Date(timestamp), modified: new Date(timestamp) })).rejects.toThrow("Managed model-request journals cannot be imported");
+				await expect(
+					store.load({
+						source: store.source,
+						id: "foreign",
+						path: file,
+						cwd: dir.path(),
+						created: new Date(timestamp),
+						modified: new Date(timestamp),
+					}),
+				).rejects.toThrow("Managed model-request journals cannot be imported");
 			}
 			expect(await Bun.file(file).text()).toBe(body);
 		}
@@ -254,8 +355,20 @@ describe("model-request metadata consumer cutover", () => {
 		try {
 			for (const file of [oldFile, managedFile]) {
 				const manager = await SessionManager.open(file, dir.path(), undefined, { suppressBreadcrumb: true });
-				const agent = new Agent({ initialState: { model, systemPrompt: ["test"], tools: [], messages: manager.buildSessionContext().messages } });
-				const session = new AgentSession({ agent, sessionManager: manager, modelRegistry: registry, settings: Settings.isolated({ "compaction.enabled": false }) });
+				const agent = new Agent({
+					initialState: {
+						model,
+						systemPrompt: ["test"],
+						tools: [],
+						messages: manager.buildSessionContext().messages,
+					},
+				});
+				const session = new AgentSession({
+					agent,
+					sessionManager: manager,
+					modelRegistry: registry,
+					settings: Settings.isolated({ "compaction.enabled": false }),
+				});
 				try {
 					snapshots.push({ context: session.getContextUsage(), usage: manager.getUsageStatistics() });
 				} finally {
@@ -274,17 +387,31 @@ describe("model-request metadata consumer cutover", () => {
 		await initTheme(false, undefined, undefined, "dark", "light");
 		const { entries, metadata } = fixture("/tmp");
 		const registry: ModelRequestRegistryEntry = {
-			type: "model_request_registry", id: "registry2", parentId: null, timestamp,
-			schemaVersion: 2, registryId: journalId, registryEpoch: journalEpoch, seq: 1,
+			type: "model_request_registry",
+			id: "registry2",
+			parentId: null,
+			timestamp,
+			schemaVersion: 2,
+			registryId: journalId,
+			registryEpoch: journalEpoch,
+			seq: 1,
 			record: {
-				event: "owner-registered", ownerId: journalOwnerId, sessionId: "consumer-session",
-				journalEpoch, writerOwnerId: journalOwnerId,
+				event: "owner-registered",
+				ownerId: journalOwnerId,
+				sessionId: "consumer-session",
+				journalEpoch,
+				writerOwnerId: journalOwnerId,
 			},
 		};
 		const legacyRegistry: ModelRequestRegistryEntry = {
-			...registry, id: "registry1", schemaVersion: 1,
+			...registry,
+			id: "registry1",
+			schemaVersion: 1,
 			record: {
-				event: "owner-registered", ownerId: journalOwnerId, sessionId: "consumer-session", journalEpoch,
+				event: "owner-registered",
+				ownerId: journalOwnerId,
+				sessionId: "consumer-session",
+				journalEpoch,
 			},
 		};
 		const bookkeeping = [metadata, legacyRegistry, registry];
@@ -294,8 +421,16 @@ describe("model-request metadata consumer cutover", () => {
 			for (const entry of bookkeeping) {
 				const selected: string[] = [];
 				const selector = new TreeSelectorComponent(
-					[{ entry: entries[0], children: [], label: "conversation" }, { entry, children: [], label: "journal-canary" }],
-					entry.id, 40, id => selected.push(id), () => selected.push("cancelled"), undefined, mode,
+					[
+						{ entry: entries[0], children: [], label: "conversation" },
+						{ entry, children: [], label: "journal-canary" },
+					],
+					entry.id,
+					40,
+					id => selected.push(id),
+					() => selected.push("cancelled"),
+					undefined,
+					mode,
 				);
 				expect(selector.render(100).join("\n")).not.toContain("journal-canary");
 				selector.handleInput("\r");

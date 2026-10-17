@@ -7,10 +7,7 @@ import * as path from "node:path";
 import { type } from "@oh-my-pi/omptype";
 import * as zod from "@oh-my-pi/omptype/zod";
 import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import type {
-	Model,
-	TSchema,
-} from "@oh-my-pi/pi-ai";
+import type { Model, TSchema } from "@oh-my-pi/pi-ai";
 import type {
 	ImageContent,
 	ServiceTier,

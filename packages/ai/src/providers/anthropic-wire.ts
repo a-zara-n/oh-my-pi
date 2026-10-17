@@ -463,7 +463,6 @@ export type ContentBlockDelta =
 	| { type: "thinking_delta"; thinking: string }
 	| { type: "signature_delta"; signature: string };
 
-
 export type MessageDelta = {
 	stop_reason?: StopReason | null;
 	stop_sequence?: string | null;

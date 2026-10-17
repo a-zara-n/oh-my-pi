@@ -8,12 +8,7 @@
  * broken turn is the score, because state is carried in the model's own last
  * reply and cannot be recovered once it drifts.
  */
-import type {
-	ApiKeyResolver,
-	Context,
-	Model,
-	ProviderSessionState,
-} from "@oh-my-pi/pi-ai";
+import type { ApiKeyResolver, Context, Model, ProviderSessionState } from "@oh-my-pi/pi-ai";
 import type { Api, AssistantMessage, Message } from "@oh-my-pi/pi-utils/model-data";
 import { logger } from "@oh-my-pi/pi-utils";
 import type { BenchRuntime, BenchTarget, StreamSimpleFn } from "../cli/bench-runtime";

@@ -1,7 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { validateModelRequestJournal } from "../src/model-request-journal";
 import { validateModelRequestRegistry } from "../src/model-request-registry";
-import { CURRENT_SESSION_VERSION, type ModelRequestRegistryEntry, type ModelRequestRegistryRecord, type SessionEntry, type SessionHeader } from "../src/session-entries";
+import {
+	CURRENT_SESSION_VERSION,
+	type ModelRequestRegistryEntry,
+	type ModelRequestRegistryRecord,
+	type SessionEntry,
+	type SessionHeader,
+} from "../src/session-entries";
 import { migrateToCurrentVersion } from "../src/session-migrations";
 
 const ISO = "2026-10-17T00:00:00.000Z";
@@ -10,13 +16,33 @@ const WRITER = "writer_same-OS_lease";
 const uuid = (value: number): string => `${value.toString(16).padStart(8, "0")}-1111-4111-8111-111111111111`;
 
 function header(schemaVersion: 1 | 2 = 2): SessionHeader {
-	return { type: "session", version: CURRENT_SESSION_VERSION, id: "root", timestamp: ISO, cwd: "/tmp",
-		modelRequestRegistry: { schemaVersion, registryId: REGISTRY, registryEpoch: uuid(1), rootSessionId: "root" } };
+	return {
+		type: "session",
+		version: CURRENT_SESSION_VERSION,
+		id: "root",
+		timestamp: ISO,
+		cwd: "/tmp",
+		modelRequestRegistry: { schemaVersion, registryId: REGISTRY, registryEpoch: uuid(1), rootSessionId: "root" },
+	};
 }
 
-function registration(owner: number, epoch: number, sessionId = "root", parentSessionId: string | null = null): ModelRequestRegistryRecord[] {
+function registration(
+	owner: number,
+	epoch: number,
+	sessionId = "root",
+	parentSessionId: string | null = null,
+): ModelRequestRegistryRecord[] {
 	return [
-		{ event: "member-registered", sessionId, parentSessionId, ownerId: uuid(owner), persistenceOwnerRef: uuid(2), journalRef: sessionId, journalEpoch: uuid(epoch), firstSeq: 1 },
+		{
+			event: "member-registered",
+			sessionId,
+			parentSessionId,
+			ownerId: uuid(owner),
+			persistenceOwnerRef: uuid(2),
+			journalRef: sessionId,
+			journalEpoch: uuid(epoch),
+			firstSeq: 1,
+		},
 		{ event: "owner-registered", ownerId: uuid(owner), sessionId, journalEpoch: uuid(epoch), writerOwnerId: WRITER },
 	];
 }
@@ -24,37 +50,78 @@ function registration(owner: number, epoch: number, sessionId = "root", parentSe
 function closed(owner: number, epoch: number, sessionId = "root"): ModelRequestRegistryRecord[] {
 	return [
 		{ event: "member-closed", sessionId, journalEpoch: uuid(epoch), throughSeq: 0, outcome: "closed" },
-		{ event: "owner-closed", ownerId: uuid(owner), sessionId, journalEpoch: uuid(epoch), throughSeq: 0, outcome: "closed" },
+		{
+			event: "owner-closed",
+			ownerId: uuid(owner),
+			sessionId,
+			journalEpoch: uuid(epoch),
+			throughSeq: 0,
+			outcome: "closed",
+		},
 	];
 }
 
 function entries(records: readonly ModelRequestRegistryRecord[]): ModelRequestRegistryEntry[] {
-	return records.map((record, index) => ({ type: "model_request_registry", id: `entry_${index}`, parentId: null,
-		timestamp: ISO, schemaVersion: 2, registryId: REGISTRY, registryEpoch: uuid(1), seq: index + 1, record }));
+	return records.map((record, index) => ({
+		type: "model_request_registry",
+		id: `entry_${index}`,
+		parentId: null,
+		timestamp: ISO,
+		schemaVersion: 2,
+		registryId: REGISTRY,
+		registryEpoch: uuid(1),
+		seq: index + 1,
+		record,
+	}));
 }
 
 // Intentionally malformed persisted snapshots cross the same typed boundary as a JSONL decoder.
 function reject(snapshot: readonly unknown[], root: unknown = header()): void {
-	expect(() => validateModelRequestRegistry(root as SessionHeader, snapshot as readonly SessionEntry[])).toThrow("Invalid model request registry");
+	expect(() => validateModelRequestRegistry(root as SessionHeader, snapshot as readonly SessionEntry[])).toThrow(
+		"Invalid model request registry",
+	);
 }
 
 function legacyEntries(): ModelRequestRegistryEntry[] {
 	return entries([...registration(3, 4), ...closed(3, 4)]).map(entry => {
 		const record = entry.record;
-		return { ...entry, schemaVersion: 1, record: record.event === "owner-registered" ?
-			{ event: record.event, ownerId: record.ownerId, sessionId: record.sessionId, journalEpoch: record.journalEpoch } : record };
+		return {
+			...entry,
+			schemaVersion: 1,
+			record:
+				record.event === "owner-registered"
+					? {
+							event: record.event,
+							ownerId: record.ownerId,
+							sessionId: record.sessionId,
+							journalEpoch: record.journalEpoch,
+						}
+					: record,
+		};
 	});
 }
 
 describe("canonical model request registry versions", () => {
 	test("allows one writer to own distinct root, child and reopened epochs", () => {
 		const history = entries([
-			...registration(3, 4), ...registration(5, 6, "child", "root"), ...closed(5, 6, "child"),
-			...registration(7, 8, "child", "root"), ...closed(7, 8, "child"), ...closed(3, 4), ...registration(9, 10),
+			...registration(3, 4),
+			...registration(5, 6, "child", "root"),
+			...closed(5, 6, "child"),
+			...registration(7, 8, "child", "root"),
+			...closed(7, 8, "child"),
+			...closed(3, 4),
+			...registration(9, 10),
 		]);
 		const result = validateModelRequestRegistry(header(), history);
-		expect(result).toMatchObject({ registryId: REGISTRY, registryEpoch: uuid(1), rootSessionId: "root", throughSeq: 14 });
-		const writers = history.flatMap(entry => entry.schemaVersion === 2 && entry.record.event === "owner-registered" ? [entry.record.writerOwnerId] : []);
+		expect(result).toMatchObject({
+			registryId: REGISTRY,
+			registryEpoch: uuid(1),
+			rootSessionId: "root",
+			throughSeq: 14,
+		});
+		const writers = history.flatMap(entry =>
+			entry.schemaVersion === 2 && entry.record.event === "owner-registered" ? [entry.record.writerOwnerId] : [],
+		);
 		expect(writers).toEqual([WRITER, WRITER, WRITER, WRITER]);
 	});
 
@@ -94,18 +161,33 @@ describe("canonical model request registry versions", () => {
 			reject([current[0], { ...owner, record: { ...owner.record, writerOwnerId } }]);
 		}
 		for (const writerOwnerId of ["a", "_", "-", "x".repeat(128)]) {
-			const valid: ModelRequestRegistryEntry = { ...owner, schemaVersion: 2,
-				record: { event: "owner-registered", ownerId: uuid(3), sessionId: "root", journalEpoch: uuid(4), writerOwnerId } };
+			const valid: ModelRequestRegistryEntry = {
+				...owner,
+				schemaVersion: 2,
+				record: {
+					event: "owner-registered",
+					ownerId: uuid(3),
+					sessionId: "root",
+					journalEpoch: uuid(4),
+					writerOwnerId,
+				},
+			};
 			expect(validateModelRequestRegistry(header(), [current[0]!, valid]).throughSeq).toBe(2);
 		}
 		reject([{ ...current[0], record: { ...current[0]?.record, writerOwnerId: WRITER } }, owner]);
 		for (const position of [2, 3]) {
 			const all = entries([...registration(3, 4), ...closed(3, 4)]);
-			reject(all.map((entry, index) => index === position ?
-				{ ...entry, record: { ...entry.record, writerOwnerId: WRITER } } : entry));
+			reject(
+				all.map((entry, index) =>
+					index === position ? { ...entry, record: { ...entry.record, writerOwnerId: WRITER } } : entry,
+				),
+			);
 		}
 		const legacy = legacyEntries();
-		reject([legacy[0], { ...legacy[1], record: { ...legacy[1]?.record, writerOwnerId: WRITER } }, ...legacy.slice(2)], header(1));
+		reject(
+			[legacy[0], { ...legacy[1], record: { ...legacy[1]?.record, writerOwnerId: WRITER } }, ...legacy.slice(2)],
+			header(1),
+		);
 		reject([current[0], { ...owner, record: { ...owner.record, token: "NEVER_ECHO_CANARY" } }]);
 	});
 
@@ -117,27 +199,45 @@ describe("canonical model request registry versions", () => {
 		reject([member]);
 		reject([owner]);
 		reject([owner, member]);
-		reject([member, { type: "custom", id: "ordinary", parentId: null, timestamp: ISO, customType: "correlation" }, owner]);
+		reject([
+			member,
+			{ type: "custom", id: "ordinary", parentId: null, timestamp: ISO, customType: "correlation" },
+			owner,
+		]);
 		for (const patch of [{ ownerId: uuid(5) }, { sessionId: "child" }, { journalEpoch: uuid(6) }]) {
 			reject([member, { ...owner, record: { ...owner.record, ...patch } }]);
 		}
 		for (const writerOwnerId of [WRITER, "different_writer"]) {
 			reject([...current, { ...owner, id: "duplicate", seq: 3, record: { ...owner.record, writerOwnerId } }]);
 		}
-		reject(entries([...registration(3, 4), ...registration(5, 6, "child", "root")]).filter((_, index) => index !== 1));
+		reject(
+			entries([...registration(3, 4), ...registration(5, 6, "child", "root")]).filter((_, index) => index !== 1),
+		);
 	});
 
 	test("preserves physical registration adjacency through journal validation and migration", () => {
-		const root: SessionHeader = { ...header(), modelRequestJournal: {
-			schemaVersion: 1, journalId: uuid(8), sessionId: "root",
-			epochs: [{ journalOwnerId: uuid(3), journalEpoch: uuid(4) }],
-		} };
+		const root: SessionHeader = {
+			...header(),
+			modelRequestJournal: {
+				schemaVersion: 1,
+				journalId: uuid(8),
+				sessionId: "root",
+				epochs: [{ journalOwnerId: uuid(3), journalEpoch: uuid(4) }],
+			},
+		};
 		const pair = entries(registration(3, 4));
 		const valid = [root, ...pair];
-		expect<SessionHeader["modelRequestJournal"]>(validateModelRequestJournal(valid).descriptor).toEqual(root.modelRequestJournal);
+		expect<SessionHeader["modelRequestJournal"]>(validateModelRequestJournal(valid).descriptor).toEqual(
+			root.modelRequestJournal,
+		);
 		expect(migrateToCurrentVersion(valid)).toBe(false);
-		const ordinary: SessionEntry = { type: "custom", id: "ordinary", parentId: null,
-			timestamp: ISO, customType: "correlation" };
+		const ordinary: SessionEntry = {
+			type: "custom",
+			id: "ordinary",
+			parentId: null,
+			timestamp: ISO,
+			customType: "correlation",
+		};
 		const snapshot = [root, pair[0]!, ordinary, pair[1]!];
 		const before = JSON.stringify(snapshot);
 		expect(() => validateModelRequestJournal(snapshot)).toThrow("Invalid model request registry");
@@ -157,10 +257,27 @@ describe("canonical model request registry versions", () => {
 
 	test("requires exact source epoch ownership but does not add writer fields to the source descriptor", () => {
 		const root = header();
-		root.modelRequestJournal = { schemaVersion: 1, journalId: uuid(11), sessionId: "root", epochs: [{ journalOwnerId: uuid(3), journalEpoch: uuid(4) }] };
+		root.modelRequestJournal = {
+			schemaVersion: 1,
+			journalId: uuid(11),
+			sessionId: "root",
+			epochs: [{ journalOwnerId: uuid(3), journalEpoch: uuid(4) }],
+		};
 		const history = entries(registration(3, 4));
 		expect(validateModelRequestRegistry(root, history).throughSeq).toBe(2);
-		reject(history, { ...root, modelRequestJournal: { ...root.modelRequestJournal, epochs: [{ journalOwnerId: uuid(5), journalEpoch: uuid(4) }] } });
-		reject(history, { ...root, modelRequestJournal: { ...root.modelRequestJournal, epochs: [{ journalOwnerId: uuid(3), journalEpoch: uuid(6) }] } });
+		reject(history, {
+			...root,
+			modelRequestJournal: {
+				...root.modelRequestJournal,
+				epochs: [{ journalOwnerId: uuid(5), journalEpoch: uuid(4) }],
+			},
+		});
+		reject(history, {
+			...root,
+			modelRequestJournal: {
+				...root.modelRequestJournal,
+				epochs: [{ journalOwnerId: uuid(3), journalEpoch: uuid(6) }],
+			},
+		});
 	});
 });

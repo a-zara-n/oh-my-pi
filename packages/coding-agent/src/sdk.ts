@@ -1712,7 +1712,9 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	const extensionRoots = options.extensionRoots?.();
 	const explicit = extensionRoots?.explicit ?? options.additionalExtensionPaths ?? [];
 	const mode = extensionRoots?.mode ?? (options.disableExtensionDiscovery ? "explicit-only" : "merge");
-	return await withOmpExtensionRootScope(explicit, mode, () => createAgentSessionScoped(options, modelRequestRootSource));
+	return await withOmpExtensionRootScope(explicit, mode, () =>
+		createAgentSessionScoped(options, modelRequestRootSource),
+	);
 }
 
 async function createAgentSessionScoped(
@@ -2285,8 +2287,7 @@ async function createAgentSessionScoped(
 				throw new Error("model request journal binding belongs to a different authority runtime");
 			}
 			const rootSessionId = journalBinding.rootSessionId;
-			if (modelRequestRootSource.kind === "inherited" &&
-				modelRequestRootSource.rootSessionId !== rootSessionId) {
+			if (modelRequestRootSource.kind === "inherited" && modelRequestRootSource.rootSessionId !== rootSessionId) {
 				throw new Error("model request journal binding does not match the execution root");
 			}
 			let rootManager: SessionManager | undefined;

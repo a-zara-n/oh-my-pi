@@ -78,11 +78,13 @@ beforeEach(async () => {
 	AgentLifecycleManager.resetGlobalForTests();
 	registerMockApi(MOCK_API_SOURCE);
 	manager = new AsyncJobManager({ maxRunningJobs: 4 });
-	HAND_OVER = childModelRequestRootOf(createSessionModelRequestExecution({
-		getSessionId: () => TOP_LEVEL_ROOT,
-		root: { kind: "self" },
-		agent: { kind: "main", id: "Main", name: "main", depth: 0 },
-	}));
+	HAND_OVER = childModelRequestRootOf(
+		createSessionModelRequestExecution({
+			getSessionId: () => TOP_LEVEL_ROOT,
+			root: { kind: "self" },
+			agent: { kind: "main", id: "Main", name: "main", depth: 0 },
+		}),
+	);
 	AsyncJobManager.setInstance(manager);
 });
 
@@ -233,7 +235,9 @@ describe("child sessions reach the gate under the spawning session's root", () =
 		});
 
 		expect(result.exitCode).toBe(0);
-		const grandchildRoots = new Set(gate.attempts.slice(firstGeneration).map(attempt => attempt.scope?.rootSessionId));
+		const grandchildRoots = new Set(
+			gate.attempts.slice(firstGeneration).map(attempt => attempt.scope?.rootSessionId),
+		);
 		expect(grandchildRoots).toEqual(new Set([TOP_LEVEL_ROOT]));
 	}, 30_000);
 

@@ -62,9 +62,10 @@ export function resolveModelRequestRootSource(
 	const activeExecution = getModelRequestExecution();
 	const parentExecution = assignment?.parentExecution;
 	if (parentExecution !== undefined) assertJournalExecutionIdentity(parentExecution);
-	const required = modelRequestJournalLeaseBinding !== undefined ||
-		parentExecution !== undefined && parentExecution.journalState !== "untracked" ||
-		activeExecution !== undefined && activeExecution.journalState !== "untracked";
+	const required =
+		modelRequestJournalLeaseBinding !== undefined ||
+		(parentExecution !== undefined && parentExecution.journalState !== "untracked") ||
+		(activeExecution !== undefined && activeExecution.journalState !== "untracked");
 	if (required) {
 		if (activeExecution !== undefined) {
 			if (parentExecution !== undefined) {
@@ -80,22 +81,28 @@ export function resolveModelRequestRootSource(
 				throw new Error("a managed child must retain its genuine parent execution");
 			}
 			assertJournalExecutionReady(parentExecution);
-			if (parentExecution.journalState === "untracked" ||
+			if (
+				parentExecution.journalState === "untracked" ||
 				modelRequestJournalLeaseBinding !== parentExecution.modelRequestJournalLeaseBinding ||
 				assignment.rootSessionId !== resolveModelRequestScope(parentExecution).rootSessionId ||
-				assignment.rootSessionId !== modelRequestJournalLeaseBinding?.rootSessionId) {
+				assignment.rootSessionId !== modelRequestJournalLeaseBinding?.rootSessionId
+			) {
 				throw new Error("model request journal root differs from its genuine parent");
 			}
-			if (activeExecution !== undefined &&
-				resolveModelRequestScope(activeExecution).rootSessionId !== assignment.rootSessionId) {
+			if (
+				activeExecution !== undefined &&
+				resolveModelRequestScope(activeExecution).rootSessionId !== assignment.rootSessionId
+			) {
 				throw new Error("model request journal root differs from the active parent");
 			}
 		}
 	}
 	if (assignment !== undefined) {
 		return Object.freeze({
-			kind: "inherited", rootSessionId: assignment.rootSessionId,
-			modelRequestJournalLeaseBinding, parentExecution,
+			kind: "inherited",
+			rootSessionId: assignment.rootSessionId,
+			modelRequestJournalLeaseBinding,
+			parentExecution,
 		});
 	}
 	if (activeExecution !== undefined) {

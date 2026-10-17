@@ -36,13 +36,7 @@ import * as AIError from "../error";
 import { runAsIndependentModelRequest } from "../model-request-lineage";
 import { parseToolCallArguments } from "../utils/tool-call-arguments";
 
-import type {
-	Context,
-	Model,
-	StreamFunction,
-	StreamOptions,
-	Tool,
-} from "../types";
+import type { Context, Model, StreamFunction, StreamOptions, Tool } from "../types";
 import type {
 	Api,
 	AssistantMessage,
@@ -231,7 +225,12 @@ export const streamDevin: StreamFunction<"devin-agent"> = (
 			// The auth metadata lookup is not a model request (credentials only); the router assignment and the chat
 			// message POST are: both carry the user's prompt to the provider and both are asked of the gate.
 			const baseUrl = (model.baseUrl || DEVIN_API_URL).replace(/\/+$/, "");
-			const auth = await fetchDevinAuthMetadata(options?.apiKey, baseUrl, auxiliaryFetch(fetchImpl), options?.signal);
+			const auth = await fetchDevinAuthMetadata(
+				options?.apiKey,
+				baseUrl,
+				auxiliaryFetch(fetchImpl),
+				options?.signal,
+			);
 			const chatBaseUrl = auth.baseUrl ?? baseUrl;
 			const turn: DevinTurn = {
 				apiKey: auth.apiKey,

@@ -216,7 +216,10 @@ describe("package-root declaration staging", () => {
 			await Promise.all([
 				Bun.write(path.join(pkgDir, "dist/types-root/src/index.d.ts"), publicDeclaration),
 				Bun.write(path.join(pkgDir, "dist/types-root/src/ar/index.d.ts"), sessionDeclaration),
-				Bun.write(path.join(pkgDir, "dist/types-root/internal/lifetime.d.ts"), "export declare function privateOperation(): void;\n"),
+				Bun.write(
+					path.join(pkgDir, "dist/types-root/internal/lifetime.d.ts"),
+					"export declare function privateOperation(): void;\n",
+				),
 				Bun.write(path.join(pkgDir, "dist/types/stale.d.ts"), "stale\n"),
 				Bun.write(path.join(pkgDir, "internal/lifetime.ts"), privateSource),
 			]);
@@ -227,7 +230,9 @@ describe("package-root declaration staging", () => {
 			expect(await Bun.file(path.join(pkgDir, "dist/types-root/internal/lifetime.d.ts")).exists()).toBe(false);
 			expect(await Bun.file(path.join(pkgDir, "internal/lifetime.ts")).text()).toBe(privateSource);
 			expect(await Bun.file(path.join(pkgDir, "internal/lifetime.d.ts")).exists()).toBe(false);
-		} finally { await fs.rm(pkgDir, { recursive: true, force: true }); }
+		} finally {
+			await fs.rm(pkgDir, { recursive: true, force: true });
+		}
 	});
 
 	it("rejects missing public emit before replacing previous public declarations", async () => {
@@ -236,7 +241,9 @@ describe("package-root declaration staging", () => {
 			await Bun.write(path.join(pkgDir, "dist/types/index.d.ts"), "existing\n");
 			await expect(stagePublicTypeDeclarations(pkgDir)).rejects.toThrow();
 			expect(await Bun.file(path.join(pkgDir, "dist/types/index.d.ts")).text()).toBe("existing\n");
-		} finally { await fs.rm(pkgDir, { recursive: true, force: true }); }
+		} finally {
+			await fs.rm(pkgDir, { recursive: true, force: true });
+		}
 	});
 });
 
@@ -278,7 +285,9 @@ describe("published manifest topology", () => {
 
 		const manifest = await rewriteManifest(pkg, false);
 		expect(pkg.packageRootDeclarations).toBe(true);
-		const typeConfig: unknown = await Bun.file(path.join(import.meta.dir, "../packages/utils/tsconfig.publish.json")).json();
+		const typeConfig: unknown = await Bun.file(
+			path.join(import.meta.dir, "../packages/utils/tsconfig.publish.json"),
+		).json();
 		expect(typeConfig).toMatchObject({
 			compilerOptions: { rootDir: ".", outDir: "dist/types-root" },
 			include: ["src", "internal"],

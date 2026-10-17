@@ -32,12 +32,16 @@ function assertExclusiveLease(filename: string, held: boolean): void {
 	const uid = process.getuid?.();
 	if (uid === undefined) throw new Error("Missing actual test uid");
 	const acquired = tryAcquireRawModelRequestJournalFileLease(filename, "exclusive", uid);
-	try { expect(acquired === undefined).toBe(held); }
-	finally { acquired?.release(); }
+	try {
+		expect(acquired === undefined).toBe(held);
+	} finally {
+		acquired?.release();
+	}
 }
 
 function closedSessions(root: FileJournalCell): string[] {
-	return root.getEntries()
+	return root
+		.getEntries()
 		.filter((entry): entry is ModelRequestRegistryEntry => entry.type === "model_request_registry")
 		.filter(entry => entry.record.event === "owner-closed")
 		.map(entry => entry.record.sessionId);
@@ -51,8 +55,14 @@ mac("authority private binding lifetime with actual File principals", () => {
 			const result = Object.freeze({ result: "unchanged" });
 			expect(await fixture.withBinding(root, async () => result)).toBe(result);
 			const failure = new Error("original callback failure");
-			await expect(fixture.withBinding(root, async () => { throw failure; })).rejects.toBe(failure);
-		} finally { await fixture.close(); }
+			await expect(
+				fixture.withBinding(root, async () => {
+					throw failure;
+				}),
+			).rejects.toBe(failure);
+		} finally {
+			await fixture.close();
+		}
 	});
 
 	test("original use retains real leases until settlement, then closes actual child graphs before release", async () => {
@@ -93,7 +103,11 @@ mac("authority private binding lifetime with actual File principals", () => {
 			expect(durable).toContain('"event":"owner-closed"');
 		} finally {
 			useSettlement.resolve();
-			try { await operation; } finally { await fixture.close(); }
+			try {
+				await operation;
+			} finally {
+				await fixture.close();
+			}
 		}
 	});
 
@@ -112,10 +126,17 @@ mac("authority private binding lifetime with actual File principals", () => {
 				assertExclusiveLease(path.join(fixture.namespace, "owners", `${fixture.writerId}.lock`), true);
 				for (const principal of [parent, childPrincipal, descendant]) {
 					const append = appendJournalMetadata(principal.session, principal.execution, {
-						schemaVersion: 1, event: "decision", coreAttemptId: randomUUID(), requestId: randomUUID(),
-						coreRetryOf: null, rootSessionId: root.getSessionId(), sessionId: principal.cell.getSessionId(),
-						purpose: "main", modelRef: { provider: "openai", id: "fixture-model", api: "openai-completions" },
-						atMs: 1, decision: "pass",
+						schemaVersion: 1,
+						event: "decision",
+						coreAttemptId: randomUUID(),
+						requestId: randomUUID(),
+						coreRetryOf: null,
+						rootSessionId: root.getSessionId(),
+						sessionId: principal.cell.getSessionId(),
+						purpose: "main",
+						modelRef: { provider: "openai", id: "fixture-model", api: "openai-completions" },
+						atMs: 1,
+						decision: "pass",
 					});
 					accepted.push(append);
 					// Observe an immediate rejection without replacing or detaching the real operation.
@@ -127,7 +148,9 @@ mac("authority private binding lifetime with actual File principals", () => {
 			const results = await Promise.allSettled(accepted);
 			expect(results).toHaveLength(3);
 			expect(results.every(result => result.status === "fulfilled")).toBe(true);
-			expect(new Set(closedSessions(root))).toEqual(new Set([root.getSessionId(), child.getSessionId(), deep.getSessionId()]));
+			expect(new Set(closedSessions(root))).toEqual(
+				new Set([root.getSessionId(), child.getSessionId(), deep.getSessionId()]),
+			);
 			for (const cell of [root, child, deep]) {
 				expect(cell.getEntries().filter(entry => entry.type === "model_request_metadata")).toHaveLength(1);
 				expect(fs.readFileSync(cell.getSessionFile(), "utf8")).toContain('"event":"decision"');
@@ -160,7 +183,9 @@ mac("authority private binding lifetime with actual File principals", () => {
 					retained.release();
 					throw failure;
 				});
-			} catch (error) { combined = error; }
+			} catch (error) {
+				combined = error;
+			}
 			expect(combined).toBeInstanceOf(AggregateError);
 			if (!(combined instanceof AggregateError)) throw new Error("Expected operation and drain failures");
 			expect(combined.errors[0]).toBe(failure);
@@ -169,7 +194,9 @@ mac("authority private binding lifetime with actual File principals", () => {
 			expect(retained).toBeDefined();
 			expect(() => retained?.assertHeld()).toThrow();
 			assertExclusiveLease(path.join(fixture.namespace, "accounting/lifetime-retired.lock"), false);
-		} finally { await fixture.close(); }
+		} finally {
+			await fixture.close();
+		}
 	});
 
 	test("an unawaited actual compose must fulfill and durably close before binding and cell leases end", async () => {
@@ -179,11 +206,19 @@ mac("authority private binding lifetime with actual File principals", () => {
 		try {
 			const root = fixture.open();
 			const result = await fixture.withBinding(root, async binding => {
-				const execution = createJournalExecution({ binding, purpose: "main",
-					agent: { id: randomUUID(), kind: "main", name: "unawaited-compose", depth: 0 } });
+				const execution = createJournalExecution({
+					binding,
+					purpose: "main",
+					agent: { id: randomUUID(), kind: "main", name: "unawaited-compose", depth: 0 },
+				});
 				composing = composeJournalSession({ binding, cell: root, root, execution });
 				// Observe the real promise, not a ready getter or caller-authored proof.
-				void composing.then(() => { fulfilled = true; }, () => {});
+				void composing.then(
+					() => {
+						fulfilled = true;
+					},
+					() => {},
+				);
 				return "callback returned without awaiting composition";
 			});
 			expect(result).toBe("callback returned without awaiting composition");
@@ -195,11 +230,18 @@ mac("authority private binding lifetime with actual File principals", () => {
 			expect(durable).toContain('"event":"member-closed"');
 			expect(durable).toContain('"event":"owner-closed"');
 			const cellLease = tryAcquireSessionLease(root.getSessionId());
-			try { expect(cellLease).not.toBeNull(); }
-			finally { cellLease?.release(); }
+			try {
+				expect(cellLease).not.toBeNull();
+			} finally {
+				cellLease?.release();
+			}
 			assertExclusiveLease(path.join(fixture.namespace, "owners", `${fixture.writerId}.lock`), false);
 		} finally {
-			try { await composing; } finally { await fixture.close(); }
+			try {
+				await composing;
+			} finally {
+				await fixture.close();
+			}
 		}
 	});
 
@@ -221,7 +263,9 @@ mac("authority private binding lifetime with actual File principals", () => {
 			assertExclusiveLease(path.join(fixture.namespace, "owners", `${fixture.writerId}.lock`), false);
 			expect(() => beginJournalSend(prepared.admission, prepared.execution, prepared.attempt)).toThrow();
 			endJournalSendStart(prepared.admission);
-		} finally { await fixture.close(); }
+		} finally {
+			await fixture.close();
+		}
 	});
 
 	test("an actual begun span holds binding and native leases until its external real end", async () => {
@@ -240,14 +284,23 @@ mac("authority private binding lifetime with actual File principals", () => {
 				beginJournalSend(admission, principal.execution, attempt);
 				begun.resolve({ admission, execution: principal.execution });
 			});
-			void operation.then(() => { settled = true; }, error => { settled = true; begun.reject(error); });
+			void operation.then(
+				() => {
+					settled = true;
+				},
+				error => {
+					settled = true;
+					begun.reject(error);
+				},
+			);
 			const { admission, execution } = await begun.promise;
 			ending = externalEnd.promise.then(() => endJournalSendStart(admission));
 			// The callback has returned; yield to its already-queued authority
 			// continuation, then observe closing through a real rejected work entry.
 			await Promise.resolve();
-			await expect(Promise.resolve().then(() => prepareJournalSend(execution,
-				Object.freeze({ attemptId: randomUUID() })))).rejects.toThrow();
+			await expect(
+				Promise.resolve().then(() => prepareJournalSend(execution, Object.freeze({ attemptId: randomUUID() }))),
+			).rejects.toThrow();
 			expect(settled).toBe(false);
 			expect(closedSessions(root)).toEqual([]);
 			expect(fs.readFileSync(root.getSessionFile(), "utf8")).not.toContain('"event":"owner-closed"');
@@ -267,7 +320,12 @@ mac("authority private binding lifetime with actual File principals", () => {
 			assertExclusiveLease(ownerLock, false);
 		} finally {
 			externalEnd.resolve();
-			try { await ending; await operation; } finally { await fixture.close(); }
+			try {
+				await ending;
+				await operation;
+			} finally {
+				await fixture.close();
+			}
 		}
 	});
 });

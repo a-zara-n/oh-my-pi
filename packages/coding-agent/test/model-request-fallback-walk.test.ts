@@ -136,7 +136,12 @@ describe("eval completion and the model-request gate", () => {
 			getApiKey: async (model: Model<Api>) => keyOf(model),
 			resolver: (model: Model<Api>) => async () => keyOf(model),
 		} as unknown as ModelRegistry;
-		return { cwd: process.cwd(), settings, modelRegistry, getActiveModelString: () => undefined } as unknown as ToolSession;
+		return {
+			cwd: process.cwd(),
+			settings,
+			modelRegistry,
+			getActiveModelString: () => undefined,
+		} as unknown as ToolSession;
 	}
 
 	async function completeSmol(session: ToolSession): Promise<void> {

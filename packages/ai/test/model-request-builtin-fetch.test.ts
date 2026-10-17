@@ -2,10 +2,7 @@ import { describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import {
-	assertModelRequestBuiltinFetch,
-	modelRequestBuiltinFetch,
-} from "../src/utils/model-request-builtin-fetch";
+import { assertModelRequestBuiltinFetch, modelRequestBuiltinFetch } from "../src/utils/model-request-builtin-fetch";
 
 async function factoryProbe(scenario: "untracked" | "required"): Promise<unknown> {
 	const fixture = path.join(import.meta.dir, "fixtures/model-request-factory-getter-process.ts");
@@ -28,7 +25,8 @@ async function factoryProbe(scenario: "untracked" | "required"): Promise<unknown
 
 // Test selection only, never an authority proof. The child still authenticates a
 // real owned SQLite connection, credential and epoch through the fixed verifier.
-const nativePreloaded = Object.getOwnPropertyDescriptor(globalThis, Symbol.for("omp.audit.sqlite.required.v1"))?.value === true;
+const nativePreloaded =
+	Object.getOwnPropertyDescriptor(globalThis, Symbol.for("omp.audit.sqlite.required.v1"))?.value === true;
 
 // These exercise the real Bun builtin. Managed admission/root-release cases belong
 // to the actual authority integration suite, not an injected fetch implementation.

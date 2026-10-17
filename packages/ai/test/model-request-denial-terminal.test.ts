@@ -291,9 +291,9 @@ describe("provider-internal retry loop with a denied request", () => {
 	});
 
 	it("keeps a denial out of the shared provider-retry predicate", () => {
-		expect(AIError.isProviderRetryableError(new AIError.ModelRequestDeniedError("gate_refused", overloadedText))).toBe(
-			false,
-		);
+		expect(
+			AIError.isProviderRetryableError(new AIError.ModelRequestDeniedError("gate_refused", overloadedText)),
+		).toBe(false);
 		expect(AIError.isProviderRetryableError(new Error(overloadedText))).toBe(true);
 	});
 });

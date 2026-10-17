@@ -17,8 +17,15 @@ import { resolveModelRequestRootSource } from "@oh-my-pi/pi-coding-agent/session
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { runSubprocess } from "@oh-my-pi/pi-coding-agent/task/executor";
 import { isRecord, setAgentDir } from "@oh-my-pi/pi-utils";
-import { assertJournalExecutionIdentity, assertJournalExecutionReady } from "@oh-my-pi/pi-utils/model-request-journal-composition";
-import { openAICompletionsTextReply, sseReply, startLoopbackProvider } from "../../../ai/test/helpers/model-request-loopback";
+import {
+	assertJournalExecutionIdentity,
+	assertJournalExecutionReady,
+} from "@oh-my-pi/pi-utils/model-request-journal-composition";
+import {
+	openAICompletionsTextReply,
+	sseReply,
+	startLoopbackProvider,
+} from "../../../ai/test/helpers/model-request-loopback";
 import { R11JournalFixture } from "../../../utils/test/fixtures/model-request-journal-r11";
 import { createInMemoryAuthStorage } from "../helpers/agent-session-setup";
 
@@ -51,18 +58,41 @@ const server = startLoopbackProvider(request => {
 	const hasYield = tools.some(tool => isRecord(tool) && isRecord(tool.function) && tool.function.name === "yield");
 	if (!hasYield) return openAICompletionsTextReply("local fixture label");
 	const messages = Array.isArray(body.messages) ? body.messages : [];
-	const wakeRequested = messages.some(message => isRecord(message) && message.role === "user" &&
-		JSON.stringify(message.content).includes(WAKE));
+	const wakeRequested = messages.some(
+		message => isRecord(message) && message.role === "user" && JSON.stringify(message.content).includes(WAKE),
+	);
 	const writing = wakeRequested && !wakeDispatched;
 	if (writing) wakeDispatched = true;
 	const name = writing ? "write" : "yield";
-	const args = writing ? { path: `agent://${A}`, content: "wake from genuine sibling B" } : { type: "result", data: "done" };
+	const args = writing
+		? { path: `agent://${A}`, content: "wake from genuine sibling B" }
+		: { type: "result", data: "done" };
 	const chunk = { id: "chatcmpl-warm-parent", object: "chat.completion.chunk", created: 0, model: MODEL };
 	return sseReply([
-		{ ...chunk, choices: [{ index: 0, delta: { role: "assistant", tool_calls: [{ index: 0, id: `call_${name}_${server.requests.length}`,
-			type: "function", function: { name, arguments: JSON.stringify(args) } }] } }] },
-		{ ...chunk, choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
-			usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } },
+		{
+			...chunk,
+			choices: [
+				{
+					index: 0,
+					delta: {
+						role: "assistant",
+						tool_calls: [
+							{
+								index: 0,
+								id: `call_${name}_${server.requests.length}`,
+								type: "function",
+								function: { name, arguments: JSON.stringify(args) },
+							},
+						],
+					},
+				},
+			],
+		},
+		{
+			...chunk,
+			choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
+			usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+		},
 		"[DONE]",
 	]);
 });
@@ -71,28 +101,63 @@ const server = startLoopbackProvider(request => {
 registerModelRequestGate("native-warm-parent-loopback-only", {
 	async authorize(attempt) {
 		const endpoint = attempt.wire === undefined ? undefined : new URL(attempt.wire.url);
-		if (attempt.model.provider !== PROVIDER || attempt.model.id !== MODEL ||
-			attempt.model.api !== "openai-completions" || endpoint?.origin !== server.origin ||
-			endpoint.pathname !== "/v1/chat/completions" || attempt.wire?.method !== "POST") {
-			return { type: "deny", code: "fixture-non-loopback", message: "Native warm-parent fixture refused a non-loopback attempt" };
+		if (
+			attempt.model.provider !== PROVIDER ||
+			attempt.model.id !== MODEL ||
+			attempt.model.api !== "openai-completions" ||
+			endpoint?.origin !== server.origin ||
+			endpoint.pathname !== "/v1/chat/completions" ||
+			attempt.wire?.method !== "POST"
+		) {
+			return {
+				type: "deny",
+				code: "fixture-non-loopback",
+				message: "Native warm-parent fixture refused a non-loopback attempt",
+			};
 		}
 		return { type: "pass" };
 	},
 });
 const modelsPath = path.join(directory, "models.yml");
-fs.writeFileSync(modelsPath, JSON.stringify({ providers: { [PROVIDER]: {
-	baseUrl: `${server.origin}/v1`, api: "openai-completions", apiKey: "loopback-only-unused-key",
-	models: [{ id: MODEL, name: "Native warm parent loopback", reasoning: false, input: ["text"],
-		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128_000, maxTokens: 4096 }],
-} } }));
+fs.writeFileSync(
+	modelsPath,
+	JSON.stringify({
+		providers: {
+			[PROVIDER]: {
+				baseUrl: `${server.origin}/v1`,
+				api: "openai-completions",
+				apiKey: "loopback-only-unused-key",
+				models: [
+					{
+						id: MODEL,
+						name: "Native warm parent loopback",
+						reasoning: false,
+						input: ["text"],
+						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+						contextWindow: 128_000,
+						maxTokens: 4096,
+					},
+				],
+			},
+		},
+	}),
+);
 const settings = Settings.isolated({
-	"task.agentIdleTtlMs": 0, "task.enableLsp": false, "task.isolation.enabled": false,
-	"async.enabled": false, "compaction.enabled": false, "retry.enabled": false,
-	"todo.enabled": false, "todo.reminders": false, "advisor.enabled": false,
+	"task.agentIdleTtlMs": 0,
+	"task.enableLsp": false,
+	"task.isolation.enabled": false,
+	"async.enabled": false,
+	"compaction.enabled": false,
+	"retry.enabled": false,
+	"todo.enabled": false,
+	"todo.reminders": false,
+	"advisor.enabled": false,
 	modelRoles: { default: MODEL_PATTERN, smol: MODEL_PATTERN },
 });
-const modelRegistry = new ModelRegistry(authStorage, modelsPath, { settings,
-	cacheDbPath: path.join(directory, "models-cache.db") });
+const modelRegistry = new ModelRegistry(authStorage, modelsPath, {
+	settings,
+	cacheDbPath: path.join(directory, "models-cache.db"),
+});
 
 async function waitForIdle(session: AgentSession): Promise<void> {
 	const deadline = Date.now() + 15_000;
@@ -117,122 +182,198 @@ async function diagnosePhase<T>(phase: string, run: () => Promise<T>): Promise<T
 	try {
 		return await run();
 	} catch (error) {
-		console.error(JSON.stringify({ diagnostic: "warm-parent-phase", phase, event: "error", stage,
-			failure: describeFailure(error) }));
+		console.error(
+			JSON.stringify({
+				diagnostic: "warm-parent-phase",
+				phase,
+				event: "error",
+				stage,
+				failure: describeFailure(error),
+			}),
+		);
 		throw error;
 	}
 }
 
 try {
-	await diagnosePhase("verified-binding-use-and-drain", () => fixture.withBinding(rootCell, async binding => {
-		try {
-		stage = "sdk-root";
-		const model = modelRegistry.find(PROVIDER, MODEL);
-		assert(model !== undefined, "actual registry must resolve the unique loopback model");
-		assert.equal(model.baseUrl, `${server.origin}/v1`);
-		const root = await createAgentSession({
-			cwd: directory, agentDir: path.join(directory, "agent"), sessionManager: manager,
-			authStorage, modelRegistry, settings, model, bindProcessState: false,
-			extensions: [], disableExtensionDiscovery: true, skills: [], rules: [], contextFiles: [],
-			promptTemplates: [], slashCommands: [], enableMCP: false, enableLsp: false,
-			skipPythonPreflight: true, agentId: "WarmRootR", modelRequestJournalLeaseBinding: binding,
-		});
-		rootSession = root.session;
-		const handover = root.session.childModelRequestRoot();
-		const parent = handover.parentExecution;
-		assert(parent !== undefined);
-		assertJournalExecutionReady(parent);
-		assert.equal(parent.journalState, "required-ready");
-		assert.equal(parent.modelRequestJournalLeaseBinding, binding);
-		const spawn = async (id: string) => {
-			const result = await root.session.runInModelRequestContext(() => runSubprocess({
-				cwd: directory, artifactsDir: path.join(directory, "artifacts"),
-				agent: { name: "task", description: "native warm parent regression", systemPrompt: "test", tools: ["write"], source: "bundled" },
-				task: "report done", index: id === A ? 0 : 1, id, parentAgentId: "WarmRootR",
-				modelOverride: MODEL_PATTERN, authStorage, modelRegistry, settings,
-				modelRequestRoot: handover, enableLsp: false, enableMCP: false, enableIrc: true,
-				inheritedSessionAgents: [], skills: [], rules: [], contextFiles: [], promptTemplates: [],
-				preloadedExtensionPaths: [], preloadedPreparedExtensions: [], preloadedCustomToolPaths: [],
-			}));
-			assert.equal(result.exitCode, 0, JSON.stringify(result));
-			const session = AgentRegistry.global().get(id)?.session;
-			assert(session, `${id} was not adopted after its real executor turn`);
-			const execution = session.childModelRequestRoot().parentExecution;
-			assert(execution !== undefined);
-			assertJournalExecutionReady(execution);
-			assert.equal(execution.journalState, "required-ready");
-			assert.equal(execution.modelRequestJournalLeaseBinding, binding);
-			assert.equal(resolveModelRequestScope(execution).rootSessionId, manager.getSessionId());
-			assert.throws(() => assertJournalExecutionIdentity(parent, execution), unavailable);
-			return { session, execution };
-		};
-		stage = "executor-A";
-		const a = await spawn(A);
-		stage = "executor-B";
-		const b = await spawn(B);
-		assert.throws(() => assertJournalExecutionIdentity(a.execution, b.execution), unavailable);
-		assert(a.session.sessionManager.getEntries().some(entry => entry.type === "message"));
-		const aFile = a.session.sessionManager.getSessionFile();
-		assert(aFile !== undefined);
-		stage = "park-A";
-		await AgentLifecycleManager.global().park(A);
-		assert.equal(AgentRegistry.global().get(A)?.status, "parked");
-		assert.equal(AgentRegistry.global().get(A)?.session, null);
-		assert(AgentLifecycleManager.global().has(A), "executor's actual saved warm reviver must remain adopted");
-		assertJournalExecutionReady(parent);
-		assertJournalExecutionReady(b.execution);
-		// The direct wrong-family resolver stays forbidden: the legitimate consumer must rebind R itself.
-		b.session.runInModelRequestContext(() => {
-			assert.equal(getModelRequestExecution(), b.execution);
-			assert.throws(() => resolveModelRequestRootSource(handover), unavailable);
-		});
-		const unsubscribe = b.session.subscribe(event => {
-			if (event.type === "tool_execution_start" && event.toolName === "write") {
-				const active = getModelRequestExecution();
-				assert(active !== undefined, "actual write turn lost its execution");
-				assertJournalExecutionIdentity(b.execution, active);
-				writeStartedUnderB = true;
+	await diagnosePhase("verified-binding-use-and-drain", () =>
+		fixture.withBinding(rootCell, async binding => {
+			try {
+				stage = "sdk-root";
+				const model = modelRegistry.find(PROVIDER, MODEL);
+				assert(model !== undefined, "actual registry must resolve the unique loopback model");
+				assert.equal(model.baseUrl, `${server.origin}/v1`);
+				const root = await createAgentSession({
+					cwd: directory,
+					agentDir: path.join(directory, "agent"),
+					sessionManager: manager,
+					authStorage,
+					modelRegistry,
+					settings,
+					model,
+					bindProcessState: false,
+					extensions: [],
+					disableExtensionDiscovery: true,
+					skills: [],
+					rules: [],
+					contextFiles: [],
+					promptTemplates: [],
+					slashCommands: [],
+					enableMCP: false,
+					enableLsp: false,
+					skipPythonPreflight: true,
+					agentId: "WarmRootR",
+					modelRequestJournalLeaseBinding: binding,
+				});
+				rootSession = root.session;
+				const handover = root.session.childModelRequestRoot();
+				const parent = handover.parentExecution;
+				assert(parent !== undefined);
+				assertJournalExecutionReady(parent);
+				assert.equal(parent.journalState, "required-ready");
+				assert.equal(parent.modelRequestJournalLeaseBinding, binding);
+				const spawn = async (id: string) => {
+					const result = await root.session.runInModelRequestContext(() =>
+						runSubprocess({
+							cwd: directory,
+							artifactsDir: path.join(directory, "artifacts"),
+							agent: {
+								name: "task",
+								description: "native warm parent regression",
+								systemPrompt: "test",
+								tools: ["write"],
+								source: "bundled",
+							},
+							task: "report done",
+							index: id === A ? 0 : 1,
+							id,
+							parentAgentId: "WarmRootR",
+							modelOverride: MODEL_PATTERN,
+							authStorage,
+							modelRegistry,
+							settings,
+							modelRequestRoot: handover,
+							enableLsp: false,
+							enableMCP: false,
+							enableIrc: true,
+							inheritedSessionAgents: [],
+							skills: [],
+							rules: [],
+							contextFiles: [],
+							promptTemplates: [],
+							preloadedExtensionPaths: [],
+							preloadedPreparedExtensions: [],
+							preloadedCustomToolPaths: [],
+						}),
+					);
+					assert.equal(result.exitCode, 0, JSON.stringify(result));
+					const session = AgentRegistry.global().get(id)?.session;
+					assert(session, `${id} was not adopted after its real executor turn`);
+					const execution = session.childModelRequestRoot().parentExecution;
+					assert(execution !== undefined);
+					assertJournalExecutionReady(execution);
+					assert.equal(execution.journalState, "required-ready");
+					assert.equal(execution.modelRequestJournalLeaseBinding, binding);
+					assert.equal(resolveModelRequestScope(execution).rootSessionId, manager.getSessionId());
+					assert.throws(() => assertJournalExecutionIdentity(parent, execution), unavailable);
+					return { session, execution };
+				};
+				stage = "executor-A";
+				const a = await spawn(A);
+				stage = "executor-B";
+				const b = await spawn(B);
+				assert.throws(() => assertJournalExecutionIdentity(a.execution, b.execution), unavailable);
+				assert(a.session.sessionManager.getEntries().some(entry => entry.type === "message"));
+				const aFile = a.session.sessionManager.getSessionFile();
+				assert(aFile !== undefined);
+				stage = "park-A";
+				await AgentLifecycleManager.global().park(A);
+				assert.equal(AgentRegistry.global().get(A)?.status, "parked");
+				assert.equal(AgentRegistry.global().get(A)?.session, null);
+				assert(AgentLifecycleManager.global().has(A), "executor's actual saved warm reviver must remain adopted");
+				assertJournalExecutionReady(parent);
+				assertJournalExecutionReady(b.execution);
+				// The direct wrong-family resolver stays forbidden: the legitimate consumer must rebind R itself.
+				b.session.runInModelRequestContext(() => {
+					assert.equal(getModelRequestExecution(), b.execution);
+					assert.throws(() => resolveModelRequestRootSource(handover), unavailable);
+				});
+				const unsubscribe = b.session.subscribe(event => {
+					if (event.type === "tool_execution_start" && event.toolName === "write") {
+						const active = getModelRequestExecution();
+						assert(active !== undefined, "actual write turn lost its execution");
+						assertJournalExecutionIdentity(b.execution, active);
+						writeStartedUnderB = true;
+					}
+					if (event.type === "tool_execution_end" && event.toolName === "write") {
+						writeFailed = event.isError;
+						writeResult = event.result;
+					}
+				});
+				stage = "B-turn-agent-url-warm-revive";
+				console.log(
+					JSON.stringify({
+						stage,
+						rootReady: parent.journalState,
+						bReady: b.execution.journalState,
+						sameBinding: parent.modelRequestJournalLeaseBinding === b.execution.modelRequestJournalLeaseBinding,
+						savedParent: handover.parentExecution === parent,
+						parkedHistory: aFile,
+						adopted: true,
+						wrongFamilyDirectRejected: true,
+					}),
+				);
+				try {
+					await b.session.prompt(WAKE);
+				} finally {
+					unsubscribe();
+				}
+				assert(writeStartedUnderB, "write must execute under B's actual core turn context");
+				assert.equal(writeFailed, false, `actual agent://A write failed: ${JSON.stringify(writeResult)}`);
+				const revived = AgentRegistry.global().get(A)?.session;
+				assert(revived, "actual saved warm reviver did not attach A");
+				assert.notEqual(revived, a.session);
+				assert.equal(revived.sessionManager.getSessionFile(), aFile);
+				assertJournalExecutionReady(revived.childModelRequestRoot().parentExecution);
+				await waitForIdle(revived);
+				b.session.runInModelRequestContext(() =>
+					assert.throws(() => resolveModelRequestRootSource(handover), unavailable),
+				);
+				stage = "outside-ALS-warm-revive";
+				assert.equal(getModelRequestExecution(), undefined);
+				await AgentLifecycleManager.global().park(A);
+				const outside = await AgentLifecycleManager.global().ensureLive(A);
+				assertJournalExecutionReady(outside.childModelRequestRoot().parentExecution);
+				console.log(
+					JSON.stringify({
+						stage: "complete",
+						writeStartedUnderB,
+						writeFailed,
+						wrongFamilyDirectRejected: true,
+						outsideAlsReady: true,
+						wireRequests: server.requests.length,
+					}),
+				);
+			} finally {
+				await diagnosePhase("inside-binding-lifecycle-dispose", () => AgentLifecycleManager.global().dispose());
+				await diagnosePhase("inside-binding-root-session-dispose", async () => {
+					await rootSession?.dispose();
+				});
+				rootSession = undefined;
 			}
-			if (event.type === "tool_execution_end" && event.toolName === "write") {
-				writeFailed = event.isError;
-				writeResult = event.result;
-			}
-		});
-		stage = "B-turn-agent-url-warm-revive";
-		console.log(JSON.stringify({ stage, rootReady: parent.journalState, bReady: b.execution.journalState,
-			sameBinding: parent.modelRequestJournalLeaseBinding === b.execution.modelRequestJournalLeaseBinding,
-			savedParent: handover.parentExecution === parent, parkedHistory: aFile, adopted: true, wrongFamilyDirectRejected: true }));
-		try { await b.session.prompt(WAKE); }
-		finally { unsubscribe(); }
-		assert(writeStartedUnderB, "write must execute under B's actual core turn context");
-		assert.equal(writeFailed, false, `actual agent://A write failed: ${JSON.stringify(writeResult)}`);
-		const revived = AgentRegistry.global().get(A)?.session;
-		assert(revived, "actual saved warm reviver did not attach A");
-		assert.notEqual(revived, a.session);
-		assert.equal(revived.sessionManager.getSessionFile(), aFile);
-		assertJournalExecutionReady(revived.childModelRequestRoot().parentExecution);
-		await waitForIdle(revived);
-		b.session.runInModelRequestContext(() => assert.throws(() => resolveModelRequestRootSource(handover), unavailable));
-		stage = "outside-ALS-warm-revive";
-		assert.equal(getModelRequestExecution(), undefined);
-		await AgentLifecycleManager.global().park(A);
-		const outside = await AgentLifecycleManager.global().ensureLive(A);
-		assertJournalExecutionReady(outside.childModelRequestRoot().parentExecution);
-		console.log(JSON.stringify({ stage: "complete", writeStartedUnderB, writeFailed, wrongFamilyDirectRejected: true,
-			outsideAlsReady: true, wireRequests: server.requests.length }));
-		} finally {
-			await diagnosePhase("inside-binding-lifecycle-dispose", () => AgentLifecycleManager.global().dispose());
-			await diagnosePhase("inside-binding-root-session-dispose", async () => { await rootSession?.dispose(); });
-			rootSession = undefined;
-		}
-	}));
+		}),
+	);
 	console.log("model-request-warm-parent:ok");
 } catch (error) {
-	console.error(JSON.stringify({ stage, writeStartedUnderB, writeFailed, writeResult, failure: describeFailure(error) }));
+	console.error(
+		JSON.stringify({ stage, writeStartedUnderB, writeFailed, writeResult, failure: describeFailure(error) }),
+	);
 	throw error;
 } finally {
 	await diagnosePhase("outer-lifecycle-dispose", () => AgentLifecycleManager.global().dispose());
-	await diagnosePhase("outer-root-session-dispose", async () => { await rootSession?.dispose(); });
+	await diagnosePhase("outer-root-session-dispose", async () => {
+		await rootSession?.dispose();
+	});
 	await diagnosePhase("outer-manager-close", () => manager.close());
 	modelRegistry.clearSourceRegistrations("<inline-0>");
 	authStorage.close();

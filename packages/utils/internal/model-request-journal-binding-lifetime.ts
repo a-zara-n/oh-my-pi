@@ -64,7 +64,11 @@ export function joinBindingPrincipalDrains(binding: ModelRequestJournalLeaseBind
 		const drains = new Set<Promise<void>>();
 		const failures: unknown[] = [];
 		for (const { drain } of lifetime.principals.values()) {
-			try { drains.add(drain()); } catch (error) { failures.push(error); }
+			try {
+				drains.add(drain());
+			} catch (error) {
+				failures.push(error);
+			}
 		}
 		const settled = await Promise.allSettled(drains);
 		lifetime.phase = "drained";

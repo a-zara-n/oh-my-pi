@@ -11,11 +11,7 @@ import {
 	joinAdditionalContext,
 } from "@oh-my-pi/pi-agent-core";
 import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
-import type {
-	CredentialDisabledEvent,
-	Model,
-	ProviderResponseMetadata,
-} from "@oh-my-pi/pi-ai";
+import type { CredentialDisabledEvent, Model, ProviderResponseMetadata } from "@oh-my-pi/pi-ai";
 import type { AssistantMessage, ImageContent, TextContent } from "@oh-my-pi/pi-utils/model-data";
 import {
 	getModelRequestExecution,

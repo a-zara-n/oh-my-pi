@@ -6,10 +6,7 @@ import type {
 } from "@oh-my-pi/pi-ai/providers/openai-chat-wire";
 import { convertMessages } from "@oh-my-pi/pi-ai/providers/openai-completions";
 import { transformMessages } from "@oh-my-pi/pi-ai/providers/transform-messages";
-import type {
-	Context,
-	Model,
-} from "@oh-my-pi/pi-ai/types";
+import type { Context, Model } from "@oh-my-pi/pi-ai/types";
 import type {
 	Api,
 	AssistantMessage,

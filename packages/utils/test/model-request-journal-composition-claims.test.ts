@@ -55,10 +55,14 @@ class CompositionFixture {
 		const epochWriterId = `writer-${randomUUID()}`;
 		const token = randomBytes(32);
 		retainModelRequestWriterCredential(this.requester, {
-			writerId: this.writerId, token, role: "operator-command", capabilities: [],
+			writerId: this.writerId,
+			token,
+			role: "operator-command",
+			capabilities: [],
 		});
 		const physicalBindingId = randomUUID();
-		const common = "seq INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL UNIQUE,tx_seq INTEGER NOT NULL,created_at_ms INTEGER NOT NULL";
+		const common =
+			"seq INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL UNIQUE,tx_seq INTEGER NOT NULL,created_at_ms INTEGER NOT NULL";
 		this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA application_id=1330856277; PRAGMA user_version=20;
 			CREATE TABLE store_meta(singleton INTEGER PRIMARY KEY,store_id TEXT) STRICT;
 			CREATE TABLE tx_log(tx_seq INTEGER PRIMARY KEY,writer_id TEXT,op_name TEXT,sealed INTEGER) STRICT;
@@ -66,25 +70,52 @@ class CompositionFixture {
 			CREATE TABLE writer_event(${common},writer_id TEXT NOT NULL,event TEXT NOT NULL,reason TEXT) STRICT;
 			CREATE TABLE store_config_event(${common},key TEXT NOT NULL,value_json TEXT NOT NULL,approval_id TEXT,writer_id TEXT NOT NULL) STRICT;`);
 		this.db.query("INSERT INTO store_meta VALUES(1,?)").run(this.storeId);
-		this.db.query("INSERT INTO tx_log VALUES(1,?,'store.init',1),(2,?,'bootstrapModelRequestJournalAuthority',1),(3,?,'registerWriter',1)")
+		this.db
+			.query(
+				"INSERT INTO tx_log VALUES(1,?,'store.init',1),(2,?,'bootstrapModelRequestJournalAuthority',1),(3,?,'registerWriter',1)",
+			)
 			.run(epochWriterId, epochWriterId, epochWriterId);
-		this.db.query("INSERT INTO writer(id,tx_seq,created_at_ms,role,capabilities_json,token_hash) VALUES(?,1,1,'operator-command','[]',?),(?,3,3,'operator-command','[]',?)")
-			.run(epochWriterId, createHash("sha256").update(randomBytes(32)).digest("hex"), this.writerId,
-				createHash("sha256").update(token).digest("hex"));
-		this.db.query("INSERT INTO store_config_event(id,tx_seq,created_at_ms,key,value_json,approval_id,writer_id) VALUES('epoch-1',2,2,'budget_authority_epoch',?,NULL,?)")
+		this.db
+			.query(
+				"INSERT INTO writer(id,tx_seq,created_at_ms,role,capabilities_json,token_hash) VALUES(?,1,1,'operator-command','[]',?),(?,3,3,'operator-command','[]',?)",
+			)
+			.run(
+				epochWriterId,
+				createHash("sha256").update(randomBytes(32)).digest("hex"),
+				this.writerId,
+				createHash("sha256").update(token).digest("hex"),
+			);
+		this.db
+			.query(
+				"INSERT INTO store_config_event(id,tx_seq,created_at_ms,key,value_json,approval_id,writer_id) VALUES('epoch-1',2,2,'budget_authority_epoch',?,NULL,?)",
+			)
 			.run(JSON.stringify({ schemaVersion: 1, authorityEpoch: 1, physicalBindingId }), epochWriterId);
-		withRawModelRequestJournalLeases({ storeId: this.storeId, control: "exclusive", maintenance: "exclusive" }, raw => {
-			this.namespace = raw.namespacePath;
-			const stat = fs.statSync(databasePath);
-			fs.writeFileSync(raw.recordPath, JSON.stringify({
-				schemaVersion: 1, storeId: this.storeId, authorityEpoch: 1, physicalBindingId,
-				dbDevice: stat.dev, dbInode: stat.ino, state: "active",
-			}), { mode: 0o600 });
-		});
+		withRawModelRequestJournalLeases(
+			{ storeId: this.storeId, control: "exclusive", maintenance: "exclusive" },
+			raw => {
+				this.namespace = raw.namespacePath;
+				const stat = fs.statSync(databasePath);
+				fs.writeFileSync(
+					raw.recordPath,
+					JSON.stringify({
+						schemaVersion: 1,
+						storeId: this.storeId,
+						authorityEpoch: 1,
+						physicalBindingId,
+						dbDevice: stat.dev,
+						dbInode: stat.ino,
+						state: "active",
+					}),
+					{ mode: 0o600 },
+				);
+			},
+		);
 	}
 
 	open(sessionFile?: string): FileJournalCell {
-		const cell = openFileJournalCell({ cwd: this.directory, sessionDir: this.directory,
+		const cell = openFileJournalCell({
+			cwd: this.directory,
+			sessionDir: this.directory,
 			...(sessionFile === undefined ? {} : { sessionFile }),
 		});
 		this.cells.push(cell);
@@ -92,18 +123,26 @@ class CompositionFixture {
 	}
 
 	withBinding<T>(root: FileJournalCell, use: (binding: ModelRequestJournalLeaseBinding) => Promise<T>): Promise<T> {
-		return withVerifiedModelRequestJournalBinding({ resources: this.resources, requester: this.requester,
-			mode: "resume", rootSessionId: root.getSessionId() }, use);
+		return withVerifiedModelRequestJournalBinding(
+			{ resources: this.resources, requester: this.requester, mode: "resume", rootSessionId: root.getSessionId() },
+			use,
+		);
 	}
 
 	execution(binding: ModelRequestJournalLeaseBinding, parent?: ReadyPrincipal): ModelRequestExecution {
-		return createJournalExecution({ binding,
+		return createJournalExecution({
+			binding,
 			agent: { id: randomUUID(), kind: parent ? "sub" : "main", name: "claims", depth: parent ? 1 : 0 },
-			purpose: "main", ...(parent === undefined ? {} : { parentExecution: parent.execution }),
+			purpose: "main",
+			...(parent === undefined ? {} : { parentExecution: parent.execution }),
 		});
 	}
 
-	async ready(binding: ModelRequestJournalLeaseBinding, cell: FileJournalCell, parent?: ReadyPrincipal): Promise<ReadyPrincipal> {
+	async ready(
+		binding: ModelRequestJournalLeaseBinding,
+		cell: FileJournalCell,
+		parent?: ReadyPrincipal,
+	): Promise<ReadyPrincipal> {
 		const execution = this.execution(binding, parent);
 		const session = await composeJournalSession({ cell, root: parent?.cell ?? cell, binding, execution });
 		return { cell, execution, session };
@@ -111,8 +150,10 @@ class CompositionFixture {
 
 	async close(): Promise<void> {
 		await Promise.allSettled([...this.cells].reverse().map(cell => cell.close()));
-		try { retireModelRequestWriterCredential(this.requester); this.db.close(); }
-		finally {
+		try {
+			retireModelRequestWriterCredential(this.requester);
+			this.db.close();
+		} finally {
 			fs.rmSync(this.directory, { recursive: true, force: true });
 			if (this.namespace) fs.rmSync(this.namespace, { recursive: true, force: true });
 		}
@@ -120,9 +161,19 @@ class CompositionFixture {
 }
 
 function decision(cell: FileJournalCell, root: FileJournalCell): ModelRequestLifecycleRecord {
-	return { schemaVersion: 1, event: "decision", coreAttemptId: randomUUID(), requestId: randomUUID(),
-		coreRetryOf: null, rootSessionId: root.getSessionId(), sessionId: cell.getSessionId(), purpose: "main",
-		modelRef: { provider: "openai", id: "fixture-model", api: "openai-completions" }, atMs: 1, decision: "pass" };
+	return {
+		schemaVersion: 1,
+		event: "decision",
+		coreAttemptId: randomUUID(),
+		requestId: randomUUID(),
+		coreRetryOf: null,
+		rootSessionId: root.getSessionId(),
+		sessionId: cell.getSessionId(),
+		purpose: "main",
+		modelRef: { provider: "openai", id: "fixture-model", api: "openai-completions" },
+		atMs: 1,
+		decision: "pass",
+	};
 }
 
 const mac = process.platform === "darwin" ? describe : describe.skip;
@@ -139,21 +190,32 @@ mac("actual File composition claims", () => {
 				await other.ensureOnDisk();
 				const rootBytes = fs.readFileSync(rootCell.getSessionFile(), "utf8");
 				const otherBytes = fs.readFileSync(other.getSessionFile(), "utf8");
-				await expect(composeJournalSession({ cell: other, root: rootCell, binding, execution: derived })).rejects.toThrow();
+				await expect(
+					composeJournalSession({ cell: other, root: rootCell, binding, execution: derived }),
+				).rejects.toThrow();
 				expect(fs.readFileSync(rootCell.getSessionFile(), "utf8")).toBe(rootBytes);
 				expect(fs.readFileSync(other.getSessionFile(), "utf8")).toBe(otherBytes);
 				expect(derived.modelRequestScope?.sessionId).toBe(child.cell.getSessionId());
 				assertJournalExecutionReady(child.execution);
-				expect(await composeJournalSession({ cell: child.cell, root: rootCell, binding, execution: derived })).toBe(child.session);
+				expect(await composeJournalSession({ cell: child.cell, root: rootCell, binding, execution: derived })).toBe(
+					child.session,
+				);
 				await appendJournalMetadata(child.session, derived, decision(child.cell, rootCell));
 				await closeJournalSession(root.session);
-				const closes = rootCell.getEntries().filter(entry => entry.type === "model_request_registry" &&
-					entry.record.sessionId === child.cell.getSessionId() &&
-					(entry.record.event === "member-closed" || entry.record.event === "owner-closed"));
+				const closes = rootCell
+					.getEntries()
+					.filter(
+						entry =>
+							entry.type === "model_request_registry" &&
+							entry.record.sessionId === child.cell.getSessionId() &&
+							(entry.record.event === "member-closed" || entry.record.event === "owner-closed"),
+					);
 				expect(closes).toHaveLength(2);
 				for (const entry of closes) expect(entry).toMatchObject({ record: { throughSeq: 1, outcome: "closed" } });
 			});
-		} finally { await fixture.close(); }
+		} finally {
+			await fixture.close();
+		}
 	});
 
 	for (const contender of ["same-family-other-cell", "other-family-same-cell", "same-family-same-cell"] as const) {
@@ -167,21 +229,35 @@ mac("actual File composition claims", () => {
 					const other = contender === "same-family-other-cell" ? fixture.open() : cell;
 					await other.ensureOnDisk();
 					const execution = fixture.execution(binding, root);
-					const otherExecution = contender === "other-family-same-cell" ? fixture.execution(binding, root) : execution;
+					const otherExecution =
+						contender === "other-family-same-cell" ? fixture.execution(binding, root) : execution;
 					const before = fs.readFileSync(other.getSessionFile(), "utf8");
 					const first = composeJournalSession({ cell, root: rootCell, binding, execution });
-					const second = composeJournalSession({ cell: other, root: rootCell, binding, execution: otherExecution });
+					const second = composeJournalSession({
+						cell: other,
+						root: rootCell,
+						binding,
+						execution: otherExecution,
+					});
 					await expect(second).rejects.toThrow();
 					const session = await first;
 					assertJournalExecutionReady(execution);
 					expect(await composeJournalSession({ cell, root: rootCell, binding, execution })).toBe(session);
 					if (other !== cell) expect(fs.readFileSync(other.getSessionFile(), "utf8")).toBe(before);
-					const members = rootCell.getEntries().filter(entry => entry.type === "model_request_registry" &&
-						entry.record.event === "member-registered" && entry.record.sessionId === cell.getSessionId());
+					const members = rootCell
+						.getEntries()
+						.filter(
+							entry =>
+								entry.type === "model_request_registry" &&
+								entry.record.event === "member-registered" &&
+								entry.record.sessionId === cell.getSessionId(),
+						);
 					expect(members).toHaveLength(1);
 					await closeJournalSession(root.session);
 				});
-			} finally { await fixture.close(); }
+			} finally {
+				await fixture.close();
+			}
 		});
 	}
 });
@@ -221,14 +297,22 @@ mac("actual File historical composition mappings", () => {
 					const entries = oldRoot.getEntries();
 					await oldRoot.close();
 					let seq = 0;
-					const retained = entries.filter(entry => entry.type !== "model_request_registry" ||
-						entry.record.sessionId !== childHeader.id ||
-						(mode === "missing-first-epoch" && entry.record.journalEpoch !== oldEpochs[0]!.journalEpoch));
-					const rows = retained.map(entry => entry.type === "model_request_registry" ? { ...entry, seq: ++seq } : entry);
+					const retained = entries.filter(
+						entry =>
+							entry.type !== "model_request_registry" ||
+							entry.record.sessionId !== childHeader.id ||
+							(mode === "missing-first-epoch" && entry.record.journalEpoch !== oldEpochs[0]!.journalEpoch),
+					);
+					const rows = retained.map(entry =>
+						entry.type === "model_request_registry" ? { ...entry, seq: ++seq } : entry,
+					);
 					// A held child's descriptor alone is not a root mapping. Removing
 					// all its mappings simulates legacy history without backfilling.
 					const title = fs.readFileSync(rootFile, "utf8").split("\n")[0];
-					fs.writeFileSync(rootFile, `${title}\n${JSON.stringify(header)}\n${rows.map(entry => JSON.stringify(entry)).join("\n")}\n`);
+					fs.writeFileSync(
+						rootFile,
+						`${title}\n${JSON.stringify(header)}\n${rows.map(entry => JSON.stringify(entry)).join("\n")}\n`,
+					);
 				}
 				const rootCell = mode === "wrong-root" ? fixture.open() : fixture.open(rootFile);
 				let checked = false;
@@ -243,9 +327,14 @@ mac("actual File historical composition mappings", () => {
 						if (mode === "same-root") {
 							const session = await pending;
 							assertJournalExecutionReady(execution);
-							expect<typeof oldEpochs | undefined>(childCell.getHeader().modelRequestJournal?.epochs.slice(0, 2)).toEqual(oldEpochs);
+							expect<typeof oldEpochs | undefined>(
+								childCell.getHeader().modelRequestJournal?.epochs.slice(0, 2),
+							).toEqual(oldEpochs);
 							expect(childCell.getEntries()).toEqual(childEntries);
-							for (const entry of childEntries) expect(fs.readFileSync(childCell.getSessionFile(), "utf8")).toContain(`${JSON.stringify(entry)}\n`);
+							for (const entry of childEntries)
+								expect(fs.readFileSync(childCell.getSessionFile(), "utf8")).toContain(
+									`${JSON.stringify(entry)}\n`,
+								);
 							await appendJournalMetadata(session, execution, decision(childCell, rootCell));
 							await closeJournalSession(root.session);
 							await Promise.all([...fixture.cells].reverse().map(cell => cell.close()));
@@ -263,7 +352,9 @@ mac("actual File historical composition mappings", () => {
 					if (!checked) throw error;
 				}
 				expect(checked).toBe(true);
-			} finally { await fixture.close(); }
+			} finally {
+				await fixture.close();
+			}
 		});
 	}
 });

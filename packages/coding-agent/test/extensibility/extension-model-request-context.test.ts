@@ -16,10 +16,7 @@ import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { ExtensionRuntime, loadExtensionFromFactory } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/loader";
 import { ExtensionRunner } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/runner";
-import type {
-	ExtensionContext,
-	ExtensionFactory,
-} from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
+import type { ExtensionContext, ExtensionFactory } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
 import { ExtensionToolWrapper, wrapRegisteredTool } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/wrapper";
 import * as legacyPiAi from "@oh-my-pi/pi-coding-agent/extensibility/legacy-pi-ai-shim";
 import type { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";

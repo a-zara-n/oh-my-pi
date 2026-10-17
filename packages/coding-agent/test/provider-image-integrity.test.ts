@@ -7,10 +7,7 @@
  * never travel because a reference does — byte-identical.
  */
 import { describe, expect, test } from "bun:test";
-import type {
-	Context,
-	Model,
-} from "@oh-my-pi/pi-ai";
+import type { Context, Model } from "@oh-my-pi/pi-ai";
 import type {
 	ImageContent,
 	Message,

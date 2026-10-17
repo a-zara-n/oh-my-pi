@@ -8,7 +8,6 @@ import type { Effort } from "./effort";
 export type { FetchImpl } from "@oh-my-pi/pi-utils";
 export type { KnownProvider } from "./provider-models/descriptors";
 
-
 /** Catalog kinds used to isolate role-specific runners from session chat models. */
 export const MODEL_KINDS = [
 	"chat",
@@ -171,10 +170,8 @@ export interface ThinkingConfig {
 	requiresEffort?: boolean;
 }
 
-
 /** Token budgets for each thinking level (token-based providers only) */
 export type ThinkingBudgets = { [key in Effort]?: number };
-
 
 export type OpenAIReasoningFormat =
 	| "openai"

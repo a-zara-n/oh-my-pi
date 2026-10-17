@@ -1,4 +1,10 @@
-export { kStreamingPartialJson, getStreamingPartialJson, setStreamingPartialJson, clearStreamingPartialJson, type StreamingPartialJsonCarrier } from "@oh-my-pi/pi-utils/model-data";
+export {
+	kStreamingPartialJson,
+	getStreamingPartialJson,
+	setStreamingPartialJson,
+	clearStreamingPartialJson,
+	type StreamingPartialJsonCarrier,
+} from "@oh-my-pi/pi-utils/model-data";
 
 /** Stores a provider-local stream block index without exposing a string-keyed property. */
 export const kStreamingBlockIndex = Symbol("provider.block.index");

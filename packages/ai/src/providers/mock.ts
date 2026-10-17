@@ -45,11 +45,7 @@
 import { classifyModel } from "@oh-my-pi/pi-catalog/compat/taxonomy";
 import { registerCustomApi } from "../api-registry";
 import * as AIError from "../error";
-import type {
-	Context,
-	Model,
-	SimpleStreamOptions,
-} from "../types";
+import type { Context, Model, SimpleStreamOptions } from "../types";
 import type {
 	AnthropicFallbackCreditHandle,
 	Api,

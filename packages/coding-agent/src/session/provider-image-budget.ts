@@ -1,7 +1,4 @@
-import type {
-	Context,
-	Model,
-} from "@oh-my-pi/pi-ai";
+import type { Context, Model } from "@oh-my-pi/pi-ai";
 import type {
 	DeveloperMessage,
 	ImageContent,

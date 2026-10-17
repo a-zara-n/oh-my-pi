@@ -6,7 +6,10 @@ import { stream } from "@oh-my-pi/pi-ai/stream";
 import type { FetchImpl, Model } from "@oh-my-pi/pi-ai/types";
 import { gateFetch } from "@oh-my-pi/pi-ai/utils/model-request-fetch";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
-import { CLOUDFLARE_AI_GATEWAY_ANTHROPIC_BASE_URL, serializeCloudflareAiGatewayCredential } from "@oh-my-pi/pi-catalog/wire/cloudflare-ai-gateway";
+import {
+	CLOUDFLARE_AI_GATEWAY_ANTHROPIC_BASE_URL,
+	serializeCloudflareAiGatewayCredential,
+} from "@oh-my-pi/pi-catalog/wire/cloudflare-ai-gateway";
 import { fetchWithRetry } from "@oh-my-pi/pi-utils";
 import { installFixtureGate, recordingLease } from "./helpers/model-request-gate-fixture";
 import { scripted, startLoopbackProvider } from "./helpers/model-request-loopback";
@@ -79,7 +82,9 @@ describe("the model an attempt names", () => {
 		const attempt = gate.attempts[0]!;
 		expect(attempt.model.api).toBe("openai-completions");
 		expect(attempt.model.baseUrl).toBe("https://gateway.ai.cloudflare.com/v1/account-id/my-gateway/openai");
-		expect(attempt.wire?.url).toBe("https://gateway.ai.cloudflare.com/v1/account-id/my-gateway/openai/chat/completions");
+		expect(attempt.wire?.url).toBe(
+			"https://gateway.ai.cloudflare.com/v1/account-id/my-gateway/openai/chat/completions",
+		);
 		expect(sentTo).toEqual(["https://gateway.ai.cloudflare.com/v1/account-id/my-gateway/openai/chat/completions"]);
 	});
 });

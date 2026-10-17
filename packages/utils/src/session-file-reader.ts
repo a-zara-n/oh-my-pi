@@ -73,15 +73,23 @@ function applyTitleSlot(entry: FileEntry | undefined, slot: SessionTitleUpdate |
 type ManagedHint = "journal" | "registry";
 
 function managedEntryHint(entry: FileEntry): ManagedHint | undefined {
-	if (entry?.type === "model_request_metadata" || entry?.type === "session" && entry.modelRequestJournal !== undefined) return "journal";
-	if (entry?.type === "model_request_registry" || entry?.type === "session" && entry.modelRequestRegistry !== undefined) return "registry";
+	if (
+		entry?.type === "model_request_metadata" ||
+		(entry?.type === "session" && entry.modelRequestJournal !== undefined)
+	)
+		return "journal";
+	if (
+		entry?.type === "model_request_registry" ||
+		(entry?.type === "session" && entry.modelRequestRegistry !== undefined)
+	)
+		return "registry";
 	return undefined;
 }
 
 function jsonStringEnd(line: string, start: number): number {
 	for (let index = start + 1; index < line.length; index++) {
 		if (line[index] === "\\") index++;
-		else if (line[index] === "\"") return index + 1;
+		else if (line[index] === '"') return index + 1;
 	}
 	return -1;
 }
@@ -92,11 +100,23 @@ function managedRawHint(line: string): ManagedHint | undefined {
 	let arrays = 0;
 	for (let index = 0; index < line.length; index++) {
 		const character = line[index];
-		if (character === "{") { objects++; continue; }
-		if (character === "}") { objects--; continue; }
-		if (character === "[") { arrays++; continue; }
-		if (character === "]") { arrays--; continue; }
-		if (character !== "\"") continue;
+		if (character === "{") {
+			objects++;
+			continue;
+		}
+		if (character === "}") {
+			objects--;
+			continue;
+		}
+		if (character === "[") {
+			arrays++;
+			continue;
+		}
+		if (character === "]") {
+			arrays--;
+			continue;
+		}
+		if (character !== '"') continue;
 		const end = jsonStringEnd(line, index);
 		if (end < 0) break;
 		if (objects === 1 && arrays === 0) {
@@ -104,17 +124,27 @@ function managedRawHint(line: string): ManagedHint | undefined {
 			while (colon < line.length && /\s/.test(line[colon]!)) colon++;
 			if (line[colon] === ":") {
 				let key: unknown;
-				try { key = JSON.parse(line.slice(index, end)); } catch { index = end - 1; continue; }
+				try {
+					key = JSON.parse(line.slice(index, end));
+				} catch {
+					index = end - 1;
+					continue;
+				}
 				if (key === "modelRequestJournal") return "journal";
 				if (key === "modelRequestRegistry") return "registry";
 				if (key === "type") {
 					let start = colon + 1;
 					while (start < line.length && /\s/.test(line[start]!)) start++;
-					if (line[start] === "\"") {
+					if (line[start] === '"') {
 						const valueEnd = jsonStringEnd(line, start);
 						if (valueEnd > 0) {
 							let value: unknown;
-							try { value = JSON.parse(line.slice(start, valueEnd)); } catch { index = end - 1; continue; }
+							try {
+								value = JSON.parse(line.slice(start, valueEnd));
+							} catch {
+								index = end - 1;
+								continue;
+							}
 							if (value === "model_request_metadata") return "journal";
 							if (value === "model_request_registry") return "registry";
 						}
@@ -368,8 +398,11 @@ export async function visitEntriesFromFileStream(
 			const remainder = decoder.decode(sink.flush()!);
 			const hint = managedHint ?? managedRawHint(remainder);
 			if (hint && remainder.trim()) {
-				try { JSON.parse(remainder); }
-				catch { malformedManagedSnapshot(hint); }
+				try {
+					JSON.parse(remainder);
+				} catch {
+					malformedManagedSnapshot(hint);
+				}
 			}
 			sink.append(LF);
 			await drain();

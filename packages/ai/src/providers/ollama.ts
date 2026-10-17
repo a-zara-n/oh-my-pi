@@ -3,14 +3,7 @@ import { fetchWithRetry, parseStreamingJson, readJsonl } from "@oh-my-pi/pi-util
 import * as AIError from "../error";
 import { parseToolCallArguments } from "../utils/tool-call-arguments";
 import { getEnvApiKey } from "../env-api-key";
-import type {
-	Context,
-	Model,
-	StreamFunction,
-	StreamOptions,
-	Tool,
-	ToolChoice,
-} from "../types";
+import type { Context, Model, StreamFunction, StreamOptions, Tool, ToolChoice } from "../types";
 import type { Api, AssistantMessage, ImageContent, Message, TextContent } from "@oh-my-pi/pi-utils/model-data";
 import { normalizeSystemPrompts } from "../utils";
 import { clearStreamingPartialJson, kStreamingPartialJson } from "@oh-my-pi/pi-utils/model-data";

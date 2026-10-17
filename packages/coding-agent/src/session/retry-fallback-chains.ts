@@ -174,7 +174,6 @@ export function getRetryFallbackChains(settings: Settings): RetryFallbackChains 
 	return expandDefaultRetryFallbackChains(configuredChains, Object.keys(settings.getModelRoles()));
 }
 
-
 /** Reads the primary and non-empty chain installed for `role`, if any. */
 export function getRetryFallbackRole(settings: Settings, role: string): RetryFallbackRole | undefined {
 	const primary = settings.getModelRole(role);

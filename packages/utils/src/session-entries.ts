@@ -1,6 +1,14 @@
 import type { AgentMessage } from "./agent-messages";
 import type {} from "./compaction-entries";
-import type { AssistantMessage, ImageContent, MessageAttribution, ServiceTierByFamily, StopReason, TextContent, Usage } from "./model-data";
+import type {
+	AssistantMessage,
+	ImageContent,
+	MessageAttribution,
+	ServiceTierByFamily,
+	StopReason,
+	TextContent,
+	Usage,
+} from "./model-data";
 import type { ModelRequestModelRef, ModelRequestOutcome, ModelRequestPurpose } from "./model-request-data";
 export const CURRENT_SESSION_VERSION = 3;
 
@@ -133,7 +141,13 @@ export type ModelRequestRegistryRecord =
 			journalEpoch: string;
 			firstSeq: 1;
 	  }>
-	| Readonly<{ event: "owner-registered"; ownerId: string; sessionId: string; journalEpoch: string; writerOwnerId: string }>
+	| Readonly<{
+			event: "owner-registered";
+			ownerId: string;
+			sessionId: string;
+			journalEpoch: string;
+			writerOwnerId: string;
+	  }>
 	| Readonly<{
 			event: "member-closed";
 			sessionId: string;
@@ -164,10 +178,11 @@ interface ModelRequestRegistryEntryBase extends SessionEntryBase {
 }
 
 /** Version discrimination is required before consuming the current writer-owner mapping. */
-export type ModelRequestRegistryEntry = ModelRequestRegistryEntryBase & (
-	| Readonly<{ schemaVersion: 1; record: LegacyModelRequestRegistryRecord }>
-	| Readonly<{ schemaVersion: 2; record: ModelRequestRegistryRecord }>
-);
+export type ModelRequestRegistryEntry = ModelRequestRegistryEntryBase &
+	(
+		| Readonly<{ schemaVersion: 1; record: LegacyModelRequestRegistryRecord }>
+		| Readonly<{ schemaVersion: 2; record: ModelRequestRegistryRecord }>
+	);
 
 export interface SessionHeader {
 	type: "session";
@@ -539,7 +554,10 @@ export type ModelRequestAssistantSourceArgs = [message: AssistantMessage];
 
 /** Arguments for a journal-owned non-transcript model usage append. */
 export type ModelRequestModelUsageSourceArgs = [
-	usage: Pick<ModelUsageEntry, "purpose" | "role" | "api" | "provider" | "model" | "usage" | "stopReason" | "errorMessage">,
+	usage: Pick<
+		ModelUsageEntry,
+		"purpose" | "role" | "api" | "provider" | "model" | "usage" | "stopReason" | "errorMessage"
+	>,
 	owner: { sessionId: string; parentId: string | null },
 ];
 

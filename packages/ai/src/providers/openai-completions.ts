@@ -16,15 +16,7 @@ import * as AIError from "../error";
 import { parseToolCallArguments } from "../utils/tool-call-arguments";
 import { getKimiCommonHeaders } from "../registry/oauth/kimi";
 import { getEnvApiKey } from "../env-api-key";
-import type {
-	Context,
-	Model,
-	ProviderSessionState,
-	StreamFunction,
-	StreamOptions,
-	Tool,
-	ToolChoice,
-} from "../types";
+import type { Context, Model, ProviderSessionState, StreamFunction, StreamOptions, Tool, ToolChoice } from "../types";
 import type {
 	AssistantMessage,
 	Message,

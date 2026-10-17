@@ -1,10 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import {
-	loadModelRequestJournalFromFile,
-	loadSessionFile,
-} from "@oh-my-pi/pi-coding-agent/session/session-loader";
+import { loadModelRequestJournalFromFile, loadSessionFile } from "@oh-my-pi/pi-coding-agent/session/session-loader";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import {
 	appendJournalMetadata,
@@ -42,7 +39,10 @@ function ordinaryHeader(cwd: string): SessionHeader {
 
 function userEntry(id: string, parentId: string | null = null): SessionMessageEntry {
 	return {
-		type: "message", id, parentId, timestamp: ISO,
+		type: "message",
+		id,
+		parentId,
+		timestamp: ISO,
 		message: { role: "user", content: `message ${id}`, timestamp: 1 },
 	};
 }
@@ -74,39 +74,78 @@ function managedFixture(cwd: string): ManagedFixture {
 	// these bytes neither issue an owner nor register a ready execution.
 	const sessionId = crypto.randomUUID();
 	const header: SessionHeader = {
-		type: "session", version: 3, id: sessionId, timestamp: ISO, cwd,
+		type: "session",
+		version: 3,
+		id: sessionId,
+		timestamp: ISO,
+		cwd,
 		modelRequestJournal: {
-			schemaVersion: 1, journalId: JOURNAL, sessionId,
+			schemaVersion: 1,
+			journalId: JOURNAL,
+			sessionId,
 			epochs: [{ journalOwnerId: OWNER, journalEpoch: EPOCH }],
 		},
 	};
 	const decision: ModelRequestLifecycleRecord = {
-		schemaVersion: 1, event: "decision", coreAttemptId: ATTEMPT, requestId: REQUEST, coreRetryOf: null,
-		rootSessionId: sessionId, sessionId, purpose: "main",
+		schemaVersion: 1,
+		event: "decision",
+		coreAttemptId: ATTEMPT,
+		requestId: REQUEST,
+		coreRetryOf: null,
+		rootSessionId: sessionId,
+		sessionId,
+		purpose: "main",
 		modelRef: { provider: "openai", id: "gpt-5", api: "openai-responses" },
-		atMs: 1, decision: "pass",
+		atMs: 1,
+		decision: "pass",
 	};
 	const metadata: ModelRequestMetadataEntry = {
-		type: "model_request_metadata", id: "metadata1", parentId: null, timestamp: ISO,
-		schemaVersion: 1, journalId: JOURNAL, sessionId, journalOwnerId: OWNER, journalEpoch: EPOCH,
-		seq: 1, record: decision,
+		type: "model_request_metadata",
+		id: "metadata1",
+		parentId: null,
+		timestamp: ISO,
+		schemaVersion: 1,
+		journalId: JOURNAL,
+		sessionId,
+		journalOwnerId: OWNER,
+		journalEpoch: EPOCH,
+		seq: 1,
+		record: decision,
 	};
 	const assistant: SessionMessageEntry = {
-		type: "message", id: "assistant1", parentId: null, timestamp: ISO,
+		type: "message",
+		id: "assistant1",
+		parentId: null,
+		timestamp: ISO,
 		message: {
-			role: "assistant", api: "openai-responses", provider: "openai", model: "gpt-5",
-			stopReason: "stop", timestamp: 1, content: [{ type: "text", text: "reader fixture" }],
+			role: "assistant",
+			api: "openai-responses",
+			provider: "openai",
+			model: "gpt-5",
+			stopReason: "stop",
+			timestamp: 1,
+			content: [{ type: "text", text: "reader fixture" }],
 			usage: {
-				input: 1, output: 2, cacheRead: 0, cacheWrite: 0, totalTokens: 3,
+				input: 1,
+				output: 2,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 3,
 				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 			},
 		},
 	};
 	const linked: ModelRequestMetadataEntry = {
-		...metadata, id: "metadata2", seq: 2,
+		...metadata,
+		id: "metadata2",
+		seq: 2,
 		record: {
-			schemaVersion: 1, sourceKind: "assistant", sourceSessionId: sessionId,
-			sourceEntryId: assistant.id, resultId: null, provenance: { kind: "non-wire", reason: "cache" },
+			schemaVersion: 1,
+			sourceKind: "assistant",
+			sourceSessionId: sessionId,
+			sourceEntryId: assistant.id,
+			resultId: null,
+			provenance: { kind: "non-wire", reason: "cache" },
 		},
 	};
 	return { header, decision, metadata, assistant, linked };
@@ -122,7 +161,9 @@ describe("actual File session principal", () => {
 		const file = path.join(dir.path(), "session.jsonl");
 		const header = { ...ordinaryHeader(dir.path()), version: 1 };
 		const bytes = `${JSON.stringify(header)}\n${JSON.stringify({
-			type: "message", timestamp: ISO, message: { role: "user", content: "legacy", timestamp: 1 },
+			type: "message",
+			timestamp: ISO,
+			message: { role: "user", content: "legacy", timestamp: 1 },
 		})}\n{BROKEN`;
 		await Bun.write(file, bytes);
 		const ordinary = await loadSessionFile(file);
@@ -265,17 +306,24 @@ describe("actual File session principal", () => {
 		const cell = openFileJournalCell({ cwd: dir.path(), sessionFile: file });
 		// No binding: this must not set the process-global journalRequired latch.
 		const execution = createJournalExecution({
-			agent: { kind: "main", id: "RootAgent", name: "main", depth: 0 }, purpose: "main",
+			agent: { kind: "main", id: "RootAgent", name: "main", depth: 0 },
+			purpose: "main",
 		});
 		try {
 			const fakeCell = Object.freeze({
-				...cell, getSessionId: () => cell.getSessionId(), getSessionFile: () => file,
-				getHeader: () => cell.getHeader(), getEntries: () => cell.getEntries(),
+				...cell,
+				getSessionId: () => cell.getSessionId(),
+				getSessionFile: () => file,
+				getHeader: () => cell.getHeader(),
+				getEntries: () => cell.getEntries(),
 			});
 			const fakeExecution = Object.freeze({
-				...execution, journalState: "required-ready",
+				...execution,
+				journalState: "required-ready",
 				modelRequestScope: {
-					sessionId: cell.getSessionId(), rootSessionId: cell.getSessionId(), purpose: "main",
+					sessionId: cell.getSessionId(),
+					rootSessionId: cell.getSessionId(),
+					purpose: "main",
 					agent: { kind: "main", id: "RootAgent", name: "main", depth: 0 },
 				},
 			});
@@ -287,11 +335,17 @@ describe("actual File session principal", () => {
 				{ cell, root: fakeCell, binding: undefined, execution },
 				{ cell, root: cell, binding: undefined, execution: fakeExecution },
 			]) {
-				await expect((async () => Reflect.apply(composeJournalSession, undefined, [input]))()).rejects.toThrow(unavailable);
+				await expect((async () => Reflect.apply(composeJournalSession, undefined, [input]))()).rejects.toThrow(
+					unavailable,
+				);
 			}
 			expect(() => assertJournalExecutionIdentity(fakeExecution)).toThrow(unavailable);
-			expect(() => Reflect.apply(cell.appendModelRequestMetadata, cell, [fakeOwner, fixture.decision])).toThrow(unavailable);
-			expect(() => Reflect.apply(appendJournalMetadata, undefined, [fakeSession, fakeExecution, fixture.decision])).toThrow(unavailable);
+			expect(() => Reflect.apply(cell.appendModelRequestMetadata, cell, [fakeOwner, fixture.decision])).toThrow(
+				unavailable,
+			);
+			expect(() =>
+				Reflect.apply(appendJournalMetadata, undefined, [fakeSession, fakeExecution, fixture.decision]),
+			).toThrow(unavailable);
 			expect<readonly FileEntry[]>(cell.getEntries()).toEqual(managedEntries(fixture).slice(1));
 			expect(await Bun.file(file).text()).toBe(bytes);
 		} finally {
@@ -311,8 +365,12 @@ describe("actual File session principal", () => {
 			const metadata = cell.getEntry(fixture.metadata.id);
 			const assistant = cell.getEntry(fixture.assistant.id);
 			Reflect.set(header, "id", "caller-mutated");
-			if (!header.modelRequestJournal || metadata?.type !== "model_request_metadata" ||
-				assistant?.type !== "message" || assistant.message.role !== "assistant") {
+			if (
+				!header.modelRequestJournal ||
+				metadata?.type !== "model_request_metadata" ||
+				assistant?.type !== "message" ||
+				assistant.message.role !== "assistant"
+			) {
 				throw new Error("Expected the managed persisted-reader fixture");
 			}
 			Reflect.set(header.modelRequestJournal.epochs[0]!, "journalOwnerId", "caller-mutated");
@@ -344,9 +402,10 @@ describe("actual File session principal", () => {
 				expect(cell.openWriter(file)).toBe(oldWriter);
 				const laterWriter = new FileSessionStorage().openWriter(file);
 				expect(laterWriter).toBe(oldWriter);
-				const entry: SessionEntry = kind === "assistant"
-					? { ...fixture.assistant, id: "raw-assistant" }
-					: { ...fixture.metadata, id: "raw-metadata", seq: 3 };
+				const entry: SessionEntry =
+					kind === "assistant"
+						? { ...fixture.assistant, id: "raw-assistant" }
+						: { ...fixture.metadata, id: "raw-metadata", seq: 3 };
 				const line = `${JSON.stringify(entry)}\n`;
 				await expect(oldWriter.append(line)).rejects.toThrow();
 				await expect(laterWriter.append(line)).rejects.toThrow();
@@ -367,9 +426,8 @@ describe("actual File session principal", () => {
 			using dir = TempDir.createSync("@file-principal-strict-");
 			const file = path.join(dir.path(), "session.jsonl");
 			const fixture = managedFixture(dir.path());
-			const prefix = hint === "descriptor"
-				? managedEntries(fixture)
-				: [ordinaryHeader(dir.path()), userEntry("ordinary")];
+			const prefix =
+				hint === "descriptor" ? managedEntries(fixture) : [ordinaryHeader(dir.path()), userEntry("ordinary")];
 			const bytes = `${prefix.map(entry => JSON.stringify(entry)).join("\n")}\n${
 				hint === "descriptor" ? "{BROKEN\n" : '{"type":"model_request_metadata","id":'
 			}`;
@@ -384,8 +442,8 @@ describe("actual File session principal", () => {
 		using dir = TempDir.createSync("@file-principal-staging-");
 		const file = path.join(dir.path(), "session.jsonl");
 		const header = ordinaryHeader(dir.path());
-		const bytes = serializeTitleSlot({ title: "Before", source: "user", updatedAt: ISO }) +
-			`${JSON.stringify(header)}\n`;
+		const bytes =
+			serializeTitleSlot({ title: "Before", source: "user", updatedAt: ISO }) + `${JSON.stringify(header)}\n`;
 		await Bun.write(file, bytes);
 		const cell = openFileJournalCell({ cwd: dir.path(), sessionFile: file });
 		try {
@@ -402,7 +460,12 @@ describe("actual File session principal", () => {
 			expect(cell.getProjectionRevision()).toBeGreaterThan(beforeBranch);
 			expect(cell.getLeafId()).toBe(first.id);
 			const beforeApply = cell.getProjectionRevision();
-			cell.applyEntries({ ...cell.getHeader(), title: "After", titleSource: "user" }, [first, second], first.id, UPDATED_ISO);
+			cell.applyEntries(
+				{ ...cell.getHeader(), title: "After", titleSource: "user" },
+				[first, second],
+				first.id,
+				UPDATED_ISO,
+			);
 			expect(cell.getProjectionRevision()).toBeGreaterThan(beforeApply);
 			expect(cell.getTitleUpdatedAt()).toBe(UPDATED_ISO);
 			expect(cell.getHeader().title).toBe("After");
@@ -470,7 +533,9 @@ describe("actual File session principal", () => {
 			expect(cell.getExpectedDiskSize()).toBe(expectedSize);
 			expect(cell.getEntries().map(entry => entry.id)).toEqual(["first", "staged"]);
 			expect(await Bun.file(file).text()).toBe(externallyChanged);
-			expect((await loadSessionFile(file)).entries.slice(1).map(entry => entry.type !== "session" ? entry.id : null)).toEqual(["first", "external"]);
+			expect(
+				(await loadSessionFile(file)).entries.slice(1).map(entry => (entry.type !== "session" ? entry.id : null)),
+			).toEqual(["first", "external"]);
 		} finally {
 			await closeCell(cell);
 		}
@@ -493,10 +558,30 @@ describe("actual File session principal", () => {
 				{ header: { ...header, modelRequestJournal: { ...descriptor, journalId: crypto.randomUUID() } }, entries },
 				{ header: { ...header, modelRequestJournal: undefined }, entries },
 				{ header, entries: entries.filter(entry => entry.id !== fixture.metadata.id) },
-				{ header, entries: entries.map(entry => entry.id === fixture.metadata.id ? { ...fixture.metadata, id: "different" } : entry) },
-				{ header, entries: entries.map(entry => entry.id === fixture.metadata.id ? { ...fixture.metadata, timestamp: UPDATED_ISO } : entry) },
-				{ header, entries: entries.map(entry => entry.id === fixture.assistant.id ? { ...fixture.assistant, id: "different" } : entry) },
-				{ header, entries: entries.map(entry => entry.id === fixture.assistant.id ? userEntry(fixture.assistant.id) : entry) },
+				{
+					header,
+					entries: entries.map(entry =>
+						entry.id === fixture.metadata.id ? { ...fixture.metadata, id: "different" } : entry,
+					),
+				},
+				{
+					header,
+					entries: entries.map(entry =>
+						entry.id === fixture.metadata.id ? { ...fixture.metadata, timestamp: UPDATED_ISO } : entry,
+					),
+				},
+				{
+					header,
+					entries: entries.map(entry =>
+						entry.id === fixture.assistant.id ? { ...fixture.assistant, id: "different" } : entry,
+					),
+				},
+				{
+					header,
+					entries: entries.map(entry =>
+						entry.id === fixture.assistant.id ? userEntry(fixture.assistant.id) : entry,
+					),
+				},
 				{ header, entries: [...entries, { ...fixture.metadata, id: "new-metadata", seq: 3 }] },
 				{ header, entries: [...entries, { ...fixture.assistant, id: "new-source" }] },
 			];
@@ -510,7 +595,10 @@ describe("actual File session principal", () => {
 			expect(() => cell.branch(fixture.metadata.id)).toThrow();
 			expect(cell.getExpectedDiskSize()).toBe(Buffer.byteLength(bytes));
 			expect(await Bun.file(file).text()).toBe(bytes);
-			expect((await loadModelRequestJournalFromFile(file)).metadataEntries).toEqual([fixture.metadata, fixture.linked]);
+			expect((await loadModelRequestJournalFromFile(file)).metadataEntries).toEqual([
+				fixture.metadata,
+				fixture.linked,
+			]);
 		} finally {
 			await closeCell(cell);
 		}

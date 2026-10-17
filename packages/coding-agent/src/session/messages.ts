@@ -4,8 +4,26 @@
  * Extends the base AgentMessage type with coding-agent specific message types,
  * and provides a transformer to convert them to LLM-compatible messages.
  */
-import type { AgentMessage, BashExecutionMessage, CustomMessage, FileMentionMessage, HookMessage, PythonExecutionMessage } from "@oh-my-pi/pi-utils/agent-messages";
-export type { BranchSummaryMessage, CompactionSummaryMessage, CustomMessageContent, CustomMessagePayload, NormalizedCustomMessagePayload, BashExecutionMessage, PythonExecutionMessage, CustomMessage, HookMessage, FileMentionMessage } from "@oh-my-pi/pi-utils/agent-messages";
+import type {
+	AgentMessage,
+	BashExecutionMessage,
+	CustomMessage,
+	FileMentionMessage,
+	HookMessage,
+	PythonExecutionMessage,
+} from "@oh-my-pi/pi-utils/agent-messages";
+export type {
+	BranchSummaryMessage,
+	CompactionSummaryMessage,
+	CustomMessageContent,
+	CustomMessagePayload,
+	NormalizedCustomMessagePayload,
+	BashExecutionMessage,
+	PythonExecutionMessage,
+	CustomMessage,
+	HookMessage,
+	FileMentionMessage,
+} from "@oh-my-pi/pi-utils/agent-messages";
 import {
 	isUserInterruptAbort,
 	isCustomMessageContent,

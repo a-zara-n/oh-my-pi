@@ -31,12 +31,7 @@ import {
 	buildTransformedCodexRequestBody,
 	getOpenAICodexTransportDetails,
 } from "@oh-my-pi/pi-ai/providers/openai-codex-responses";
-import type {
-	CodexCompactionContext,
-	FetchImpl,
-	Model,
-	ProviderSessionState,
-} from "@oh-my-pi/pi-ai/types";
+import type { CodexCompactionContext, FetchImpl, Model, ProviderSessionState } from "@oh-my-pi/pi-ai/types";
 import type { AssistantMessage, ToolResultMessage, UserMessage } from "@oh-my-pi/pi-utils/model-data";
 import { __resetProxyCache } from "@oh-my-pi/pi-ai/utils/proxy";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";

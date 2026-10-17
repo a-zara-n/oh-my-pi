@@ -19,15 +19,7 @@ import { renderDemotedThinking } from "../dialect/demotion";
 import * as AIError from "../error";
 import { parseToolCallArguments } from "../utils/tool-call-arguments";
 import { resolveAwsBearerToken } from "../registry/aws";
-import type {
-	CacheRetention,
-	Context,
-	Model,
-	StreamFunction,
-	StreamOptions,
-	ThinkingBudgets,
-	Tool,
-} from "../types";
+import type { CacheRetention, Context, Model, StreamFunction, StreamOptions, ThinkingBudgets, Tool } from "../types";
 import type {
 	Api,
 	AssistantMessage,
@@ -39,10 +31,7 @@ import type {
 } from "@oh-my-pi/pi-utils/model-data";
 import { isRecord, normalizeSystemPrompts, normalizeToolCallId, resolveCacheRetention } from "../utils";
 import { resolveAwsAmbientRegion } from "../utils/aws-profile";
-import {
-	kStreamingBlockIndex,
-	kStreamingLastParseLen,
-} from "../utils/block-symbols";
+import { kStreamingBlockIndex, kStreamingLastParseLen } from "../utils/block-symbols";
 import { AssistantMessageEventStream } from "../utils/event-stream";
 import type { RawHttpRequestDump } from "../utils/http-inspector";
 import { armPreResponseTimeout, getStreamFirstEventTimeoutMs } from "../utils/idle-iterator";

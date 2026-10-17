@@ -2082,7 +2082,8 @@ export class SessionAdvisors {
 		if (
 			AIError.isModelRequestDenied(error) ||
 			failedMessages.some(
-				message => message.role === "assistant" && message.stopReason === "error" && AIError.isModelRequestDenied(message),
+				message =>
+					message.role === "assistant" && message.stopReason === "error" && AIError.isModelRequestDenied(message),
 			)
 		) {
 			return false;

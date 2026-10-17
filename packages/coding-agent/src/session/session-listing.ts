@@ -9,7 +9,11 @@ import { LRUCache } from "@oh-my-pi/pi-utils/lru";
 import { parseJsonlLenient } from "@oh-my-pi/pi-utils/stream";
 import { toError } from "@oh-my-pi/pi-utils/type-guards";
 import { computeDefaultSessionDir } from "./session-paths";
-import { FileSessionStorage, type SessionStorage, type SessionStorageStat } from "@oh-my-pi/pi-utils/model-request-journal-composition";
+import {
+	FileSessionStorage,
+	type SessionStorage,
+	type SessionStorageStat,
+} from "@oh-my-pi/pi-utils/model-request-journal-composition";
 import { lookupSessionTitle, recordSessionTitle } from "./session-index";
 
 /**

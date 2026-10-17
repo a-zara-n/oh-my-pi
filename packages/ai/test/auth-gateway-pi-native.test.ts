@@ -7,11 +7,7 @@ import { startAuthGateway } from "@oh-my-pi/pi-ai/auth-gateway";
 import { AuthStorage } from "@oh-my-pi/pi-ai/auth-storage";
 import { createMockModel, registerMockApi } from "@oh-my-pi/pi-ai/providers/mock";
 import { encodeStream, formatError, parseRequest } from "@oh-my-pi/pi-ai/providers/pi-native-server";
-import type {
-	AssistantMessageEvent,
-	AssistantMessageEventStream,
-	Context,
-} from "@oh-my-pi/pi-ai/types";
+import type { AssistantMessageEvent, AssistantMessageEventStream, Context } from "@oh-my-pi/pi-ai/types";
 import type { AssistantMessage, Usage } from "@oh-my-pi/pi-utils/model-data";
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
 

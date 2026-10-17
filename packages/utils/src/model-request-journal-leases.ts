@@ -47,7 +47,8 @@ function descendsFrom(context: LeaseContext, ancestor: LeaseContext): boolean {
 	return false;
 }
 function poison(context: LeaseContext): void {
-	for (let current: LeaseContext | undefined = context; current !== undefined; current = current.parent) current.poisoned = true;
+	for (let current: LeaseContext | undefined = context; current !== undefined; current = current.parent)
+		current.poisoned = true;
 }
 interface NativeLeaseRuntime {
 	flock(fd: number, operation: number): number;
@@ -55,7 +56,8 @@ interface NativeLeaseRuntime {
 }
 let nativeRuntime: NativeLeaseRuntime | undefined;
 function runtime(): NativeLeaseRuntime {
-	if (process.platform !== "darwin" || process.arch !== "arm64" && process.arch !== "x64") throw new Error("Journal leases unsupported");
+	if (process.platform !== "darwin" || (process.arch !== "arm64" && process.arch !== "x64"))
+		throw new Error("Journal leases unsupported");
 	if (nativeRuntime !== undefined) return nativeRuntime;
 	const library = dlopen("/usr/lib/libSystem.B.dylib", {
 		flock: { args: [FFIType.i32, FFIType.i32], returns: FFIType.i32 },
@@ -73,16 +75,22 @@ function runtime(): NativeLeaseRuntime {
 	const resultPointer = ptr(result);
 	// unistd.h:299 and getpwent(3) specify this maximum caller-owned buffer.
 	const bufferSize = Number(library.symbols.sysconf(71));
-	if (!Number.isSafeInteger(bufferSize) || bufferSize < 1 || bufferSize > 1024 * 1024) throw new Error("Journal account buffer unavailable");
+	if (!Number.isSafeInteger(bufferSize) || bufferSize < 1 || bufferSize > 1024 * 1024)
+		throw new Error("Journal account buffer unavailable");
 	const buffer = new Uint8Array(bufferSize);
 	const bufferPointer = ptr(buffer);
-	const decodeHome = new TextDecoder("utf-8", {fatal: true});
+	const decodeHome = new TextDecoder("utf-8", { fatal: true });
 	nativeRuntime = {
 		flock: (fd, operation) => library.symbols.flock(fd, operation),
 		home(uid) {
 			try {
 				const status = library.symbols.getpwuid_r(uid, accountPointer, bufferPointer, buffer.length, resultPointer);
-				if (status !== 0 || resultView.getBigUint64(0, true) !== BigInt(accountPointer) || accountView.getUint32(16, true) !== uid) throw new Error("Journal account unavailable");
+				if (
+					status !== 0 ||
+					resultView.getBigUint64(0, true) !== BigInt(accountPointer) ||
+					accountView.getUint32(16, true) !== uid
+				)
+					throw new Error("Journal account unavailable");
 				// getpwuid_r promises strings in our supplied buffer. Validate the
 				// returned pw_dir range before reading, rather than dereferencing it.
 				const directoryPointer = accountView.getBigUint64(48, true);
@@ -108,7 +116,14 @@ function validMode(mode: unknown): mode is RawModelRequestJournalLeaseMode {
 }
 function uid(): number {
 	const value = process.getuid?.();
-	if (value === undefined || !Number.isSafeInteger(value) || value < 0 || value > 0xffffffff || process.geteuid?.() !== value) throw new Error("Journal account unavailable");
+	if (
+		value === undefined ||
+		!Number.isSafeInteger(value) ||
+		value < 0 ||
+		value > 0xffffffff ||
+		process.geteuid?.() !== value
+	)
+		throw new Error("Journal account unavailable");
 	return value;
 }
 function sameFile(left: Stats, right: Stats): boolean {
@@ -116,16 +131,28 @@ function sameFile(left: Stats, right: Stats): boolean {
 }
 function directory(path: string, owner: number, privateMode: boolean, create: boolean): void {
 	if (create) {
-		try { mkdirSync(path, { mode: 0o700 }); } catch (error) {
-			if (!(error instanceof Error) || !("code" in error) || error.code !== "EEXIST") throw new Error("Journal namespace unavailable");
+		try {
+			mkdirSync(path, { mode: 0o700 });
+		} catch (error) {
+			if (!(error instanceof Error) || !("code" in error) || error.code !== "EEXIST")
+				throw new Error("Journal namespace unavailable");
 		}
 	}
 	const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_DIRECTORY);
 	try {
 		const stat = fstatSync(fd);
 		const named = lstatSync(path);
-		if (!stat.isDirectory() || !sameFile(stat, named) || named.isSymbolicLink() || stat.uid !== owner || privateMode && (stat.mode & 0o7777) !== 0o700) throw new Error("Journal namespace rejected");
-	} finally { closeSync(fd); }
+		if (
+			!stat.isDirectory() ||
+			!sameFile(stat, named) ||
+			named.isSymbolicLink() ||
+			stat.uid !== owner ||
+			(privateMode && (stat.mode & 0o7777) !== 0o700)
+		)
+			throw new Error("Journal namespace rejected");
+	} finally {
+		closeSync(fd);
+	}
 }
 function namespace(storeId: string): string {
 	const owner = uid();
@@ -151,7 +178,11 @@ function namespace(storeId: string): string {
 	return path;
 }
 /** Shared native fd implementation. This operation never removes its lock inode. */
-export function tryAcquireRawModelRequestJournalFileLease(path: string, mode: RawModelRequestJournalLeaseMode, owner: number): RawModelRequestJournalFileLease | undefined {
+export function tryAcquireRawModelRequestJournalFileLease(
+	path: string,
+	mode: RawModelRequestJournalLeaseMode,
+	owner: number,
+): RawModelRequestJournalFileLease | undefined {
 	let fd: number | undefined;
 	try {
 		if (!validMode(mode) || owner !== uid()) return undefined;
@@ -162,20 +193,44 @@ export function tryAcquireRawModelRequestJournalFileLease(path: string, mode: Ra
 		const check = (): void => {
 			const actual = fstatSync(descriptor);
 			const named = lstatSync(path);
-			if (!actual.isFile() || actual.uid !== owner || (actual.mode & 0o7777) !== 0o600 || actual.nlink !== 1 || named.isSymbolicLink() || !sameFile(actual, named) || !sameFile(actual, initial)) throw new Error("Journal lease inode rejected");
+			if (
+				!actual.isFile() ||
+				actual.uid !== owner ||
+				(actual.mode & 0o7777) !== 0o600 ||
+				actual.nlink !== 1 ||
+				named.isSymbolicLink() ||
+				!sameFile(actual, named) ||
+				!sameFile(actual, initial)
+			)
+				throw new Error("Journal lease inode rejected");
 		};
 		check();
-		if (native.flock(descriptor, (mode === "shared" ? 1 : 2) | 4) !== 0) { fd = undefined; closeSync(descriptor); return undefined; }
+		if (native.flock(descriptor, (mode === "shared" ? 1 : 2) | 4) !== 0) {
+			fd = undefined;
+			closeSync(descriptor);
+			return undefined;
+		}
 		fd = undefined;
 		let open = true;
 		return Object.freeze({
-			assertHeld() { if (!open) throw new Error("Journal lease ended"); check(); },
+			assertHeld() {
+				if (!open) throw new Error("Journal lease ended");
+				check();
+			},
 			release() {
 				if (!open) return;
 				open = false;
 				const failures: unknown[] = [];
-				try { if (native.flock(descriptor, 8) !== 0) throw new Error("Journal lease unlock failed"); } catch (error) { failures.push(error); }
-				try { closeSync(descriptor); } catch (error) { failures.push(error); }
+				try {
+					if (native.flock(descriptor, 8) !== 0) throw new Error("Journal lease unlock failed");
+				} catch (error) {
+					failures.push(error);
+				}
+				try {
+					closeSync(descriptor);
+				} catch (error) {
+					failures.push(error);
+				}
 				if (failures.length === 1) throw failures[0];
 				if (failures.length > 1) throw new AggregateError(failures, "Journal lease unlock and close failed");
 			},
@@ -189,19 +244,45 @@ function identifier(value: unknown): value is string {
 	return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value);
 }
 /** A send owns a distinct root fd; owner/control/maintenance remain borrowed. */
-export function retainRawModelRequestJournalRoot(ownerScope: RawModelRequestJournalLeaseScope, registryId: string): RawModelRequestJournalRetainedRootScope {
+export function retainRawModelRequestJournalRoot(
+	ownerScope: RawModelRequestJournalLeaseScope,
+	registryId: string,
+): RawModelRequestJournalRetainedRootScope {
 	const owner = scopes.get(ownerScope);
 	const current = leaseContext.getStore();
-	if (owner === undefined || current === undefined || !identifier(registryId) || !owner.open || !current.open || !descendsFrom(current, owner)) throw new Error("Journal retained owner rejected");
+	if (
+		owner === undefined ||
+		current === undefined ||
+		!identifier(registryId) ||
+		!owner.open ||
+		!current.open ||
+		!descendsFrom(current, owner)
+	)
+		throw new Error("Journal retained owner rejected");
 	owner.scope.assertHeld();
 	current.scope.assertHeld();
 	const request = current.request;
 	const ownerId = owner.request.ownerId;
-	if (ownerId === undefined || owner.request.registryId !== undefined || request.registryId !== undefined || request.storeId !== owner.request.storeId || request.ownerId !== ownerId || request.control !== "shared" || request.maintenance !== "shared" || request.control !== owner.request.control || request.maintenance !== owner.request.maintenance) throw new Error("Journal retained lease order rejected");
+	if (
+		ownerId === undefined ||
+		owner.request.registryId !== undefined ||
+		request.registryId !== undefined ||
+		request.storeId !== owner.request.storeId ||
+		request.ownerId !== ownerId ||
+		request.control !== "shared" ||
+		request.maintenance !== "shared" ||
+		request.control !== owner.request.control ||
+		request.maintenance !== owner.request.maintenance
+	)
+		throw new Error("Journal retained lease order rejected");
 	for (let ancestor: LeaseContext | undefined = current; ancestor !== undefined; ancestor = ancestor.parent) {
 		if (ancestor.retained.size !== 0) throw new Error("Journal retained lease order rejected");
 	}
-	const handle = tryAcquireRawModelRequestJournalFileLease(join(current.scope.namespacePath, "accounting", `${registryId}.lock`), "exclusive", uid());
+	const handle = tryAcquireRawModelRequestJournalFileLease(
+		join(current.scope.namespacePath, "accounting", `${registryId}.lock`),
+		"exclusive",
+		uid(),
+	);
 	if (handle === undefined) throw new Error("Journal lease unavailable");
 	let open = true;
 	const retained = Object.freeze<RawModelRequestJournalRetainedRootScope>({
@@ -213,7 +294,15 @@ export function retainRawModelRequestJournalRoot(ownerScope: RawModelRequestJour
 		registryId,
 		assertHeld() {
 			const active = leaseContext.getStore();
-			if (!open || !current.open || !owner.open || active === undefined || !active.open || !descendsFrom(active, current)) throw new Error("Journal retained root ended");
+			if (
+				!open ||
+				!current.open ||
+				!owner.open ||
+				active === undefined ||
+				!active.open ||
+				!descendsFrom(active, current)
+			)
+				throw new Error("Journal retained root ended");
 			current.scope.assertHeld();
 			active.scope.assertHeld();
 			owner.scope.assertHeld();
@@ -222,33 +311,83 @@ export function retainRawModelRequestJournalRoot(ownerScope: RawModelRequestJour
 		release() {
 			if (!open) return;
 			open = false;
-			for (let ancestor: LeaseContext | undefined = current; ancestor !== undefined; ancestor = ancestor.parent) ancestor.retained.delete(retained);
-			try { handle.release(); } catch (error) { poison(current); throw error; }
+			for (let ancestor: LeaseContext | undefined = current; ancestor !== undefined; ancestor = ancestor.parent)
+				ancestor.retained.delete(retained);
+			try {
+				handle.release();
+			} catch (error) {
+				poison(current);
+				throw error;
+			}
 		},
 	});
-	for (let ancestor: LeaseContext | undefined = current; ancestor !== undefined; ancestor = ancestor.parent) ancestor.retained.add(retained);
+	for (let ancestor: LeaseContext | undefined = current; ancestor !== undefined; ancestor = ancestor.parent)
+		ancestor.retained.add(retained);
 	return retained;
 }
 /** Fixed nonblocking order. Synchronous acquisition failures throw before a callback can return a Promise. */
-export function withRawModelRequestJournalLeases<T>(request: RawModelRequestJournalLeaseRequest, use: (raw: RawModelRequestJournalLeaseScope) => Promise<T>): Promise<T>;
-export function withRawModelRequestJournalLeases<T>(request: RawModelRequestJournalLeaseRequest, use: (raw: RawModelRequestJournalLeaseScope) => T): T;
-export function withRawModelRequestJournalLeases<T>(request: RawModelRequestJournalLeaseRequest, use: (raw: RawModelRequestJournalLeaseScope) => T | Promise<T>): T | Promise<T> {
-	if (request === null || typeof request !== "object" || Reflect.ownKeys(request).some(key => typeof key !== "string" || !["storeId", "control", "maintenance", "ownerId", "registryId"].includes(key))) throw new Error("Journal lease request rejected");
-	const {storeId, control, maintenance, ownerId, registryId} = request;
-	if (!identifier(storeId) || !validMode(control) || !validMode(maintenance) || ownerId !== undefined && !identifier(ownerId) || registryId !== undefined && !identifier(registryId) || typeof use !== "function") throw new Error("Journal lease request rejected");
+export function withRawModelRequestJournalLeases<T>(
+	request: RawModelRequestJournalLeaseRequest,
+	use: (raw: RawModelRequestJournalLeaseScope) => Promise<T>,
+): Promise<T>;
+export function withRawModelRequestJournalLeases<T>(
+	request: RawModelRequestJournalLeaseRequest,
+	use: (raw: RawModelRequestJournalLeaseScope) => T,
+): T;
+export function withRawModelRequestJournalLeases<T>(
+	request: RawModelRequestJournalLeaseRequest,
+	use: (raw: RawModelRequestJournalLeaseScope) => T | Promise<T>,
+): T | Promise<T> {
+	if (
+		request === null ||
+		typeof request !== "object" ||
+		Reflect.ownKeys(request).some(
+			key =>
+				typeof key !== "string" || !["storeId", "control", "maintenance", "ownerId", "registryId"].includes(key),
+		)
+	)
+		throw new Error("Journal lease request rejected");
+	const { storeId, control, maintenance, ownerId, registryId } = request;
+	if (
+		!identifier(storeId) ||
+		!validMode(control) ||
+		!validMode(maintenance) ||
+		(ownerId !== undefined && !identifier(ownerId)) ||
+		(registryId !== undefined && !identifier(registryId)) ||
+		typeof use !== "function"
+	)
+		throw new Error("Journal lease request rejected");
 	const parent = leaseContext.getStore();
 	if (parent !== undefined) {
 		if (!parent.open || parent.request.storeId !== storeId) throw new Error("Journal lease scope ended");
 		parent.scope.assertHeld();
-		if (parent.request.control === "shared" && control === "exclusive" || parent.request.maintenance === "shared" && maintenance === "exclusive" || ownerId !== undefined && parent.request.ownerId !== undefined && ownerId !== parent.request.ownerId || registryId !== undefined && parent.request.registryId !== undefined && registryId !== parent.request.registryId || parent.request.registryId !== undefined && ownerId !== undefined && parent.request.ownerId !== ownerId) throw new Error("Journal lease order rejected");
-		if (parent.retained.size !== 0 && (registryId !== undefined || ownerId !== undefined && ownerId !== parent.request.ownerId || control !== "shared" || maintenance !== "shared")) throw new Error("Journal retained lease order rejected");
+		if (
+			(parent.request.control === "shared" && control === "exclusive") ||
+			(parent.request.maintenance === "shared" && maintenance === "exclusive") ||
+			(ownerId !== undefined && parent.request.ownerId !== undefined && ownerId !== parent.request.ownerId) ||
+			(registryId !== undefined &&
+				parent.request.registryId !== undefined &&
+				registryId !== parent.request.registryId) ||
+			(parent.request.registryId !== undefined && ownerId !== undefined && parent.request.ownerId !== ownerId)
+		)
+			throw new Error("Journal lease order rejected");
+		if (
+			parent.retained.size !== 0 &&
+			(registryId !== undefined ||
+				(ownerId !== undefined && ownerId !== parent.request.ownerId) ||
+				control !== "shared" ||
+				maintenance !== "shared")
+		)
+			throw new Error("Journal retained lease order rejected");
 	}
 	const effective: RawModelRequestJournalLeaseRequest = Object.freeze({
 		storeId,
 		control: parent?.request.control ?? control,
 		maintenance: parent?.request.maintenance ?? maintenance,
-		...((parent?.request.ownerId ?? ownerId) === undefined ? {} : {ownerId: parent?.request.ownerId ?? ownerId}),
-		...((parent?.request.registryId ?? registryId) === undefined ? {} : {registryId: parent?.request.registryId ?? registryId}),
+		...((parent?.request.ownerId ?? ownerId) === undefined ? {} : { ownerId: parent?.request.ownerId ?? ownerId }),
+		...((parent?.request.registryId ?? registryId) === undefined
+			? {}
+			: { registryId: parent?.request.registryId ?? registryId }),
 	});
 	const namespacePath = parent?.scope.namespacePath ?? namespace(storeId);
 	const leases: RawModelRequestJournalFileLease[] = [];
@@ -266,17 +405,29 @@ export function withRawModelRequestJournalLeases<T>(request: RawModelRequestJour
 		const failures: unknown[] = [];
 		if (context !== undefined) {
 			for (const retained of context.retained) {
-				try { retained.release(); } catch (error) { failures.push(error); }
+				try {
+					retained.release();
+				} catch (error) {
+					failures.push(error);
+				}
 			}
 		}
 		for (let index = leases.length - 1; index >= 0; index--) {
-			try { leases[index]!.release(); } catch (error) { failures.push(error); }
+			try {
+				leases[index]!.release();
+			} catch (error) {
+				failures.push(error);
+			}
 		}
 		if (failures.length === 1) throw failures[0];
 		if (failures.length > 1) throw new AggregateError(failures, "Journal lease releases failed");
 	};
 	const fail = (error: unknown): never => {
-		try { release(); } catch (releaseError) { throw new AggregateError([error, releaseError], "Journal operation and lease release failed"); }
+		try {
+			release();
+		} catch (releaseError) {
+			throw new AggregateError([error, releaseError], "Journal operation and lease release failed");
+		}
 		throw error;
 	};
 	try {
@@ -284,38 +435,66 @@ export function withRawModelRequestJournalLeases<T>(request: RawModelRequestJour
 			acquire(join(namespacePath, "control", `${storeId}.lock`), control);
 			acquire(join(namespacePath, "maintenance.lock"), maintenance);
 		}
-		if (effective.ownerId !== undefined && parent?.request.ownerId === undefined) acquire(join(namespacePath, "owners", `${effective.ownerId}.lock`), "shared");
-		if (effective.registryId !== undefined && parent?.request.registryId === undefined) acquire(join(namespacePath, "accounting", `${effective.registryId}.lock`), "exclusive");
+		if (effective.ownerId !== undefined && parent?.request.ownerId === undefined)
+			acquire(join(namespacePath, "owners", `${effective.ownerId}.lock`), "shared");
+		if (effective.registryId !== undefined && parent?.request.registryId === undefined)
+			acquire(join(namespacePath, "accounting", `${effective.registryId}.lock`), "exclusive");
 		const scope: RawModelRequestJournalLeaseScope = Object.freeze({
 			storeId,
 			namespacePath,
 			recordPath: join(namespacePath, "authority.json"),
-			...(effective.ownerId === undefined ? {} : {ownerId: effective.ownerId}),
-			...(effective.registryId === undefined ? {} : {registryId: effective.registryId}),
+			...(effective.ownerId === undefined ? {} : { ownerId: effective.ownerId }),
+			...(effective.registryId === undefined ? {} : { registryId: effective.registryId }),
 			assertHeld() {
-				if (!open || context?.poisoned || parent !== undefined && !parent.open || namespace(storeId) !== namespacePath) throw new Error("Journal lease scope ended");
+				if (
+					!open ||
+					context?.poisoned ||
+					(parent !== undefined && !parent.open) ||
+					namespace(storeId) !== namespacePath
+				)
+					throw new Error("Journal lease scope ended");
 				parent?.scope.assertHeld();
 				for (const lease of leases) lease.assertHeld();
 			},
 		});
-		context = {request: effective, scope, parent, retained: new Set(), poisoned: false, open: true};
+		context = { request: effective, scope, parent, retained: new Set(), poisoned: false, open: true };
 		scopes.set(scope, context);
 		scope.assertHeld();
 		const result = leaseContext.run(context, () => use(scope));
 		if (result instanceof Promise) {
 			// Use the native intrinsic, not an overridden .then/.finally on a caller's Promise.
 			const completion = Promise.withResolvers<T>();
-			Promise.prototype.then.call(result, (value: T) => {
-				try { scope.assertHeld(); release(); completion.resolve(value); }
-				catch (error) { try { fail(error); } catch (failure) { completion.reject(failure); } }
-			}, (error: unknown) => {
-				try { fail(error); } catch (failure) { completion.reject(failure); }
-			});
+			Promise.prototype.then.call(
+				result,
+				(value: T) => {
+					try {
+						scope.assertHeld();
+						release();
+						completion.resolve(value);
+					} catch (error) {
+						try {
+							fail(error);
+						} catch (failure) {
+							completion.reject(failure);
+						}
+					}
+				},
+				(error: unknown) => {
+					try {
+						fail(error);
+					} catch (failure) {
+						completion.reject(failure);
+					}
+				},
+			);
 			return completion.promise;
 		}
-		if (result !== null && (typeof result === "object" || typeof result === "function") && "then" in result) throw new Error("Journal lease callback must return a native Promise");
+		if (result !== null && (typeof result === "object" || typeof result === "function") && "then" in result)
+			throw new Error("Journal lease callback must return a native Promise");
 		scope.assertHeld();
 		release();
 		return result;
-	} catch (error) { return fail(error); }
+	} catch (error) {
+		return fail(error);
+	}
 }

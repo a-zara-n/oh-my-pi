@@ -21,11 +21,13 @@ import type { Model } from "@oh-my-pi/pi-ai/types";
 import type { AssistantMessage, ProviderPayload, Usage } from "@oh-my-pi/pi-utils/model-data";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { buildSessionContext } from "@oh-my-pi/pi-coding-agent/session/session-context";
-import type { CompactionEntry,
+import type {
+	CompactionEntry,
 	ModelChangeEntry,
 	SessionEntry,
 	SessionMessageEntry,
-	ThinkingLevelChangeEntry, } from "@oh-my-pi/pi-utils/session-entries";
+	ThinkingLevelChangeEntry,
+} from "@oh-my-pi/pi-utils/session-entries";
 import { parseSessionEntries } from "@oh-my-pi/pi-utils/session-file-reader";
 import { migrateSessionEntries } from "@oh-my-pi/pi-utils/session-migrations";
 import { mockFetch } from "./helpers/fetch-mock";

@@ -1,5 +1,18 @@
-import type { AgentMessage, BranchSummaryMessage, CompactionSummaryMessage, CoreCompactionMessage, CustomMessage, HookMessage } from "@oh-my-pi/pi-utils/agent-messages";
-export type { BranchSummaryMessage, CompactionSummaryMessage, CoreCompactionMessage, CustomMessage, HookMessage } from "@oh-my-pi/pi-utils/agent-messages";
+import type {
+	AgentMessage,
+	BranchSummaryMessage,
+	CompactionSummaryMessage,
+	CoreCompactionMessage,
+	CustomMessage,
+	HookMessage,
+} from "@oh-my-pi/pi-utils/agent-messages";
+export type {
+	BranchSummaryMessage,
+	CompactionSummaryMessage,
+	CoreCompactionMessage,
+	CustomMessage,
+	HookMessage,
+} from "@oh-my-pi/pi-utils/agent-messages";
 import type {
 	ImageContent,
 	Message,
@@ -17,7 +30,6 @@ import handoffSummaryContextPrompt from "./prompts/handoff-summary-context.md" w
 const COMPACTION_SUMMARY_TEMPLATE = compactionSummaryContextPrompt;
 const HANDOFF_SUMMARY_TEMPLATE = handoffSummaryContextPrompt;
 const BRANCH_SUMMARY_TEMPLATE = branchSummaryContextPrompt;
-
 
 export type ConvertToLlm = (messages: AgentMessage[]) => Message[];
 

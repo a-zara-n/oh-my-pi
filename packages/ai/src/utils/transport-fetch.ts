@@ -18,9 +18,13 @@ function requireBuiltinTransport(base: FetchImpl): void {
 	try {
 		assertModelRequestBuiltinFetch(base);
 	} catch (error) {
-		throw new ModelRequestDeniedError("transport-unsupported", "required model request needs the startup builtin fetch", {
-			cause: error,
-		});
+		throw new ModelRequestDeniedError(
+			"transport-unsupported",
+			"required model request needs the startup builtin fetch",
+			{
+				cause: error,
+			},
+		);
 	}
 }
 
@@ -93,7 +97,14 @@ export function transportFetch(model: Model<Api>, fetchImpl: FetchImpl | undefin
 			});
 			return session === undefined ? response : session.wrapResponse(response);
 		}
-		return gatedSend({ model, kind: "chat", input, init: sentInit, transport: base, send: () => send(input, sentInit) });
+		return gatedSend({
+			model,
+			kind: "chat",
+			input,
+			init: sentInit,
+			transport: base,
+			send: () => send(input, sentInit),
+		});
 	};
 	if (base.preconnect) fetch.preconnect = base.preconnect;
 	transportFetches.add(fetch);

@@ -1,10 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { renderDemotedThinking } from "@oh-my-pi/pi-ai/dialect";
 import { convertAnthropicMessages } from "@oh-my-pi/pi-ai/providers/anthropic";
-import type {
-	Model,
-	ModelSpec,
-} from "@oh-my-pi/pi-ai/types";
+import type { Model, ModelSpec } from "@oh-my-pi/pi-ai/types";
 import type { AssistantMessage, Message, ToolResultMessage, UserMessage } from "@oh-my-pi/pi-utils/model-data";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 

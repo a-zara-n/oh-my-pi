@@ -256,7 +256,8 @@ export function buildSessionContext(
 	}
 	if (leafId) {
 		const candidate = byId.get(leafId);
-		if (candidate?.type !== "model_request_metadata" && candidate?.type !== "model_request_registry") leaf = candidate;
+		if (candidate?.type !== "model_request_metadata" && candidate?.type !== "model_request_registry")
+			leaf = candidate;
 	}
 	if (!leaf) {
 		// Journal and registry metadata are canonical history, not branch or context leaves.

@@ -24,10 +24,7 @@ import type { AgentRef } from "../registry/agent-registry";
 import { AgentRegistry } from "../registry/agent-registry";
 import { ensurePersistedRoster } from "../registry/persisted-agents";
 import { formatSessionHistoryMarkdown } from "../session/session-history-format";
-import {
-	bashExecutionToText,
-	pythonExecutionToText,
-} from "../session/messages";
+import { bashExecutionToText, pythonExecutionToText } from "../session/messages";
 import type {
 	BashExecutionMessage,
 	BranchSummaryMessage,

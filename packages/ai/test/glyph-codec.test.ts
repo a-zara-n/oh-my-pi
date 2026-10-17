@@ -3,7 +3,13 @@ import { clearCustomApis } from "@oh-my-pi/pi-ai/api-registry";
 import { createMockModel, registerMockApi } from "@oh-my-pi/pi-ai/providers/mock";
 import { streamSimple } from "@oh-my-pi/pi-ai/stream";
 import type { Context, CursorExecHandlers } from "@oh-my-pi/pi-ai/types";
-import { getStreamingPartialJson, setStreamingPartialJson, type AssistantMessage, type ToolCall, type ToolResultMessage } from "@oh-my-pi/pi-utils/model-data";
+import {
+	getStreamingPartialJson,
+	setStreamingPartialJson,
+	type AssistantMessage,
+	type ToolCall,
+	type ToolResultMessage,
+} from "@oh-my-pi/pi-utils/model-data";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { applyGlyphCodec, decodeGlyphText, encodeGlyphText } from "@oh-my-pi/pi-ai/utils/glyph-codec";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";

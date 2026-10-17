@@ -101,7 +101,11 @@ import {
 	listSessions,
 	type SessionInfo,
 } from "./session-listing";
-import { parseSessionContent, readSessionHeaderId, type SessionLoadResult } from "@oh-my-pi/pi-utils/session-file-reader";
+import {
+	parseSessionContent,
+	readSessionHeaderId,
+	type SessionLoadResult,
+} from "@oh-my-pi/pi-utils/session-file-reader";
 import {
 	loadEntriesFromFile,
 	loadSessionFile,
@@ -971,7 +975,7 @@ export class SessionManager {
 	#nonFileTitleUpdatedAt = "";
 	get #titleUpdatedAt(): string {
 		const cell = fileJournalCells.get(this);
-		return cell ? cell.getTitleUpdatedAt() ?? "" : this.#nonFileTitleUpdatedAt;
+		return cell ? (cell.getTitleUpdatedAt() ?? "") : this.#nonFileTitleUpdatedAt;
 	}
 	set #titleUpdatedAt(value: string) {
 		const cell = fileJournalCells.get(this);
@@ -1443,13 +1447,17 @@ export class SessionManager {
 			this.#sessionId = mintSessionId();
 			to = path.join(path.dirname(from), `${fileSafeTimestamp(timestamp)}_${this.#sessionId}.jsonl`);
 		}
-		this.#applyEntries({
-			...previousHeader,
-			id: this.#sessionId,
-			timestamp,
-			parentSession: previousSessionId,
-			providerPromptCacheKey: previousHeader.providerPromptCacheKey ?? previousSessionId,
-		}, previousEntries, previousLeaf);
+		this.#applyEntries(
+			{
+				...previousHeader,
+				id: this.#sessionId,
+				timestamp,
+				parentSession: previousSessionId,
+				providerPromptCacheKey: previousHeader.providerPromptCacheKey ?? previousSessionId,
+			},
+			previousEntries,
+			previousLeaf,
+		);
 		this.#titleUpdatedAt = previousTitleUpdatedAt;
 		this.#closeWriterEventually();
 		this.#sessionFile = to;
@@ -2325,9 +2333,14 @@ export class SessionManager {
 
 	#refuseManagedJournalMutation(): void {
 		const canonical = fileJournalCells.get(this)?.getHeader();
-		if (canonical?.modelRequestJournal || canonical?.modelRequestRegistry ||
-			this.#modelRequestJournalHistory || this.#header.modelRequestJournal || this.#header.modelRequestRegistry ||
-			this.#entries.some(entry => entry.type === "model_request_metadata" || entry.type === "model_request_registry")) {
+		if (
+			canonical?.modelRequestJournal ||
+			canonical?.modelRequestRegistry ||
+			this.#modelRequestJournalHistory ||
+			this.#header.modelRequestJournal ||
+			this.#header.modelRequestRegistry ||
+			this.#entries.some(entry => entry.type === "model_request_metadata" || entry.type === "model_request_registry")
+		) {
 			throw new Error("Managed model request journal history cannot be copied, moved, or discarded.");
 		}
 	}
@@ -2336,7 +2349,11 @@ export class SessionManager {
 		// File history protection belongs exclusively to the principal mutation boundary.
 		if (fileJournalCells.has(this)) return;
 		const protectedHistory = this.#modelRequestJournalHistory;
-		if (!protectedHistory && !header.modelRequestJournal && !entries.some(entry => entry.type === "model_request_metadata")) {
+		if (
+			!protectedHistory &&
+			!header.modelRequestJournal &&
+			!entries.some(entry => entry.type === "model_request_metadata")
+		) {
 			return;
 		}
 		validateModelRequestJournal([header, ...entries]);
@@ -2380,8 +2397,9 @@ export class SessionManager {
 	#applyEntries(
 		header: SessionHeader,
 		entries: SessionEntry[],
-		leafId: string | null = entries.findLast(entry =>
-			entry.type !== "model_request_metadata" && entry.type !== "model_request_registry")?.id ?? null,
+		leafId: string | null = entries.findLast(
+			entry => entry.type !== "model_request_metadata" && entry.type !== "model_request_registry",
+		)?.id ?? null,
 	): void {
 		const repairedUsage = normalizeLoadedUsage(entries);
 		if (repairedUsage > 0) logger.warn("Loaded assistant messages with incomplete usage", { count: repairedUsage });
@@ -2442,7 +2460,12 @@ export class SessionManager {
 		this.#appendLogicalEntry(entry);
 		const batch = this.#atomicEntryBatch;
 		if (batch?.collecting) batch.entryIds.add(entry.id);
-		if (batch && !batch.collecting && entry.type !== "model_request_metadata" && entry.type !== "model_request_registry") {
+		if (
+			batch &&
+			!batch.collecting &&
+			entry.type !== "model_request_metadata" &&
+			entry.type !== "model_request_registry"
+		) {
 			batch.externalLeafChanged = true;
 			batch.externalLeafId = entry.id;
 		}
@@ -2450,8 +2473,13 @@ export class SessionManager {
 		const stagedRevision = cell?.getProjectionRevision();
 		const stagedSessionId = cell?.getSessionId();
 		this.#appendToSessionFile(entry);
-		if (cell && fileJournalCells.get(this) === cell && cell.getSessionId() === stagedSessionId &&
-			stagedRevision !== undefined && cell.getProjectionRevision() === stagedRevision + 1) {
+		if (
+			cell &&
+			fileJournalCells.get(this) === cell &&
+			cell.getSessionId() === stagedSessionId &&
+			stagedRevision !== undefined &&
+			cell.getProjectionRevision() === stagedRevision + 1
+		) {
 			const size = cell.getExpectedDiskSize();
 			if (size !== this.#projectionExpectedDiskSize) this.#expectedDiskSize = size;
 			this.#projectionExpectedDiskSize = size;
@@ -2477,9 +2505,12 @@ export class SessionManager {
 			}
 		}
 		const currentLeaf = this.#index.leafId();
-		const externalLeaf = fileJournalCells.has(this) && currentLeaf !== batch.stagedLeafId
-			? currentLeaf
-			: batch.externalLeafChanged ? batch.externalLeafId : batch.preBatchLeafId;
+		const externalLeaf =
+			fileJournalCells.has(this) && currentLeaf !== batch.stagedLeafId
+				? currentLeaf
+				: batch.externalLeafChanged
+					? batch.externalLeafId
+					: batch.preBatchLeafId;
 		const restoredLeaf = retainedAncestor(externalLeaf);
 		this.#applyEntries(
 			this.#header,
@@ -2608,7 +2639,10 @@ export class SessionManager {
 		this.#refuseManagedJournalMutation();
 		const persist = options?.persist ?? this.#persist;
 		const clone = new SessionManager(
-			this.#cwd, this.#sessionDir, persist, this.#storage,
+			this.#cwd,
+			this.#sessionDir,
+			persist,
+			this.#storage,
 			persist ? fileJournalCells.get(this) : undefined,
 		);
 		clone.#suppressBreadcrumb = true;
@@ -2627,21 +2661,36 @@ export class SessionManager {
 		if (snapshot.sessionId !== this.#sessionId || snapshot.sessionFile !== this.#sessionFile) {
 			this.#revokeJournalSession();
 		}
-		if (snapshot.header.modelRequestJournal || snapshot.header.modelRequestRegistry ||
-			snapshot.entries.some(entry => entry.type === "model_request_metadata" || entry.type === "model_request_registry")) {
+		if (
+			snapshot.header.modelRequestJournal ||
+			snapshot.header.modelRequestRegistry ||
+			snapshot.entries.some(
+				entry => entry.type === "model_request_metadata" || entry.type === "model_request_registry",
+			)
+		) {
 			const captured = this.#modelRequestJournalCaptures.get(snapshot);
-			if (!captured || captured.sessionId !== snapshot.sessionId || captured.sessionFile !== snapshot.sessionFile ||
-				captured.cwd !== snapshot.cwd || captured.sessionDir !== snapshot.sessionDir) {
+			if (
+				!captured ||
+				captured.sessionId !== snapshot.sessionId ||
+				captured.sessionFile !== snapshot.sessionFile ||
+				captured.cwd !== snapshot.cwd ||
+				captured.sessionDir !== snapshot.sessionDir
+			) {
 				throw new Error("Managed model request journal snapshots cannot be imported, copied, or relocated.");
 			}
 		}
 		if (snapshot.sessionId === this.#sessionId) {
 			this.#assertModelRequestJournalHistory(snapshot.header, snapshot.entries);
-		} else if (snapshot.header.modelRequestJournal || snapshot.entries.some(entry => entry.type === "model_request_metadata")) {
+		} else if (
+			snapshot.header.modelRequestJournal ||
+			snapshot.entries.some(entry => entry.type === "model_request_metadata")
+		) {
 			validateModelRequestJournal([snapshot.header, ...snapshot.entries]);
 		}
-		if (fileJournalCells.has(this) &&
-			(snapshot.sessionId !== this.#sessionId || snapshot.sessionFile !== this.#sessionFile)) {
+		if (
+			fileJournalCells.has(this) &&
+			(snapshot.sessionId !== this.#sessionId || snapshot.sessionFile !== this.#sessionFile)
+		) {
 			if (snapshot.sessionFile === undefined) journalUnavailable();
 			const cell = openFileJournalCell({
 				cwd: snapshot.cwd,
@@ -2736,8 +2785,11 @@ export class SessionManager {
 
 		const resolvedSessionFile = path.resolve(sessionFile);
 		const loaded = loadedSession ?? (await loadSessionFile(resolvedSessionFile, this.#storage));
-		if (loaded.entries.some(entry => entry.type === "model_request_metadata" ||
-			(entry.type === "session" && entry.modelRequestJournal))) {
+		if (
+			loaded.entries.some(
+				entry => entry.type === "model_request_metadata" || (entry.type === "session" && entry.modelRequestJournal),
+			)
+		) {
 			validateModelRequestJournal(loaded.entries, {
 				malformedRecords: loaded.malformedRecords,
 				invalidHeader: loaded.invalidHeader,
@@ -2754,7 +2806,6 @@ export class SessionManager {
 				`Cannot resume session "${resolvedSessionFile}": the session header is missing or malformed. The file was not modified.`,
 			);
 		}
-
 
 		const { entries: fileEntries, titleSlot } = loaded;
 		if (fileEntries.length === 0) {
@@ -2774,14 +2825,15 @@ export class SessionManager {
 		}
 		if (fileJournalCells.has(this)) {
 			const cell = openFileJournalCell({
-				cwd: this.#cwd, sessionDir: path.dirname(resolvedSessionFile), sessionFile: resolvedSessionFile,
+				cwd: this.#cwd,
+				sessionDir: path.dirname(resolvedSessionFile),
+				sessionFile: resolvedSessionFile,
 			});
 			this.#adoptFilePrincipal(cell);
 		} else {
 			this.#sessionFile = resolvedSessionFile;
 		}
 		this.#rememberBreadcrumb(this.#cwd, resolvedSessionFile);
-
 
 		const cell = fileJournalCells.get(this);
 		const persistedHeader = fileEntries[0];
@@ -2790,7 +2842,7 @@ export class SessionManager {
 			: migrateToCurrentVersion(fileEntries);
 		if (!cell) await resolveBlobRefsInEntries(fileEntries, this.#blobs);
 		// A File cell already owns the canonical load/migration and any live draft.
-		const header = cell ? cell.getHeader() : fileEntries[0] as SessionHeader;
+		const header = cell ? cell.getHeader() : (fileEntries[0] as SessionHeader);
 
 		// Adopt the loaded session's working directory only when it is verifiably
 		// accessible. Sessions live in a dir keyed by their cwd, so resuming a
@@ -2854,12 +2906,19 @@ export class SessionManager {
 		if (this.#sessionFile && path.resolve(sessionPath) === path.resolve(this.#sessionFile)) {
 			this.#refuseManagedJournalMutation();
 		}
-		const storage = fileJournalCells.has(this) &&
-			path.resolve(sessionPath) !== path.resolve(this.#sessionFile ?? "")
-			? new FileSessionStorage() : this.#storage;
+		const storage =
+			fileJournalCells.has(this) && path.resolve(sessionPath) !== path.resolve(this.#sessionFile ?? "")
+				? new FileSessionStorage()
+				: this.#storage;
 		const onDisk = await loadSessionFile(sessionPath, storage);
-		if (onDisk.entries.some(entry => entry.type === "model_request_metadata" || entry.type === "model_request_registry" ||
-			(entry.type === "session" && (entry.modelRequestJournal || entry.modelRequestRegistry)))) {
+		if (
+			onDisk.entries.some(
+				entry =>
+					entry.type === "model_request_metadata" ||
+					entry.type === "model_request_registry" ||
+					(entry.type === "session" && (entry.modelRequestJournal || entry.modelRequestRegistry)),
+			)
+		) {
 			throw new Error("Managed model request journal history cannot be deleted.");
 		}
 		await this.#drainAndCloseWriter();
@@ -2899,18 +2958,23 @@ export class SessionManager {
 			this.#sessionFile = path.join(this.#sessionDir, `${fileSafeTimestamp(timestamp)}_${this.#sessionId}.jsonl`);
 		}
 		this.#expectedDiskSize = null;
-		this.#applyEntries({
-			type: "session",
-			version: CURRENT_SESSION_VERSION,
-			id: this.#sessionId,
-			title: previousHeader.title,
-			titleSource: previousHeader.titleSource,
-			timestamp,
-			cwd: this.#cwd,
-			additionalDirectories: this.#additionalDirectories.length > 0 ? [...this.#additionalDirectories] : undefined,
-			parentSession: parentSessionId,
-			providerPromptCacheKey: previousHeader.providerPromptCacheKey ?? parentSessionId,
-		}, previousEntries, previousLeaf);
+		this.#applyEntries(
+			{
+				type: "session",
+				version: CURRENT_SESSION_VERSION,
+				id: this.#sessionId,
+				title: previousHeader.title,
+				titleSource: previousHeader.titleSource,
+				timestamp,
+				cwd: this.#cwd,
+				additionalDirectories:
+					this.#additionalDirectories.length > 0 ? [...this.#additionalDirectories] : undefined,
+				parentSession: parentSessionId,
+				providerPromptCacheKey: previousHeader.providerPromptCacheKey ?? parentSessionId,
+			},
+			previousEntries,
+			previousLeaf,
+		);
 		this.#sessionName = this.#header.title;
 		this.#titleSource = this.#header.titleSource;
 		this.#titleUpdatedAt = timestamp;
@@ -3077,7 +3141,9 @@ export class SessionManager {
 						try {
 							if (cell) {
 								await cell.moveTo(this.#cwd, path.dirname(oldSessionFile));
-								this.#expectedDiskSize = cell.existsSync(oldSessionFile) ? cell.statSync(oldSessionFile).size : null;
+								this.#expectedDiskSize = cell.existsSync(oldSessionFile)
+									? cell.statSync(oldSessionFile).size
+									: null;
 							} else {
 								try {
 									await fs.promises.rename(newSessionFile, oldSessionFile);
@@ -3097,9 +3163,11 @@ export class SessionManager {
 				}
 
 				if (sessionFileExisted && sessionPathChanged) {
-					this.#updateHeader({ previousSessionFiles: [
-						...new Set([...(this.#header.previousSessionFiles ?? []), path.resolve(oldSessionFile)]),
-					] });
+					this.#updateHeader({
+						previousSessionFiles: [
+							...new Set([...(this.#header.previousSessionFiles ?? []), path.resolve(oldSessionFile)]),
+						],
+					});
 				}
 
 				this.#sessionFile = newSessionFile;
@@ -3127,8 +3195,9 @@ export class SessionManager {
 				// Re-filter additional roots: the new cwd may have been an
 				// additional root, or it may now contain one.
 				this.#additionalDirectories = this.#additionalDirectories.filter(d => d !== resolvedCwd);
-				this.#updateHeader({ additionalDirectories:
-					this.#additionalDirectories.length > 0 ? this.#additionalDirectories : undefined });
+				this.#updateHeader({
+					additionalDirectories: this.#additionalDirectories.length > 0 ? this.#additionalDirectories : undefined,
+				});
 			}
 
 			// Rewrite at the new location when the file already existed (update cwd) or
@@ -3169,12 +3238,17 @@ export class SessionManager {
 		manager.#suppressBreadcrumb = options?.suppressBreadcrumb === true;
 		manager.#resetToNewSession();
 		manager.#additionalDirectories = [...this.#additionalDirectories];
-		manager.#applyEntries({
-			...manager.#header,
-			title: this.#sessionName,
-			titleSource: this.#titleSource,
-			additionalDirectories: manager.#additionalDirectories.length > 0 ? [...manager.#additionalDirectories] : undefined,
-		}, structuredClone(this.#entries), this.#index.leafId());
+		manager.#applyEntries(
+			{
+				...manager.#header,
+				title: this.#sessionName,
+				titleSource: this.#titleSource,
+				additionalDirectories:
+					manager.#additionalDirectories.length > 0 ? [...manager.#additionalDirectories] : undefined,
+			},
+			structuredClone(this.#entries),
+			this.#index.leafId(),
+		);
 		manager.#titleUpdatedAt = this.#titleUpdatedAt;
 		manager.#forceFileCreation = true;
 		await manager.#rewriteAtomically();
@@ -3430,8 +3504,13 @@ export class SessionManager {
 		this.#revokeJournalSession();
 		this.#released = true;
 		const cell = fileJournalCells.get(this);
-		if (cell && ((filePrincipalReferences.get(cell) ?? 0) <= (this.#filePrincipalRetained ? 1 : 0) ||
-			cell.getHeader().modelRequestJournal || cell.getHeader().modelRequestRegistry)) cell.seal();
+		if (
+			cell &&
+			((filePrincipalReferences.get(cell) ?? 0) <= (this.#filePrincipalRetained ? 1 : 0) ||
+				cell.getHeader().modelRequestJournal ||
+				cell.getHeader().modelRequestRegistry)
+		)
+			cell.seal();
 		this.#diskEpoch++;
 	}
 
@@ -3454,8 +3533,13 @@ export class SessionManager {
 	releaseRetainedEntries(): void {
 		this.seal();
 		const cell = fileJournalCells.get(this);
-		if (cell && ((filePrincipalReferences.get(cell) ?? 0) <= (this.#filePrincipalRetained ? 1 : 0) ||
-			cell.getHeader().modelRequestJournal || cell.getHeader().modelRequestRegistry)) cell.releaseRetainedEntries();
+		if (
+			cell &&
+			((filePrincipalReferences.get(cell) ?? 0) <= (this.#filePrincipalRetained ? 1 : 0) ||
+				cell.getHeader().modelRequestJournal ||
+				cell.getHeader().modelRequestRegistry)
+		)
+			cell.releaseRetainedEntries();
 		this.#nonFileEntries = [];
 		this.#projectionEntries = [];
 		this.#entryIndex.clear();
@@ -3863,13 +3947,16 @@ export class SessionManager {
 	 */
 	snapshotForReplication(): { header: SessionHeader; entries: readonly SessionEntry[] } {
 		const canonical = fileJournalCells.get(this)?.getHeader() ?? this.#header;
-		if (!canonical.modelRequestJournal && !canonical.modelRequestRegistry) return { header: canonical, entries: this.#entries };
+		if (!canonical.modelRequestJournal && !canonical.modelRequestRegistry)
+			return { header: canonical, entries: this.#entries };
 		const header = { ...canonical };
 		delete header.modelRequestJournal;
 		delete header.modelRequestRegistry;
 		return {
 			header,
-			entries: this.#entries.filter(entry => entry.type !== "model_request_metadata" && entry.type !== "model_request_registry"),
+			entries: this.#entries.filter(
+				entry => entry.type !== "model_request_metadata" && entry.type !== "model_request_registry",
+			),
 		};
 	}
 
@@ -4336,7 +4423,11 @@ export class SessionManager {
 				child.parentId = leafId;
 				leafId = child.id;
 			}
-			this.#applyEntries(this.#header, this.#entries.filter(candidate => candidate.id !== entryId), leafId);
+			this.#applyEntries(
+				this.#header,
+				this.#entries.filter(candidate => candidate.id !== entryId),
+				leafId,
+			);
 		}
 		this.branchWithSummary(leafId, "", {
 			kind: DISCARDED_ENTRY_BRANCH_MARKER,
@@ -4396,8 +4487,8 @@ export class SessionManager {
 		const timestamp = cell?.getHeader().timestamp ?? nowIso();
 		const newSessionId = cell?.getSessionId() ?? mintSessionId();
 		this.#reconcileSessionDirForFallback();
-		const newSessionFile = cell?.getSessionFile() ??
-			path.join(this.#sessionDir, `${fileSafeTimestamp(timestamp)}_${newSessionId}.jsonl`);
+		const newSessionFile =
+			cell?.getSessionFile() ?? path.join(this.#sessionDir, `${fileSafeTimestamp(timestamp)}_${newSessionId}.jsonl`);
 		const header: SessionHeader = {
 			type: "session",
 			version: CURRENT_SESSION_VERSION,
@@ -4485,7 +4576,9 @@ export class SessionManager {
 			const cell = openFileJournalCell({ cwd, sessionDir });
 			cell.flushSync();
 			cell.seal();
-			void cell.close().catch(error => logger.warn("Failed to close empty session", { error: toError(error).message }));
+			void cell
+				.close()
+				.catch(error => logger.warn("Failed to close empty session", { error: toError(error).message }));
 			return cell.getSessionFile();
 		}
 		const id = mintSessionId();
@@ -4541,8 +4634,11 @@ export class SessionManager {
 		await resolveBlobRefsInEntries(sourceEntries, manager.#blobs);
 
 		const sourceHeader = sourceEntries.find(entry => entry.type === "session") as SessionHeader | undefined;
-		if (sourceHeader?.modelRequestJournal || sourceHeader?.modelRequestRegistry ||
-			sourceEntries.some(entry => entry.type === "model_request_metadata" || entry.type === "model_request_registry")) {
+		if (
+			sourceHeader?.modelRequestJournal ||
+			sourceHeader?.modelRequestRegistry ||
+			sourceEntries.some(entry => entry.type === "model_request_metadata" || entry.type === "model_request_registry")
+		) {
 			throw new Error("Managed model request journals cannot be forked or imported.");
 		}
 		const history = sourceEntries.filter(entry => entry.type !== "session") as SessionEntry[];
@@ -4556,12 +4652,16 @@ export class SessionManager {
 			options?.sessionFile,
 		);
 		manager.#additionalDirectories = (sourceHeader?.additionalDirectories ?? []).filter(d => d !== path.resolve(cwd));
-		manager.#applyEntries({
-			...manager.#header,
-			title: sourceHeader?.title,
-			titleSource: sourceHeader?.titleSource,
-			additionalDirectories: manager.#additionalDirectories.length > 0 ? manager.#additionalDirectories : undefined,
-		}, history);
+		manager.#applyEntries(
+			{
+				...manager.#header,
+				title: sourceHeader?.title,
+				titleSource: sourceHeader?.titleSource,
+				additionalDirectories:
+					manager.#additionalDirectories.length > 0 ? manager.#additionalDirectories : undefined,
+			},
+			history,
+		);
 		manager.#titleUpdatedAt = nowIso();
 		manager.#hasTitleSlot = true;
 		manager.sanitizeLoadedOpenAIResponsesReplayMetadata();

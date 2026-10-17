@@ -1,10 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
-import {
-	type AssistantMessageEvent,
-	completeSimple,
-	type Context,
-	streamSimple,
-} from "@oh-my-pi/pi-ai";
+import { type AssistantMessageEvent, completeSimple, type Context, streamSimple } from "@oh-my-pi/pi-ai";
 import type { AssistantMessage, Usage, UserMessage } from "@oh-my-pi/pi-utils/model-data";
 import { unregisterCustomApis } from "@oh-my-pi/pi-ai/api-registry";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";

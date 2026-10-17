@@ -38,7 +38,10 @@ describe("legacy createAgentSession model-request root", () => {
 		const parent = hostExecution("legacy-host-session");
 		await runWithModelRequestExecution(parent, () => legacyCreateAgentSession({}));
 
-		expect(sdkCall.options()?.modelRequestRoot).toMatchObject({ kind: "child", rootSessionId: "legacy-host-session" });
+		expect(sdkCall.options()?.modelRequestRoot).toMatchObject({
+			kind: "child",
+			rootSessionId: "legacy-host-session",
+		});
 		expect(sdkCall.options()?.modelRequestRoot?.parentExecution).toBe(parent);
 		expect(Object.isFrozen(sdkCall.options()?.modelRequestRoot)).toBe(true);
 	});

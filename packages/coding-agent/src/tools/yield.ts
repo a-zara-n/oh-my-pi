@@ -3,12 +3,7 @@
  *
  * Subagents can call this tool incrementally or terminally depending on `type`.
  */
-import type {
-	AgentTool,
-	AgentToolContext,
-	AgentToolResult,
-	AgentToolUpdateCallback,
-} from "@oh-my-pi/pi-agent-core";
+import type { AgentTool, AgentToolContext, AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
 import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import type { TSchema } from "@oh-my-pi/pi-ai/types";
 import {

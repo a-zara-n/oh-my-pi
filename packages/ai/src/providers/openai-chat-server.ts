@@ -7,12 +7,7 @@ import { resolvePromptCacheKey } from "../auth-gateway/http";
  */
 import type { AuthGatewayStreamControl, AuthGatewayParsedRequest as ParsedRequest } from "../auth-gateway/types";
 import * as AIError from "../error";
-import type {
-	AssistantMessageEventStream,
-	Context,
-	Tool,
-	TSchema,
-} from "../types";
+import type { AssistantMessageEventStream, Context, Tool, TSchema } from "../types";
 import type {
 	AssistantMessage,
 	ImageContent,

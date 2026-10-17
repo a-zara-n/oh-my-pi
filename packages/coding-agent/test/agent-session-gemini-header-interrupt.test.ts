@@ -1,11 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
-import type {
-	Context,
-	Model,
-	SimpleStreamOptions,
-} from "@oh-my-pi/pi-ai";
+import type { Context, Model, SimpleStreamOptions } from "@oh-my-pi/pi-ai";
 import type { Api, AssistantMessage, Message, ThinkingContent } from "@oh-my-pi/pi-utils/model-data";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";

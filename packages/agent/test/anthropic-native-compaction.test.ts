@@ -19,11 +19,7 @@ import type { SessionEntry } from "@oh-my-pi/pi-utils/compaction-entries";
 import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import * as ai from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
-import type {
-	Context,
-	Model,
-	SimpleStreamOptions,
-} from "@oh-my-pi/pi-ai/types";
+import type { Context, Model, SimpleStreamOptions } from "@oh-my-pi/pi-ai/types";
 import type { AnthropicRequestControls, AssistantMessage, Message, Usage } from "@oh-my-pi/pi-utils/model-data";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { Effort } from "@oh-my-pi/pi-catalog/effort";

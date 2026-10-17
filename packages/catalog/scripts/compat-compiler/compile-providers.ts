@@ -22,13 +22,7 @@ import type {
 	CompiledSeedModel,
 	SeedBundlePolicy,
 } from "../../src/compat/types";
-import {
-	KIND_API_KINDS,
-	RUNNER_APIS,
-	type KindApiKind,
-	runnerApiKind,
-	type TokenCost,
-} from "../../src/types";
+import { KIND_API_KINDS, RUNNER_APIS, type KindApiKind, runnerApiKind, type TokenCost } from "../../src/types";
 import type { Api, KnownApi } from "@oh-my-pi/pi-utils/model-data";
 import { axisFor, collectAxis, type RuleAxes } from "./compile-axes";
 import {

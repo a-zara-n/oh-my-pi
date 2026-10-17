@@ -16,10 +16,7 @@ import { formatDuration } from "@oh-my-pi/pi-utils";
 import { INTENT_FIELD } from "@oh-my-pi/pi-wire";
 import { YAML } from "bun";
 import { canonicalizeMessage } from "@oh-my-pi/pi-tui/chat/thinking-display";
-import {
-	bashExecutionToText,
-	pythonExecutionToText,
-} from "./messages";
+import { bashExecutionToText, pythonExecutionToText } from "./messages";
 import type {
 	BashExecutionMessage,
 	BranchSummaryMessage,

@@ -216,9 +216,10 @@ function checkpointAgentTool(toolSession: ToolSession): AgentTool {
 		...tool,
 		intent(args) {
 			const value: unknown = args;
-			const goal = value && typeof value === "object" && "goal" in value && typeof value.goal === "string"
-				? value.goal
-				: undefined;
+			const goal =
+				value && typeof value === "object" && "goal" in value && typeof value.goal === "string"
+					? value.goal
+					: undefined;
 			return tool.intent({ goal });
 		},
 		execute(toolCallId, params, signal, onUpdate, context) {
@@ -318,12 +319,14 @@ describe("AgentSession checkpoint rewind branch context", () => {
 				// Hot appends retain caller identity in the facade cache. A real
 				// rewrite reloads the File principal's cloned snapshot before rewind.
 				await session.sessionManager.rewriteEntries();
-				const entry = session.sessionManager.getEntries().find(
-					entry =>
-						entry.type === "message" &&
-						entry.message.role === "toolResult" &&
-						entry.message.toolCallId === "file_checkpoint",
-				);
+				const entry = session.sessionManager
+					.getEntries()
+					.find(
+						entry =>
+							entry.type === "message" &&
+							entry.message.role === "toolResult" &&
+							entry.message.toolCallId === "file_checkpoint",
+					);
 				persistedCheckpointId = entry?.id;
 				checkpointResultWasCloned =
 					entry?.type === "message" &&

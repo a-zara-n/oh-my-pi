@@ -81,10 +81,7 @@ import {
 	sanitizeOpenAIResponsesHistoryItemsForReplay,
 	stripUnpairedOpenAIResponsesComputerReasoningIdsForReplay,
 } from "../utils";
-import {
-	kStreamingArgumentsDone,
-	kStreamingLastParseLen,
-} from "../utils/block-symbols";
+import { kStreamingArgumentsDone, kStreamingLastParseLen } from "../utils/block-symbols";
 import { hasVisibleAssistantContent } from "../utils/empty-completion-retry";
 import type { AssistantMessageEventStream } from "../utils/event-stream";
 import {

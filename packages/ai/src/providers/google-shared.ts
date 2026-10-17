@@ -8,13 +8,7 @@ import { readSseJson, type SseEventObserver } from "@oh-my-pi/pi-utils";
 import { renderDemotedThinking } from "../dialect/demotion";
 import { ThinkingFenceStripper } from "../dialect/thinking-fence-strip";
 import * as AIError from "../error";
-import type {
-	Context,
-	FetchImpl,
-	Model,
-	StreamOptions,
-	Tool,
-} from "../types";
+import type { Context, FetchImpl, Model, StreamOptions, Tool } from "../types";
 import type {
 	Api,
 	AssistantMessage,

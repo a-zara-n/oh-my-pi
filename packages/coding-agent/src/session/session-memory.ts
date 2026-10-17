@@ -286,7 +286,9 @@ export class SessionMemory {
 		const mnemopi = this.#host.takeMnemopiSessionState();
 		if (mnemopi) {
 			try {
-				await this.#inMemoryContext(() => mnemopi.dispose({ consolidate: consolidateMnemopi, retain: retainMnemopi }));
+				await this.#inMemoryContext(() =>
+					mnemopi.dispose({ consolidate: consolidateMnemopi, retain: retainMnemopi }),
+				);
 			} catch (error) {
 				logger.warn("Memory lifecycle: Mnemopi dispose failed", { error: String(error) });
 			}

@@ -28,13 +28,7 @@ import {
 	traceGitLabDuoWorkflow,
 } from "@oh-my-pi/pi-ai/providers/gitlab-duo-workflow";
 import { configureCredentialRedaction } from "@oh-my-pi/pi-ai/providers/transform-messages";
-import type {
-	Context,
-	FetchImpl,
-	Model,
-	ProviderSessionState,
-	Tool,
-} from "@oh-my-pi/pi-ai/types";
+import type { Context, FetchImpl, Model, ProviderSessionState, Tool } from "@oh-my-pi/pi-ai/types";
 import type { AssistantMessage, Message, ToolResultMessage } from "@oh-my-pi/pi-utils/model-data";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { validateToolArguments } from "@oh-my-pi/pi-ai/utils/validation";

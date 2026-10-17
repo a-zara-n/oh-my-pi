@@ -1,9 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { encodeResponse, encodeStream, parseRequest } from "@oh-my-pi/pi-ai/providers/openai-chat-server";
-import type {
-	AssistantMessageEvent,
-	AssistantMessageEventStream,
-} from "@oh-my-pi/pi-ai/types";
+import type { AssistantMessageEvent, AssistantMessageEventStream } from "@oh-my-pi/pi-ai/types";
 import type { AssistantMessage, ToolCall } from "@oh-my-pi/pi-utils/model-data";
 
 function makeEventStream(events: AssistantMessageEvent[], final: AssistantMessage): AssistantMessageEventStream {

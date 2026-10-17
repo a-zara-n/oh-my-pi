@@ -3,10 +3,7 @@ import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { logger } from "@oh-my-pi/pi-utils";
 import { captureRequestHeaders, resolvePromptCacheKey } from "../auth-gateway/http";
 import * as AIError from "../error";
-import type {
-	AssistantMessageEventStream,
-	Tool,
-} from "../types";
+import type { AssistantMessageEventStream, Tool } from "../types";
 import type {
 	AnthropicMessagePayload,
 	AnthropicServerToolContent,

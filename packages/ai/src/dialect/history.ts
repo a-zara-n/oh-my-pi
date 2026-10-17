@@ -1,6 +1,4 @@
-import type {
-	Context,
-} from "../types";
+import type { Context } from "../types";
 import type {
 	AssistantMessage,
 	ImageContent,

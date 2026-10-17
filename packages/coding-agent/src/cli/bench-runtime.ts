@@ -8,13 +8,7 @@
  * signature tests substitute for a synthetic stream.
  */
 import type { ResolvedThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import type {
-	ApiKeyResolver,
-	AssistantMessageEventStream,
-	Context,
-	Model,
-	SimpleStreamOptions,
-} from "@oh-my-pi/pi-ai";
+import type { ApiKeyResolver, AssistantMessageEventStream, Context, Model, SimpleStreamOptions } from "@oh-my-pi/pi-ai";
 import type { Api } from "@oh-my-pi/pi-utils/model-data";
 import { buildModelProviderPriorityRank } from "@oh-my-pi/pi-catalog/identity";
 import { getProjectDir, logger } from "@oh-my-pi/pi-utils";

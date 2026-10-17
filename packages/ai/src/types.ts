@@ -126,7 +126,6 @@ export interface TokenTaskBudget {
 	remaining?: number;
 }
 
-
 export type NativeToolMarker = { type: "computer" };
 
 export type ToolChoice =
@@ -141,7 +140,6 @@ export type ToolChoice =
 
 // Base options all providers share
 export type CacheRetention = "none" | "short" | "long";
-
 
 type ServiceTierModel = Pick<Model, "provider" | "api" | "identity"> & Partial<Pick<Model, "serviceTiers">>;
 // The service-tier matrix below intentionally stays in TypeScript rather than
@@ -836,7 +834,6 @@ export type StreamFunction<TApi extends Api> = (
 	options: OptionsForApi<TApi>,
 ) => AssistantMessageEventStream;
 
-
 export type CursorExecHandlerResult<T> = { result: T; toolResult?: ToolResultMessage } | T | ToolResultMessage;
 
 /**
@@ -1144,4 +1141,3 @@ export type AssistantMessageEvent =
 			reason: Extract<StopReason, "aborted" | "error">;
 			error: AssistantMessage;
 	  };
-

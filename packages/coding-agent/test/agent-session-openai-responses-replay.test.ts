@@ -2,9 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "bun:te
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type {
-	ProviderSessionState,
-} from "@oh-my-pi/pi-ai/types";
+import type { ProviderSessionState } from "@oh-my-pi/pi-ai/types";
 import type {
 	AssistantMessage,
 	Message,

@@ -133,12 +133,22 @@ describe("gate registration latch", () => {
 	});
 
 	test("accepts the largest timeout a platform timer honors", () => {
-		expect(() => newRuntime().registerGate("owner", recordingGate(PASS).gate, { authorizeTimeoutMs: 2_147_483_647 })).not.toThrow();
+		expect(() =>
+			newRuntime().registerGate("owner", recordingGate(PASS).gate, { authorizeTimeoutMs: 2_147_483_647 }),
+		).not.toThrow();
 	});
 
 	test("rejects a timeout that is not a positive integer a platform timer can honor, instead of clamping or inventing a default", () => {
 		const gate = recordingGate(PASS).gate;
-		for (const authorizeTimeoutMs of [0, -5, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 2_147_483_648, Number.MAX_SAFE_INTEGER]) {
+		for (const authorizeTimeoutMs of [
+			0,
+			-5,
+			1.5,
+			Number.NaN,
+			Number.POSITIVE_INFINITY,
+			2_147_483_648,
+			Number.MAX_SAFE_INTEGER,
+		]) {
 			expect(() => newRuntime().registerGate("owner", gate, { authorizeTimeoutMs })).toThrow(RangeError);
 		}
 	});
@@ -149,7 +159,11 @@ describe("authorize: gate verdicts reach the caller before any I/O", () => {
 		const runtime = newRuntime();
 		runtime.registerGate(
 			"owner",
-			recordingGate(() => ({ type: "deny", code: "over-limit", message: "429 usage limit reached, rotate credentials" })).gate,
+			recordingGate(() => ({
+				type: "deny",
+				code: "over-limit",
+				message: "429 usage limit reached, rotate credentials",
+			})).gate,
 			undefined,
 		);
 		const wire: string[] = [];
@@ -185,7 +199,11 @@ describe("authorize: gate verdicts reach the caller before any I/O", () => {
 	test("a gate that never answers is a gate-error once the registered timeout passes, with nothing sent", async () => {
 		vi.useFakeTimers();
 		const runtime = newRuntime();
-		runtime.registerGate("owner", { authorize: () => new Promise<ModelRequestDecision>(() => {}) }, { authorizeTimeoutMs: 20 });
+		runtime.registerGate(
+			"owner",
+			{ authorize: () => new Promise<ModelRequestDecision>(() => {}) },
+			{ authorizeTimeoutMs: 20 },
+		);
 		const wire: string[] = [];
 
 		const outcome = denial(sendThroughFakeTransport(runtime, wire));

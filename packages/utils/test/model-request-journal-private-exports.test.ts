@@ -8,21 +8,34 @@ const packageName = "@oh-my-pi/pi-utils";
 
 test("public composition resolves and the actual private lifetime remains available to relative consumers", () => {
 	const packageRoot = path.resolve(import.meta.dir, "..");
-	expect(realpathSync(Bun.resolveSync(`${packageName}/model-request-journal-composition`, import.meta.dir)))
-		.toBe(realpathSync(path.join(packageRoot, "src/model-request-journal-composition.ts")));
-	expect(realpathSync(Bun.resolveSync(`../internal/${moduleName}`, import.meta.dir)))
-		.toBe(realpathSync(path.join(packageRoot, "internal", `${moduleName}.ts`)));
+	expect(realpathSync(Bun.resolveSync(`${packageName}/model-request-journal-composition`, import.meta.dir))).toBe(
+		realpathSync(path.join(packageRoot, "src/model-request-journal-composition.ts")),
+	);
+	expect(realpathSync(Bun.resolveSync(`../internal/${moduleName}`, import.meta.dir))).toBe(
+		realpathSync(path.join(packageRoot, "internal", `${moduleName}.ts`)),
+	);
 	expect(Object.keys(lifetime).sort()).toEqual([
-		"beginClosingBindingLifetime", "finishBindingLifetime", "initializeBindingLifetime",
-		"joinBindingPrincipalDrains", "registerBindingPrincipal",
+		"beginClosingBindingLifetime",
+		"finishBindingLifetime",
+		"initializeBindingLifetime",
+		"joinBindingPrincipalDrains",
+		"registerBindingPrincipal",
 	]);
 	for (const operation of Object.values(lifetime)) expect(typeof operation).toBe("function");
 });
 
 for (const prefix of [
-	"internal/", "%69nternal/", "internal%2f", "internal%5c",
-	"../internal/", "%2e%2e/internal/", ".%2e/internal/", "%2e./internal/",
-	"%2e%2e%2finternal%2f", "%252e%252e/internal/", "internal/%2e%2e/%2e%2e/internal/",
+	"internal/",
+	"%69nternal/",
+	"internal%2f",
+	"internal%5c",
+	"../internal/",
+	"%2e%2e/internal/",
+	".%2e/internal/",
+	"%2e./internal/",
+	"%2e%2e%2finternal%2f",
+	"%252e%252e/internal/",
+	"internal/%2e%2e/%2e%2e/internal/",
 ]) {
 	for (const name of [moduleName, `%6d${moduleName.slice(1)}`]) {
 		for (const extension of ["", ".js", ".ts"]) {

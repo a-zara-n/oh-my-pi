@@ -6,12 +6,7 @@ import * as path from "node:path";
 const nativePreloaded =
 	Object.getOwnPropertyDescriptor(globalThis, Symbol.for("omp.audit.sqlite.required.v1"))?.value === true;
 
-const callers = [
-	"compaction-v2-streaming",
-	"openai-remote-compaction",
-	"generic-remote-compaction",
-	"native-judge",
-];
+const callers = ["compaction-v2-streaming", "openai-remote-compaction", "generic-remote-compaction", "native-judge"];
 
 describe("D37 core caller fetch construction (native authority)", () => {
 	test.skipIf(!nativePreloaded)(

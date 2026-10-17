@@ -964,7 +964,6 @@ export interface AfterToolCallContext {
 	context: AgentContext;
 }
 
-
 /**
  * Agent state containing all configuration and conversation data.
  */

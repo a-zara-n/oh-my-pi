@@ -3,14 +3,16 @@ import { readFile, readdir, writeFile } from "node:fs/promises";
 import * as path from "node:path";
 import type { AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import { TempDir } from "@oh-my-pi/pi-utils";
-import type { ModelRequestJournalDescriptor,
+import type {
+	ModelRequestJournalDescriptor,
 	ModelRequestLifecycleRecord,
 	ModelRequestMetadataEntry,
 	ModelUsageEntry,
 	ModelRequestSourceLinkInput,
 	SessionEntry,
 	SessionHeader,
-	SessionMessageEntry, } from "@oh-my-pi/pi-utils/session-entries";
+	SessionMessageEntry,
+} from "@oh-my-pi/pi-utils/session-entries";
 import { loadModelRequestJournalFromFile } from "../../src/session/session-loader";
 import type { ModelRequestSourceInput } from "@oh-my-pi/pi-utils/session-entries";
 import { SessionManager } from "../../src/session/session-manager";
@@ -28,10 +30,21 @@ const rejectedCanary = "REJECTED_TYPED_APPEND_CANARY";
 
 function assistantMessage(): AssistantMessage {
 	return {
-		role: "assistant", content: [{ type: "text", text: keyCanary }],
-		api: "openai-completions", provider: "openai", model: "gpt-4o-mini", stopReason: "stop", timestamp: 2,
-		usage: { input: 10, output: 2, cacheRead: 0, cacheWrite: 0, totalTokens: 12,
-			cost: { input: 0.01, output: 0.02, cacheRead: 0, cacheWrite: 0, total: 0.03 } },
+		role: "assistant",
+		content: [{ type: "text", text: keyCanary }],
+		api: "openai-completions",
+		provider: "openai",
+		model: "gpt-4o-mini",
+		stopReason: "stop",
+		timestamp: 2,
+		usage: {
+			input: 10,
+			output: 2,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 12,
+			cost: { input: 0.01, output: 0.02, cacheRead: 0, cacheWrite: 0, total: 0.03 },
+		},
 	};
 }
 
@@ -51,40 +64,116 @@ interface JournalFixture {
 
 function fixture(cwd: string): JournalFixture {
 	const descriptor: ModelRequestJournalDescriptor = {
-		schemaVersion: 1, journalId, sessionId: "journal-session",
-		epochs: [{ journalOwnerId, journalEpoch }, { journalOwnerId: nextOwnerId, journalEpoch: nextEpoch }],
+		schemaVersion: 1,
+		journalId,
+		sessionId: "journal-session",
+		epochs: [
+			{ journalOwnerId, journalEpoch },
+			{ journalOwnerId: nextOwnerId, journalEpoch: nextEpoch },
+		],
 	};
-	const header: SessionHeader = { type: "session", version: 3, id: descriptor.sessionId, timestamp, cwd,
-		modelRequestJournal: descriptor };
-	const user: SessionMessageEntry = { type: "message", id: "user0001", parentId: null, timestamp,
-		message: { role: "user", content: promptCanary, timestamp: 1 } };
-	const assistant: SessionMessageEntry = { type: "message", id: "asst0001", parentId: user.id, timestamp,
-		message: assistantMessage() };
-	const usage: ModelUsageEntry = { type: "model_usage", id: "usage001", parentId: user.id, timestamp,
-		purpose: "title", api: "openai-completions", provider: "openai", model: "gpt-4o-mini",
-		usage: assistantMessage().usage, stopReason: "stop" };
+	const header: SessionHeader = {
+		type: "session",
+		version: 3,
+		id: descriptor.sessionId,
+		timestamp,
+		cwd,
+		modelRequestJournal: descriptor,
+	};
+	const user: SessionMessageEntry = {
+		type: "message",
+		id: "user0001",
+		parentId: null,
+		timestamp,
+		message: { role: "user", content: promptCanary, timestamp: 1 },
+	};
+	const assistant: SessionMessageEntry = {
+		type: "message",
+		id: "asst0001",
+		parentId: user.id,
+		timestamp,
+		message: assistantMessage(),
+	};
+	const usage: ModelUsageEntry = {
+		type: "model_usage",
+		id: "usage001",
+		parentId: user.id,
+		timestamp,
+		purpose: "title",
+		api: "openai-completions",
+		provider: "openai",
+		model: "gpt-4o-mini",
+		usage: assistantMessage().usage,
+		stopReason: "stop",
+	};
 	const assistantLink: ModelRequestMetadataEntry = {
-		type: "model_request_metadata", id: "meta0001", parentId: null, timestamp, schemaVersion: 1,
-		journalId, sessionId: header.id, journalOwnerId, journalEpoch, seq: 1,
-		record: { schemaVersion: 1, sourceKind: "assistant", sourceSessionId: header.id, sourceEntryId: assistant.id,
-			resultId: null, provenance: { kind: "non-wire", reason: "cache" } },
+		type: "model_request_metadata",
+		id: "meta0001",
+		parentId: null,
+		timestamp,
+		schemaVersion: 1,
+		journalId,
+		sessionId: header.id,
+		journalOwnerId,
+		journalEpoch,
+		seq: 1,
+		record: {
+			schemaVersion: 1,
+			sourceKind: "assistant",
+			sourceSessionId: header.id,
+			sourceEntryId: assistant.id,
+			resultId: null,
+			provenance: { kind: "non-wire", reason: "cache" },
+		},
 	};
 	const usageLink: ModelRequestMetadataEntry = {
-		...assistantLink, id: "meta0002", seq: 2,
-		record: { schemaVersion: 1, sourceKind: "model_usage", sourceSessionId: header.id, sourceEntryId: usage.id,
-			resultId: null, provenance: { kind: "non-wire", reason: "local" } },
+		...assistantLink,
+		id: "meta0002",
+		seq: 2,
+		record: {
+			schemaVersion: 1,
+			sourceKind: "model_usage",
+			sourceSessionId: header.id,
+			sourceEntryId: usage.id,
+			resultId: null,
+			provenance: { kind: "non-wire", reason: "local" },
+		},
 	};
 	const decision: ModelRequestMetadataEntry = {
-		...assistantLink, id: "meta0003", journalOwnerId: nextOwnerId, journalEpoch: nextEpoch, seq: 1,
-		record: { schemaVersion: 1, event: "decision", requestId: "66666666-6666-4666-8666-666666666666",
-			coreAttemptId: "77777777-7777-4777-8777-777777777777", coreRetryOf: null,
-			rootSessionId: header.id, sessionId: header.id, purpose: "main",
-			modelRef: { provider: "openai", id: "gpt-4o-mini", api: "openai-completions" }, atMs: 0, decision: "pass" },
+		...assistantLink,
+		id: "meta0003",
+		journalOwnerId: nextOwnerId,
+		journalEpoch: nextEpoch,
+		seq: 1,
+		record: {
+			schemaVersion: 1,
+			event: "decision",
+			requestId: "66666666-6666-4666-8666-666666666666",
+			coreAttemptId: "77777777-7777-4777-8777-777777777777",
+			coreRetryOf: null,
+			rootSessionId: header.id,
+			sessionId: header.id,
+			purpose: "main",
+			modelRef: { provider: "openai", id: "gpt-4o-mini", api: "openai-completions" },
+			atMs: 0,
+			decision: "pass",
+		},
 	};
 	const sources: SessionEntry[] = [user, usage, assistant];
 	const metadata = [assistantLink, usageLink, decision];
-	return { header, descriptor, sources, metadata, assistantLink, usageLink, decision, user, assistant, usage,
-		entries: [...sources, ...metadata] };
+	return {
+		header,
+		descriptor,
+		sources,
+		metadata,
+		assistantLink,
+		usageLink,
+		decision,
+		user,
+		assistant,
+		usage,
+		entries: [...sources, ...metadata],
+	};
 }
 
 function jsonl(records: readonly unknown[]): string {
@@ -97,25 +186,46 @@ async function open(file: string, storage = new FileSessionStorage()): Promise<S
 
 function journalInputs(manager: SessionManager) {
 	const record: ModelRequestLifecycleRecord = {
-		schemaVersion: 1, event: "decision", requestId: "66666666-6666-4666-8666-666666666666",
-		coreAttemptId: "77777777-7777-4777-8777-777777777777", coreRetryOf: null,
-		rootSessionId: manager.getSessionId(), sessionId: manager.getSessionId(), purpose: "main",
-		modelRef: { provider: "openai", id: "gpt-4o-mini", api: "openai-completions" }, atMs: 0, decision: "pass",
+		schemaVersion: 1,
+		event: "decision",
+		requestId: "66666666-6666-4666-8666-666666666666",
+		coreAttemptId: "77777777-7777-4777-8777-777777777777",
+		coreRetryOf: null,
+		rootSessionId: manager.getSessionId(),
+		sessionId: manager.getSessionId(),
+		purpose: "main",
+		modelRef: { provider: "openai", id: "gpt-4o-mini", api: "openai-completions" },
+		atMs: 0,
+		decision: "pass",
 	};
 	const message = assistantMessage();
 	message.content = [{ type: "text", text: rejectedCanary }];
 	const assistant: ModelRequestSourceInput = { kind: "assistant", args: [message] };
 	const usage: ModelRequestSourceInput = {
 		kind: "model_usage",
-		args: [{ purpose: "title", api: message.api, provider: message.provider, model: message.model,
-			usage: message.usage, stopReason: message.stopReason },
-			{ sessionId: manager.getSessionId(), parentId: manager.getLeafId() }],
+		args: [
+			{
+				purpose: "title",
+				api: message.api,
+				provider: message.provider,
+				model: message.model,
+				usage: message.usage,
+				stopReason: message.stopReason,
+			},
+			{ sessionId: manager.getSessionId(), parentId: manager.getLeafId() },
+		],
 	};
 	const assistantLink: ModelRequestSourceLinkInput = {
-		schemaVersion: 1, sourceKind: "assistant", resultId: null, provenance: { kind: "non-wire", reason: "cache" },
+		schemaVersion: 1,
+		sourceKind: "assistant",
+		resultId: null,
+		provenance: { kind: "non-wire", reason: "cache" },
 	};
 	const usageLink: ModelRequestSourceLinkInput = {
-		schemaVersion: 1, sourceKind: "model_usage", resultId: null, provenance: { kind: "non-wire", reason: "local" },
+		schemaVersion: 1,
+		sourceKind: "model_usage",
+		resultId: null,
+		provenance: { kind: "non-wire", reason: "local" },
 	};
 	return { record, assistant, usage, assistantLink, usageLink };
 }
@@ -161,9 +271,13 @@ async function withJournalBackend(
 				expect(reader.getEntries()).toEqual(data.entries);
 				expect(reader.getLeafId()).toBe(data.assistant.id);
 				expect((await loadModelRequestJournalFromFile(file)).metadataEntries).toEqual(data.metadata);
-			} finally { await reader.close(); }
+			} finally {
+				await reader.close();
+			}
 		}
-	} finally { await manager.close(); }
+	} finally {
+		await manager.close();
+	}
 }
 
 describe("model-request typed append rejects unissued capabilities", () => {
@@ -173,18 +287,35 @@ describe("model-request typed append rejects unissued capabilities", () => {
 				const input = journalInputs(manager);
 				// Every candidate is unissued. Copying persisted identifiers never creates an owner.
 				const owners: readonly unknown[] = [
-					undefined, null, {}, data.descriptor, structuredClone(data.descriptor),
-					data.descriptor.epochs[0], { ...data.descriptor.epochs[0] },
-					Object.freeze({ schemaVersion: 1, journalId, sessionId: manager.getSessionId(),
-						journalOwnerId, journalEpoch }),
+					undefined,
+					null,
+					{},
+					data.descriptor,
+					structuredClone(data.descriptor),
+					data.descriptor.epochs[0],
+					{ ...data.descriptor.epochs[0] },
+					Object.freeze({
+						schemaVersion: 1,
+						journalId,
+						sessionId: manager.getSessionId(),
+						journalOwnerId,
+						journalEpoch,
+					}),
 				];
 				for (const owner of owners) {
-					await expectRejectedWithoutMutation(manager,
-						() => Reflect.apply(manager.appendModelRequestMetadata, manager, [owner, input.record]));
-					await expectRejectedWithoutMutation(manager,
-						() => Reflect.apply(manager.appendModelRequestSource, manager, [owner, input.assistant, input.assistantLink]));
-					await expectRejectedWithoutMutation(manager,
-						() => Reflect.apply(manager.appendModelRequestSource, manager, [owner, input.usage, input.usageLink]));
+					await expectRejectedWithoutMutation(manager, () =>
+						Reflect.apply(manager.appendModelRequestMetadata, manager, [owner, input.record]),
+					);
+					await expectRejectedWithoutMutation(manager, () =>
+						Reflect.apply(manager.appendModelRequestSource, manager, [
+							owner,
+							input.assistant,
+							input.assistantLink,
+						]),
+					);
+					await expectRejectedWithoutMutation(manager, () =>
+						Reflect.apply(manager.appendModelRequestSource, manager, [owner, input.usage, input.usageLink]),
+					);
 				}
 			});
 		});
@@ -194,7 +325,9 @@ describe("model-request typed append rejects unissued capabilities", () => {
 				const input = journalInputs(manager);
 				const unissuedOwner = { journalId, sessionId: manager.getSessionId(), journalOwnerId, journalEpoch };
 				const records: readonly unknown[] = [
-					null, {}, data.assistantLink,
+					null,
+					{},
+					data.assistantLink,
 					{ ...input.record, body: rejectedCanary },
 					{ ...input.record, headers: { authorization: rejectedCanary } },
 					{ ...input.record, modelRef: { ...input.record.modelRef, baseUrl: rejectedCanary } },
@@ -202,29 +335,40 @@ describe("model-request typed append rejects unissued capabilities", () => {
 					{ ...input.record, sessionId: "foreign-session" },
 				];
 				for (const record of records) {
-					await expectRejectedWithoutMutation(manager,
-						() => Reflect.apply(manager.appendModelRequestMetadata, manager, [unissuedOwner, record]));
+					await expectRejectedWithoutMutation(manager, () =>
+						Reflect.apply(manager.appendModelRequestMetadata, manager, [unissuedOwner, record]),
+					);
 				}
 				const links: readonly unknown[] = [
-					null, {}, data.assistantLink.record,
+					null,
+					{},
+					data.assistantLink.record,
 					{ ...input.assistantLink, body: rejectedCanary },
 					{ ...input.assistantLink, provenance: { kind: "unresolved", error: rejectedCanary } },
 					{ ...input.assistantLink, provenance: { kind: "non-wire", reason: "unknown" } },
 					{ ...input.assistantLink, sourceKind: "model_usage" },
 				];
 				for (const link of links) {
-					await expectRejectedWithoutMutation(manager,
-						() => Reflect.apply(manager.appendModelRequestSource, manager, [unissuedOwner, input.assistant, link]));
+					await expectRejectedWithoutMutation(manager, () =>
+						Reflect.apply(manager.appendModelRequestSource, manager, [unissuedOwner, input.assistant, link]),
+					);
 				}
 				const sources: readonly unknown[] = [
-					null, {}, { kind: "assistant", args: [] },
+					null,
+					{},
+					{ kind: "assistant", args: [] },
 					{ kind: "assistant", args: [{ role: "user", content: rejectedCanary, timestamp: 2 }] },
 					{ kind: "model_usage", args: input.usage.args },
 					{ kind: "unknown", args: [rejectedCanary] },
 				];
 				for (const source of sources) {
-					await expectRejectedWithoutMutation(manager,
-						() => Reflect.apply(manager.appendModelRequestSource, manager, [unissuedOwner, source, input.assistantLink]));
+					await expectRejectedWithoutMutation(manager, () =>
+						Reflect.apply(manager.appendModelRequestSource, manager, [
+							unissuedOwner,
+							source,
+							input.assistantLink,
+						]),
+					);
 				}
 			});
 		});
@@ -246,20 +390,29 @@ describe("model-request typed append rejects unissued capabilities", () => {
 			if (!descriptor) throw new Error("Missing persisted fixture descriptor");
 			const input = journalInputs(manager);
 			const owners: readonly unknown[] = [
-				originalDescriptor, descriptor, descriptor.epochs.at(-1),
-				loaded.descriptor, loaded.descriptor.epochs.at(-1), structuredClone(loaded.descriptor),
+				originalDescriptor,
+				descriptor,
+				descriptor.epochs.at(-1),
+				loaded.descriptor,
+				loaded.descriptor.epochs.at(-1),
+				structuredClone(loaded.descriptor),
 			];
 			for (const owner of owners) {
-				await expectRejectedWithoutMutation(manager,
-					() => Reflect.apply(manager.appendModelRequestMetadata, manager, [owner, input.record]));
-				await expectRejectedWithoutMutation(manager,
-					() => Reflect.apply(manager.appendModelRequestSource, manager, [owner, input.assistant, input.assistantLink]));
-				await expectRejectedWithoutMutation(manager,
-					() => Reflect.apply(manager.appendModelRequestSource, manager, [owner, input.usage, input.usageLink]));
+				await expectRejectedWithoutMutation(manager, () =>
+					Reflect.apply(manager.appendModelRequestMetadata, manager, [owner, input.record]),
+				);
+				await expectRejectedWithoutMutation(manager, () =>
+					Reflect.apply(manager.appendModelRequestSource, manager, [owner, input.assistant, input.assistantLink]),
+				);
+				await expectRejectedWithoutMutation(manager, () =>
+					Reflect.apply(manager.appendModelRequestSource, manager, [owner, input.usage, input.usageLink]),
+				);
 			}
 			expect(await readFile(file, "utf8")).toBe(body);
 			expect((await loadModelRequestJournalFromFile(file)).metadataEntries).toEqual(data.metadata);
-		} finally { await manager.close(); }
+		} finally {
+			await manager.close();
+		}
 	});
 });
 
@@ -294,14 +447,19 @@ describe("model-request journal real File manager", () => {
 			expect(managed.getBranchView()).toEqual(legacy.getBranchView());
 			expect(managed.getTree()).toEqual(legacy.getTree());
 			expect(managed.buildSessionContext()).toEqual(legacy.buildSessionContext());
-			expect(managed.buildSessionContext({ transcript: true })).toEqual(legacy.buildSessionContext({ transcript: true }));
+			expect(managed.buildSessionContext({ transcript: true })).toEqual(
+				legacy.buildSessionContext({ transcript: true }),
+			);
 			expect(managed.getUsageStatistics()).toEqual(legacy.getUsageStatistics());
 			expect(managed.snapshotForReplication()).toEqual({ header: legacyHeader, entries: data.sources });
 			const metadataJson = JSON.stringify([data.descriptor, ...data.metadata]);
 			expect(metadataJson).not.toContain(promptCanary);
 			expect(metadataJson).not.toContain(keyCanary);
 			const validated = await loadModelRequestJournalFromFile(file);
-			expect([...validated.throughSeqByEpoch]).toEqual([[journalEpoch, 2], [nextEpoch, 1]]);
+			expect([...validated.throughSeqByEpoch]).toEqual([
+				[journalEpoch, 2],
+				[nextEpoch, 1],
+			]);
 			expect(await readFile(file, "utf8")).toBe(jsonl([data.header, ...data.entries]));
 		} finally {
 			await Promise.all([managed.close(), legacy.close()]);
@@ -325,7 +483,9 @@ describe("model-request journal real File manager", () => {
 				expect(reader.getHeader()?.modelRequestJournal).toEqual(data.descriptor);
 				expect(reader.getLeafId()).toBe(data.assistant.id);
 				expect((await loadModelRequestJournalFromFile(file)).metadataEntries).toEqual(data.metadata);
-			} finally { await reader.close(); }
+			} finally {
+				await reader.close();
+			}
 			const bytes = await readFile(file, "utf8");
 			const { modelRequestJournal: _descriptor, ...strippedHeader } = snapshot.header;
 			const rejected = [
@@ -335,12 +495,27 @@ describe("model-request journal real File manager", () => {
 				{ ...snapshot, sessionFile: path.join(dir.path(), "other.jsonl") },
 				{ ...snapshot, sessionId: "other-session" },
 				{ ...snapshot, header: strippedHeader },
-				{ ...snapshot, header: { ...snapshot.header, modelRequestJournal: { ...data.descriptor,
-					epochs: [{ journalOwnerId, journalEpoch }] } } },
+				{
+					...snapshot,
+					header: {
+						...snapshot.header,
+						modelRequestJournal: { ...data.descriptor, epochs: [{ journalOwnerId, journalEpoch }] },
+					},
+				},
 				{ ...snapshot, entries: data.sources },
 				{ ...snapshot, entries: data.entries.filter(entry => entry.id !== data.assistant.id) },
-				{ ...snapshot, entries: data.entries.map(entry => entry.id === data.assistant.id ? { ...entry, id: "changed1" } : entry) },
-				{ ...snapshot, entries: data.entries.map(entry => entry.id === data.decision.id ? { ...data.decision, seq: 2 } : entry) },
+				{
+					...snapshot,
+					entries: data.entries.map(entry =>
+						entry.id === data.assistant.id ? { ...entry, id: "changed1" } : entry,
+					),
+				},
+				{
+					...snapshot,
+					entries: data.entries.map(entry =>
+						entry.id === data.decision.id ? { ...data.decision, seq: 2 } : entry,
+					),
+				},
 			];
 			for (const invalid of rejected) {
 				expect(() => manager.restoreState(invalid)).toThrow();
@@ -348,14 +523,34 @@ describe("model-request journal real File manager", () => {
 				expect(await readFile(file, "utf8")).toBe(bytes);
 			}
 			const mutations: ((state: typeof snapshot) => void)[] = [
-				state => { delete state.header.modelRequestJournal; },
-				state => { state.header.modelRequestJournal = { ...data.descriptor, epochs: [{ journalOwnerId, journalEpoch }] }; },
-				state => { state.entries = data.sources; },
-				state => { state.entries = data.entries.filter(entry => entry.id !== data.assistant.id); },
-				state => { state.entries = data.entries.map(entry => entry.id === data.decision.id ? { ...data.decision, seq: 2 } : entry); },
-				state => { state.entries = data.entries.map(entry => entry.id === data.assistant.id ? { ...entry, id: "changed1" } : entry); },
-				state => { state.cwd = path.join(dir.path(), "relocated"); },
-				state => { state.sessionFile = path.join(dir.path(), "other.jsonl"); },
+				state => {
+					delete state.header.modelRequestJournal;
+				},
+				state => {
+					state.header.modelRequestJournal = { ...data.descriptor, epochs: [{ journalOwnerId, journalEpoch }] };
+				},
+				state => {
+					state.entries = data.sources;
+				},
+				state => {
+					state.entries = data.entries.filter(entry => entry.id !== data.assistant.id);
+				},
+				state => {
+					state.entries = data.entries.map(entry =>
+						entry.id === data.decision.id ? { ...data.decision, seq: 2 } : entry,
+					);
+				},
+				state => {
+					state.entries = data.entries.map(entry =>
+						entry.id === data.assistant.id ? { ...entry, id: "changed1" } : entry,
+					);
+				},
+				state => {
+					state.cwd = path.join(dir.path(), "relocated");
+				},
+				state => {
+					state.sessionFile = path.join(dir.path(), "other.jsonl");
+				},
 			];
 			for (const mutate of mutations) {
 				const ownedSnapshot = manager.captureState();
@@ -365,9 +560,14 @@ describe("model-request journal real File manager", () => {
 				expect(await readFile(file, "utf8")).toBe(bytes);
 			}
 			const foreign = await open(file);
-			try { expect(() => foreign.restoreState(snapshot)).toThrow(); }
-			finally { await foreign.close(); }
-		} finally { await manager.close(); }
+			try {
+				expect(() => foreign.restoreState(snapshot)).toThrow();
+			} finally {
+				await foreign.close();
+			}
+		} finally {
+			await manager.close();
+		}
 	});
 
 	it("refuses destructive managed operations before changing any session file", async () => {
@@ -379,14 +579,18 @@ describe("model-request journal real File manager", () => {
 		const manager = await open(file);
 		try {
 			const before = (await readdir(dir.path())).sort();
-			const sync = [() => manager.cloneCurrentSession(), () => manager.cloneCurrentSession({ persist: false }),
-				() => manager.createBranchedSession(data.assistant.id)];
+			const sync = [
+				() => manager.cloneCurrentSession(),
+				() => manager.cloneCurrentSession({ persist: false }),
+				() => manager.createBranchedSession(data.assistant.id),
+			];
 			const asyncOperations = [
 				() => manager.fork(),
 				() => SessionManager.forkFrom(file, dir.path(), dir.path(), undefined, { suppressBreadcrumb: true }),
 				() => manager.persistCopy({ sessionDir: dir.path(), suppressBreadcrumb: true }),
 				() => manager.moveTo(path.join(dir.path(), "moved"), path.join(dir.path(), "target")),
-				() => manager.dropSession(file), () => manager.discardEntryDurably(data.assistant.id),
+				() => manager.dropSession(file),
+				() => manager.discardEntryDurably(data.assistant.id),
 			];
 			for (const operation of sync) expect(operation).toThrow();
 			for (const operation of asyncOperations) await expect(operation()).rejects.toThrow();
@@ -394,7 +598,9 @@ describe("model-request journal real File manager", () => {
 			expect((await readdir(dir.path())).sort()).toEqual(before);
 			expect(manager.getEntries()).toEqual(data.entries);
 			expect(manager.getSessionFile()).toBe(file);
-		} finally { await manager.close(); }
+		} finally {
+			await manager.close();
+		}
 	});
 
 	it("refuses an in-place destructive header rewrite without touching the old full file", async () => {
@@ -417,20 +623,82 @@ describe("model-request journal real File manager", () => {
 	});
 
 	const corruptions: { name: string; records: (data: JournalFixture) => unknown[] }[] = [
-		{ name: "missing descriptor", records: data => { const { modelRequestJournal: _descriptor, ...header } = data.header;
-			return [header, ...data.entries]; } },
-		{ name: "header session mismatch", records: data => [{ ...data.header,
-			modelRequestJournal: { ...data.descriptor, sessionId: "other-session" } }, ...data.entries] },
-		{ name: "seq gap", records: data => [data.header, ...data.sources, { ...data.assistantLink, seq: 2 }, data.usageLink, data.decision] },
-		{ name: "duplicate seq", records: data => [data.header, ...data.sources, data.assistantLink, { ...data.usageLink, seq: 1 }, data.decision] },
-		{ name: "epoch rollback", records: data => [data.header, ...data.sources, data.decision, data.assistantLink, data.usageLink] },
-		{ name: "foreign owner", records: data => [data.header, ...data.sources, { ...data.assistantLink, journalOwnerId: nextOwnerId }] },
-		{ name: "missing source", records: data => [data.header, ...data.sources.filter(entry => entry.id !== data.assistant.id), ...data.metadata] },
-		{ name: "wrong source kind", records: data => [data.header, ...data.sources, { ...data.assistantLink,
-			record: { schemaVersion: 1, sourceKind: "assistant", sourceSessionId: data.header.id, sourceEntryId: data.usage.id,
-				resultId: null, provenance: { kind: "non-wire", reason: "cache" } } }] },
-		{ name: "source after link", records: data => [data.header, data.user, data.usage, data.assistantLink, data.assistant] },
-		{ name: "secret extra field", records: data => [data.header, ...data.sources, { ...data.assistantLink, credential: keyCanary }] },
+		{
+			name: "missing descriptor",
+			records: data => {
+				const { modelRequestJournal: _descriptor, ...header } = data.header;
+				return [header, ...data.entries];
+			},
+		},
+		{
+			name: "header session mismatch",
+			records: data => [
+				{ ...data.header, modelRequestJournal: { ...data.descriptor, sessionId: "other-session" } },
+				...data.entries,
+			],
+		},
+		{
+			name: "seq gap",
+			records: data => [
+				data.header,
+				...data.sources,
+				{ ...data.assistantLink, seq: 2 },
+				data.usageLink,
+				data.decision,
+			],
+		},
+		{
+			name: "duplicate seq",
+			records: data => [
+				data.header,
+				...data.sources,
+				data.assistantLink,
+				{ ...data.usageLink, seq: 1 },
+				data.decision,
+			],
+		},
+		{
+			name: "epoch rollback",
+			records: data => [data.header, ...data.sources, data.decision, data.assistantLink, data.usageLink],
+		},
+		{
+			name: "foreign owner",
+			records: data => [data.header, ...data.sources, { ...data.assistantLink, journalOwnerId: nextOwnerId }],
+		},
+		{
+			name: "missing source",
+			records: data => [
+				data.header,
+				...data.sources.filter(entry => entry.id !== data.assistant.id),
+				...data.metadata,
+			],
+		},
+		{
+			name: "wrong source kind",
+			records: data => [
+				data.header,
+				...data.sources,
+				{
+					...data.assistantLink,
+					record: {
+						schemaVersion: 1,
+						sourceKind: "assistant",
+						sourceSessionId: data.header.id,
+						sourceEntryId: data.usage.id,
+						resultId: null,
+						provenance: { kind: "non-wire", reason: "cache" },
+					},
+				},
+			],
+		},
+		{
+			name: "source after link",
+			records: data => [data.header, data.user, data.usage, data.assistantLink, data.assistant],
+		},
+		{
+			name: "secret extra field",
+			records: data => [data.header, ...data.sources, { ...data.assistantLink, credential: keyCanary }],
+		},
 	];
 	for (const corruption of corruptions) {
 		it(`fails closed on ${corruption.name} in the actual file`, async () => {
@@ -448,7 +716,7 @@ describe("model-request journal real File manager", () => {
 		await using dir = await TempDir.create("@journal-malformed-");
 		const data = fixture(dir.path());
 		const file = path.join(dir.path(), "managed.jsonl");
-		for (const tail of ["{broken-json}\\n", "{\"type\":\"model_request_metadata\""]) {
+		for (const tail of ["{broken-json}\\n", '{"type":"model_request_metadata"']) {
 			const body = jsonl([data.header, ...data.entries]) + tail;
 			await writeFile(file, body);
 			await expect(open(file)).rejects.toThrow();
@@ -486,12 +754,16 @@ describe("model-request journal real File manager", () => {
 				expect(storage.publishAttempts).toBe(1);
 				expect(failures.length).toBeGreaterThan(0);
 				expect(await readFile(file, "utf8")).toBe(body);
-				expect((await readdir(dir.path())).some(name => name.endsWith(".tmp") || name.endsWith(".bak"))).toBe(false);
+				expect((await readdir(dir.path())).some(name => name.endsWith(".tmp") || name.endsWith(".bak"))).toBe(
+					false,
+				);
 				const reader = await open(file);
 				try {
 					expect(reader.getEntries()).toEqual(data.entries);
 					expect((await loadModelRequestJournalFromFile(file)).metadataEntries).toEqual(data.metadata);
-				} finally { await reader.close(); }
+				} finally {
+					await reader.close();
+				}
 			} finally {
 				unsubscribe();
 				await manager.close().catch(() => {});
@@ -515,7 +787,9 @@ describe("model-request journal real File manager", () => {
 			await manager.flush();
 			expect(await readFile(file, "utf8")).toBe(body);
 			expect((await loadModelRequestJournalFromFile(file)).metadataEntries).toEqual(data.metadata);
-		} finally { await manager.close(); }
+		} finally {
+			await manager.close();
+		}
 	});
 
 	it("preserves ordinary legacy append, usage, branch, rewrite, clone, copy, fork, move and discard APIs", async () => {
@@ -541,7 +815,10 @@ describe("model-request journal real File manager", () => {
 			const copy = await manager.persistCopy({ sessionDir: dir.path(), suppressBreadcrumb: true });
 			opened.push(copy);
 			expect(copy.getSessionId()).not.toBe(manager.getSessionId());
-			const fork = await SessionManager.forkFrom(file, dir.path(), dir.path(), undefined, { suppressBreadcrumb: true, copyArtifacts: false });
+			const fork = await SessionManager.forkFrom(file, dir.path(), dir.path(), undefined, {
+				suppressBreadcrumb: true,
+				copyArtifacts: false,
+			});
 			opened.push(fork);
 			expect(fork.getHeader()?.modelRequestJournal).toBeUndefined();
 			expect(await manager.fork()).toBeDefined();
@@ -552,6 +829,8 @@ describe("model-request journal real File manager", () => {
 			if (!current) throw new Error("Missing legacy session file");
 			await manager.dropSession(current);
 			expect(manager.getHeader()?.modelRequestJournal).toBeUndefined();
-		} finally { await Promise.all(opened.map(session => session.close())); }
+		} finally {
+			await Promise.all(opened.map(session => session.close()));
+		}
 	});
 });

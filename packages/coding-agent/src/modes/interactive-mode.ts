@@ -4,13 +4,7 @@
  */
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import {
-	type Agent,
-	AgentBusyError,
-	agentPauseGate,
-	EventLoopKeepalive,
-	ThinkingLevel,
-} from "@oh-my-pi/pi-agent-core";
+import { type Agent, AgentBusyError, agentPauseGate, EventLoopKeepalive, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import type { CompactionOutcome } from "@oh-my-pi/pi-agent-core/compaction";
 import type { Model, UsageReport } from "@oh-my-pi/pi-ai";

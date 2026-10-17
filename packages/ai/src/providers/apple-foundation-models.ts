@@ -14,13 +14,7 @@ import { appleFmAvailability, appleFmCancel, appleFmGenerate } from "@oh-my-pi/p
 import { parseStreamingJsonThrottled } from "@oh-my-pi/pi-utils";
 import * as AIError from "../error";
 import { parseToolCallArguments } from "../utils/tool-call-arguments";
-import type {
-	Context,
-	Model,
-	StreamFunction,
-	StreamOptions,
-	ToolChoice,
-} from "../types";
+import type { Context, Model, StreamFunction, StreamOptions, ToolChoice } from "../types";
 import type { AssistantMessage, ImageContent, Message, TextContent } from "@oh-my-pi/pi-utils/model-data";
 import { normalizeSystemPrompts } from "../utils";
 import { kStreamingLastParseLen } from "../utils/block-symbols";

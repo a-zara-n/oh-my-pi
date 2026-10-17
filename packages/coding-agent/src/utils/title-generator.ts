@@ -6,11 +6,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as url from "node:url";
 
-import {
-	completeSimple,
-	type Model,
-	retryTransientCompletion,
-} from "@oh-my-pi/pi-ai";
+import { completeSimple, type Model, retryTransientCompletion } from "@oh-my-pi/pi-ai";
 import type { Api, AssistantMessage, Message } from "@oh-my-pi/pi-utils/model-data";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import {

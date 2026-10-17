@@ -9,10 +9,7 @@ import {
 	processInteractionUpdate,
 	type ToolCallState,
 } from "@oh-my-pi/pi-ai/providers/cursor";
-import type {
-	CursorExecHandlers,
-	CursorToolResultHandler,
-} from "@oh-my-pi/pi-ai/types";
+import type { CursorExecHandlers, CursorToolResultHandler } from "@oh-my-pi/pi-ai/types";
 import type { AssistantMessage, ToolResultMessage } from "@oh-my-pi/pi-utils/model-data";
 import { kCursorExecResolved, kStreamingBlockKind } from "@oh-my-pi/pi-ai/utils/block-symbols";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";

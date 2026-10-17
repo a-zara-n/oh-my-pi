@@ -7,12 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { Buffer } from "node:buffer";
 import * as path from "node:path";
-import {
-	type Context,
-	completeSimple,
-	type Model,
-	streamSimple,
-} from "@oh-my-pi/pi-ai";
+import { type Context, completeSimple, type Model, streamSimple } from "@oh-my-pi/pi-ai";
 import type { Api, AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { generateTextReviewContextSummary } from "@oh-my-pi/pi-coding-agent/extensibility/custom-commands/bundled/annotate/text-summary";

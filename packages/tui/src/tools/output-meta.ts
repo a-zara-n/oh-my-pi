@@ -6,11 +6,16 @@ import type {
 	SourceMeta,
 	TruncationMeta,
 } from "@oh-my-pi/pi-utils/agent-messages";
-export type { DiagnosticMeta, LimitsMeta, OutputMeta, SourceMeta, TruncationMeta } from "@oh-my-pi/pi-utils/agent-messages";
+export type {
+	DiagnosticMeta,
+	LimitsMeta,
+	OutputMeta,
+	SourceMeta,
+	TruncationMeta,
+} from "@oh-my-pi/pi-utils/agent-messages";
 import type { Theme } from "../theme/theme";
 import { formatBytes, wrapBrackets } from "../render/render-utils";
 import { formatGroupedFiles } from "./grouped-file-output";
-
 
 // Regex: split on the first `:digits:digits` boundary to separate path from the rest
 const DIAG_PATH_RE = /^(.+?):(\d+:\d+\s+.*)$/;

@@ -1,7 +1,5 @@
 import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
-import type {
-	Context,
-} from "@oh-my-pi/pi-ai";
+import type { Context } from "@oh-my-pi/pi-ai";
 import type {
 	AnthropicCompactionPayload,
 	AssistantMessage,

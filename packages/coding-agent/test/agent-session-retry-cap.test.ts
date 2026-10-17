@@ -3,9 +3,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import * as path from "node:path";
 import { type } from "@oh-my-pi/omptype";
 import { Agent, type AgentTool } from "@oh-my-pi/pi-agent-core";
-import type {
-	ApiKey,
-} from "@oh-my-pi/pi-ai";
+import type { ApiKey } from "@oh-my-pi/pi-ai";
 import type {
 	AssistantMessage,
 	TextContent,

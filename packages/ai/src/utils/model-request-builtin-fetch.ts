@@ -21,7 +21,11 @@ if (Object.getOwnPropertyDescriptor(globalThis, identityKey) === undefined) {
 export function assertModelRequestBuiltinFetch(candidate: FetchImpl | undefined): void {
 	const canonical = Object.getOwnPropertyDescriptor(globalThis, identityKey);
 	const current = Object.getOwnPropertyDescriptor(globalThis, "fetch");
-	if (canonical?.value !== identity || current?.value !== modelRequestBuiltinFetch || candidate !== modelRequestBuiltinFetch) {
+	if (
+		canonical?.value !== identity ||
+		current?.value !== modelRequestBuiltinFetch ||
+		candidate !== modelRequestBuiltinFetch
+	) {
 		throw new TypeError("required model request transport is not the canonical startup builtin fetch");
 	}
 }

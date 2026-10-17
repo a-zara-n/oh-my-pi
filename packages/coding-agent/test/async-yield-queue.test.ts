@@ -1,9 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import {
-	ASIDE_MESSAGE_COMMIT,
-	ASIDE_MESSAGE_DISCARD,
-	type CommittableAsideMessage,
-} from "@oh-my-pi/pi-agent-core";
+import { ASIDE_MESSAGE_COMMIT, ASIDE_MESSAGE_DISCARD, type CommittableAsideMessage } from "@oh-my-pi/pi-agent-core";
 import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import { type AsyncJob, AsyncJobManager, type AsyncJobType } from "@oh-my-pi/pi-coding-agent/async";
 import type { CustomMessage } from "@oh-my-pi/pi-utils/agent-messages";

@@ -359,7 +359,11 @@ import {
 	LAUNCH_COMPLETION_MESSAGE_TYPE,
 	type LaunchCompletionEntry,
 } from "./launch-completion";
-import { childModelRequestRootOf, type ModelRequestRootAssignment, withModelRequestExecution } from "./model-request-context";
+import {
+	childModelRequestRootOf,
+	type ModelRequestRootAssignment,
+	withModelRequestExecution,
+} from "./model-request-context";
 import {
 	buildReplanTitleContext,
 	CHECKPOINT_ACTIVE_REMINDER_TYPE,
@@ -3015,7 +3019,10 @@ export class AgentSession implements SettingsScope {
 	runInModelRequestContext<T>(fn: () => T, purpose?: ModelRequestPurpose): T {
 		const execution = this.#modelRequestExecution;
 		if (execution === undefined) return fn();
-		return runWithModelRequestExecution(purpose === undefined ? execution : this.#executionForPurpose(execution, purpose), fn);
+		return runWithModelRequestExecution(
+			purpose === undefined ? execution : this.#executionForPurpose(execution, purpose),
+			fn,
+		);
 	}
 
 	/** One derived context per purpose, created on first use. */

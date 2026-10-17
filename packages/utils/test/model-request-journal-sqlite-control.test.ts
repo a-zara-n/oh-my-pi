@@ -4,7 +4,11 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
-import { assertModelRequestJournalDatabase, createModelRequestJournalDatabase, openModelRequestJournalDatabase } from "../src/model-request-journal-sqlite-control";
+import {
+	assertModelRequestJournalDatabase,
+	createModelRequestJournalDatabase,
+	openModelRequestJournalDatabase,
+} from "../src/model-request-journal-sqlite-control";
 
 // This suite requires the approved pinned audit preload. No alternative fd/stat proof or native mock is accepted.
 const mac = process.platform === "darwin" && process.arch === "arm64" ? describe : describe.skip;
@@ -19,11 +23,17 @@ mac("owned SQLite fixed control", () => {
 				expect(created.identity).toBeDefined();
 				expect(() => createModelRequestJournalDatabase(path.join(directory, "state.sqlite3"))).toThrow();
 				const first = assertModelRequestJournalDatabase(created.database);
-				created.database.exec("PRAGMA journal_mode=WAL; CREATE TABLE evidence(id INTEGER PRIMARY KEY,value TEXT) STRICT; INSERT INTO evidence VALUES(1,'kept')");
-				const reader = openModelRequestJournalDatabase(path.join(directory, "state.sqlite3"), {readonly: true, create: false, strict: true});
+				created.database.exec(
+					"PRAGMA journal_mode=WAL; CREATE TABLE evidence(id INTEGER PRIMARY KEY,value TEXT) STRICT; INSERT INTO evidence VALUES(1,'kept')",
+				);
+				const reader = openModelRequestJournalDatabase(path.join(directory, "state.sqlite3"), {
+					readonly: true,
+					create: false,
+					strict: true,
+				});
 				try {
 					reader.exec("PRAGMA trusted_schema=OFF; PRAGMA query_only=ON; BEGIN");
-					expect(reader.query<{value: string}, []>("SELECT value FROM evidence").get()?.value).toBe("kept");
+					expect(reader.query<{ value: string }, []>("SELECT value FROM evidence").get()?.value).toBe("kept");
 					const snapshot = assertModelRequestJournalDatabase(reader);
 					expect(snapshot.device).toBe(first.device);
 					expect(snapshot.main.presence).toBe(1);
@@ -35,40 +45,58 @@ mac("owned SQLite fixed control", () => {
 					expect(snapshot.transactionState).toBe(1);
 					expect(snapshot.transactionGeneration).toBeGreaterThan(0n);
 					created.database.exec("UPDATE evidence SET value='new'");
-					expect(reader.query<{value: string}, []>("SELECT value FROM evidence").get()?.value).toBe("kept");
-					expect(assertModelRequestJournalDatabase(reader).transactionGeneration).toBe(snapshot.transactionGeneration);
+					expect(reader.query<{ value: string }, []>("SELECT value FROM evidence").get()?.value).toBe("kept");
+					expect(assertModelRequestJournalDatabase(reader).transactionGeneration).toBe(
+						snapshot.transactionGeneration,
+					);
 					reader.exec("ROLLBACK; BEGIN");
-					expect(reader.query<{value: string}, []>("SELECT value FROM evidence").get()?.value).toBe("new");
-					expect(assertModelRequestJournalDatabase(reader).transactionGeneration).toBeGreaterThan(snapshot.transactionGeneration);
+					expect(reader.query<{ value: string }, []>("SELECT value FROM evidence").get()?.value).toBe("new");
+					expect(assertModelRequestJournalDatabase(reader).transactionGeneration).toBeGreaterThan(
+						snapshot.transactionGeneration,
+					);
 					expect(() => reader.exec("UPDATE evidence SET value='forbidden'")).toThrow();
 					reader.exec("ROLLBACK");
-				} finally { reader.close(); }
+				} finally {
+					reader.close();
+				}
 				const backupPath = path.join(directory, "backup.sqlite3");
-				const backupSource = openModelRequestJournalDatabase(path.join(directory, "state.sqlite3"), {readonly: true, create: false, strict: true});
+				const backupSource = openModelRequestJournalDatabase(path.join(directory, "state.sqlite3"), {
+					readonly: true,
+					create: false,
+					strict: true,
+				});
 				try {
 					backupSource.exec("PRAGMA query_only=OFF");
 					backupSource.query("VACUUM INTO ?").run(backupPath);
 					assertModelRequestJournalDatabase(backupSource);
 					expect(() => backupSource.exec("UPDATE evidence SET value='forbidden'")).toThrow();
-				} finally { backupSource.close(); }
-				const backup = openModelRequestJournalDatabase(backupPath, {readonly: true, create: false, strict: true});
+				} finally {
+					backupSource.close();
+				}
+				const backup = openModelRequestJournalDatabase(backupPath, { readonly: true, create: false, strict: true });
 				try {
-					expect(backup.query<{value: string}, []>("SELECT value FROM evidence").get()?.value).toBe("new");
+					expect(backup.query<{ value: string }, []>("SELECT value FROM evidence").get()?.value).toBe("new");
 					const copied = assertModelRequestJournalDatabase(backup);
 					expect(copied.inode).not.toBe(first.inode);
 					expect(copied.liveWriterGenerations).toHaveLength(0);
-				} finally { backup.close(); }
+				} finally {
+					backup.close();
+				}
 				created.database.close();
 				expect(() => assertModelRequestJournalDatabase(created.database)).toThrow();
-			} finally { created.database.close(); }
-		} finally { fs.rmSync(directory, {recursive: true, force: true}); }
+			} finally {
+				created.database.close();
+			}
+		} finally {
+			fs.rmSync(directory, { recursive: true, force: true });
+		}
 	});
 
 	test("ordinary custom-library connections keep upstream DDL and cannot enroll through file control", () => {
 		const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ordinary-sqlite-")));
 		const filename = path.join(directory, "ordinary.sqlite3");
 		try {
-			const database = new Database(filename, {strict: true, safeIntegers: true});
+			const database = new Database(filename, { strict: true, safeIntegers: true });
 			try {
 				fs.chmodSync(filename, 0o644);
 				for (const command of [1, 2, 3]) {
@@ -79,14 +107,24 @@ mac("owned SQLite fixed control", () => {
 					buffer[3] = command;
 					expect(database.fileControl("main", 0x4f4d5001, buffer)).toBe(12);
 				}
-				database.exec("CREATE TABLE ordinary(value INTEGER) STRICT; CREATE INDEX ordinary_value ON ordinary(value); INSERT INTO ordinary VALUES(7)");
-				expect(database.query<{value: bigint}, []>("SELECT value FROM ordinary").get()?.value).toBe(7n);
-				expect(database.query<{name: string}, []>("SELECT name FROM sqlite_master WHERE type='index'").get()?.name).toBe("ordinary_value");
+				database.exec(
+					"CREATE TABLE ordinary(value INTEGER) STRICT; CREATE INDEX ordinary_value ON ordinary(value); INSERT INTO ordinary VALUES(7)",
+				);
+				expect(database.query<{ value: bigint }, []>("SELECT value FROM ordinary").get()?.value).toBe(7n);
+				expect(
+					database.query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type='index'").get()?.name,
+				).toBe("ordinary_value");
 				expect(() => assertModelRequestJournalDatabase(database)).toThrow("unregistered");
 				database.exec("INSERT INTO ordinary VALUES(8)");
-				expect(database.query<{count: bigint}, []>("SELECT count(*) AS count FROM ordinary").get()?.count).toBe(2n);
-			} finally { database.close(true); }
-		} finally { fs.rmSync(directory, {recursive: true, force: true}); }
+				expect(database.query<{ count: bigint }, []>("SELECT count(*) AS count FROM ordinary").get()?.count).toBe(
+					2n,
+				);
+			} finally {
+				database.close(true);
+			}
+		} finally {
+			fs.rmSync(directory, { recursive: true, force: true });
+		}
 	});
 
 	test("internal owned URI preserves escaped paths, Bun trim, object options and ordinary filename projection", () => {
@@ -94,71 +132,108 @@ mac("owned SQLite fixed control", () => {
 		const filename = path.join(directory, "space ?#%日本.sqlite3");
 		const requested = ` \t${filename}\n`;
 		try {
-			fs.writeFileSync(filename, "", {mode: 0o600});
-			const database = openModelRequestJournalDatabase(requested, {create: false, strict: true, safeIntegers: true});
+			fs.writeFileSync(filename, "", { mode: 0o600 });
+			const database = openModelRequestJournalDatabase(requested, {
+				create: false,
+				strict: true,
+				safeIntegers: true,
+			});
 			try {
 				expect(database.filename).toBe(filename);
-				expect(database.query<{file: string}, []>("PRAGMA database_list").get()?.file).toBe(filename);
+				expect(database.query<{ file: string }, []>("PRAGMA database_list").get()?.file).toBe(filename);
 				database.exec("CREATE TABLE evidence(id INTEGER PRIMARY KEY,value INTEGER) STRICT");
-				database.query("INSERT INTO evidence VALUES($id,$value)").run({id: 1n, value: 9007199254740993n});
-				expect(database.query<{value: bigint}, []>("SELECT value FROM evidence").get()?.value).toBe(9007199254740993n);
+				database.query("INSERT INTO evidence VALUES($id,$value)").run({ id: 1n, value: 9007199254740993n });
+				expect(database.query<{ value: bigint }, []>("SELECT value FROM evidence").get()?.value).toBe(
+					9007199254740993n,
+				);
 				const original = assertModelRequestJournalDatabase(database);
-				const reader = openModelRequestJournalDatabase(requested, {readonly: true, create: false, strict: true, safeIntegers: true});
+				const reader = openModelRequestJournalDatabase(requested, {
+					readonly: true,
+					create: false,
+					strict: true,
+					safeIntegers: true,
+				});
 				try {
 					expect(reader.filename).toBe(filename);
-					expect(reader.query<{value: bigint}, []>("SELECT value FROM evidence").get()?.value).toBe(9007199254740993n);
-					expect(assertModelRequestJournalDatabase(reader).liveWriterGenerations).toContain(original.connectionGeneration);
+					expect(reader.query<{ value: bigint }, []>("SELECT value FROM evidence").get()?.value).toBe(
+						9007199254740993n,
+					);
+					expect(assertModelRequestJournalDatabase(reader).liveWriterGenerations).toContain(
+						original.connectionGeneration,
+					);
 					expect(() => reader.exec("UPDATE evidence SET value=0")).toThrow();
-				} finally { reader.close(); }
+				} finally {
+					reader.close();
+				}
 				const escaped = path.join(directory, "escaped.sqlite3");
-				expect(() => database.query("ATTACH ? AS escaped").run(`${pathToFileURL(escaped).href}?vfs=unix`)).toThrow();
+				expect(() =>
+					database.query("ATTACH ? AS escaped").run(`${pathToFileURL(escaped).href}?vfs=unix`),
+				).toThrow();
 				expect(fs.existsSync(escaped)).toBe(false);
-				expect(assertModelRequestJournalDatabase(database).connectionGeneration).toBe(original.connectionGeneration);
-				Object.defineProperty(database, "filename", {value: "file:/not-identity?vfs=unix"});
+				expect(assertModelRequestJournalDatabase(database).connectionGeneration).toBe(
+					original.connectionGeneration,
+				);
+				Object.defineProperty(database, "filename", { value: "file:/not-identity?vfs=unix" });
 				expect(assertModelRequestJournalDatabase(database).inode).toBe(original.inode);
-			} finally { database.close(); }
-		} finally { fs.rmSync(directory, {recursive: true, force: true}); }
+			} finally {
+				database.close();
+			}
+		} finally {
+			fs.rmSync(directory, { recursive: true, force: true });
+		}
 	});
 
 	test("owned open keeps its private-parent guard before SQL and never retries through the ordinary VFS", () => {
 		const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "owned-open-guard-")));
 		const filename = path.join(directory, "state.sqlite3");
 		try {
-			fs.writeFileSync(filename, "", {mode: 0o600});
+			fs.writeFileSync(filename, "", { mode: 0o600 });
 			fs.chmodSync(directory, 0o755);
-			expect(() => openModelRequestJournalDatabase(filename, {create: false})).toThrow();
+			expect(() => openModelRequestJournalDatabase(filename, { create: false })).toThrow();
 			expect(fs.statSync(filename).size).toBe(0);
-		} finally { fs.rmSync(directory, {recursive: true, force: true}); }
+		} finally {
+			fs.rmSync(directory, { recursive: true, force: true });
+		}
 	});
 
 	test("foreign objects, memory probes, unknown options and prior connection generations are not proof", () => {
 		const memory = new Database(":memory:");
-		try { expect(() => assertModelRequestJournalDatabase(memory)).toThrow(); }
-		finally { memory.close(); }
+		try {
+			expect(() => assertModelRequestJournalDatabase(memory)).toThrow();
+		} finally {
+			memory.close();
+		}
 		expect(() => openModelRequestJournalDatabase("file:/tmp/forbidden?immutable=1")).toThrow();
 		expect(() => openModelRequestJournalDatabase(" \tfile:/tmp/forbidden?vfs=unix\n")).toThrow();
-		expect(() => openModelRequestJournalDatabase(":memory:", {readonly: true, create: true})).toThrow();
+		expect(() => openModelRequestJournalDatabase(":memory:", { readonly: true, create: true })).toThrow();
 		for (const options of [
-			{purpose: "unknown"},
-			{purpose: "general", unknown: true},
-			{purpose: "authority-control"},
-			{purpose: "authority-control", readonly: true},
-			{purpose: "authority-control", readonly: false, create: false},
-			{purpose: "authority-control", readonly: true, create: true},
-			{purpose: "authority-control", readonly: true, create: false},
-		]) expect(() => Reflect.apply(openModelRequestJournalDatabase, undefined, [":memory:", options])).toThrow();
+			{ purpose: "unknown" },
+			{ purpose: "general", unknown: true },
+			{ purpose: "authority-control" },
+			{ purpose: "authority-control", readonly: true },
+			{ purpose: "authority-control", readonly: false, create: false },
+			{ purpose: "authority-control", readonly: true, create: true },
+			{ purpose: "authority-control", readonly: true, create: false },
+		])
+			expect(() => Reflect.apply(openModelRequestJournalDatabase, undefined, [":memory:", options])).toThrow();
 		const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "owned-reopen-")));
 		try {
 			const created = createModelRequestJournalDatabase(path.join(directory, "state.sqlite3"));
 			created.database.exec("CREATE TABLE evidence(id INTEGER PRIMARY KEY) STRICT");
 			const original = assertModelRequestJournalDatabase(created.database);
 			created.database.close();
-			const replacement = openModelRequestJournalDatabase(path.join(directory, "state.sqlite3"), {create: false});
+			const replacement = openModelRequestJournalDatabase(path.join(directory, "state.sqlite3"), { create: false });
 			try {
-				expect(assertModelRequestJournalDatabase(replacement).connectionGeneration).not.toBe(original.connectionGeneration);
+				expect(assertModelRequestJournalDatabase(replacement).connectionGeneration).not.toBe(
+					original.connectionGeneration,
+				);
 				expect(() => assertModelRequestJournalDatabase(created.database)).toThrow();
-			} finally { replacement.close(); }
-		} finally { fs.rmSync(directory, {recursive: true, force: true}); }
+			} finally {
+				replacement.close();
+			}
+		} finally {
+			fs.rmSync(directory, { recursive: true, force: true });
+		}
 	});
 
 	test("writer-owned B cannot borrow reader-owned A identity after path swap-back", () => {
@@ -171,16 +246,24 @@ mac("owned SQLite fixed control", () => {
 			fs.renameSync(filename, `${filename}.A`);
 			fs.copyFileSync(`${filename}.A`, filename);
 			fs.chmodSync(filename, 0o600);
-			const writerB = openModelRequestJournalDatabase(filename, {create: false});
+			const writerB = openModelRequestJournalDatabase(filename, { create: false });
 			try {
 				fs.renameSync(filename, `${filename}.B`);
 				fs.renameSync(`${filename}.A`, filename);
 				expect(() => {
-					const readerA = openModelRequestJournalDatabase(filename, {readonly: true, create: false});
-					try { assertModelRequestJournalDatabase(readerA); } finally { readerA.close(); }
+					const readerA = openModelRequestJournalDatabase(filename, { readonly: true, create: false });
+					try {
+						assertModelRequestJournalDatabase(readerA);
+					} finally {
+						readerA.close();
+					}
 				}).toThrow();
-			} finally { expect(() => writerB.close()).toThrow(); }
-		} finally { fs.rmSync(directory, {recursive: true, force: true}); }
+			} finally {
+				expect(() => writerB.close()).toThrow();
+			}
+		} finally {
+			fs.rmSync(directory, { recursive: true, force: true });
+		}
 	});
 
 	test("managed close rejects actual main identity loss even when unchecked close is requested", () => {
@@ -192,16 +275,22 @@ mac("owned SQLite fixed control", () => {
 				const created = createModelRequestJournalDatabase(filename);
 				created.database.exec("CREATE TABLE evidence(id INTEGER PRIMARY KEY) STRICT");
 				created.database.close();
-				const reader = openModelRequestJournalDatabase(filename, {readonly: true, create: false});
+				const reader = openModelRequestJournalDatabase(filename, { readonly: true, create: false });
 				try {
 					expect(assertModelRequestJournalDatabase(reader).inode).toBeGreaterThan(0);
 					fs.renameSync(filename, moved);
 					try {
 						expect(() => reader.close(throwOnError)).toThrow();
 						expect(() => assertModelRequestJournalDatabase(reader)).toThrow();
-					} finally { fs.renameSync(moved, filename); }
-				} finally { reader.close(); }
-			} finally { fs.rmSync(directory, {recursive: true, force: true}); }
+					} finally {
+						fs.renameSync(moved, filename);
+					}
+				} finally {
+					reader.close();
+				}
+			} finally {
+				fs.rmSync(directory, { recursive: true, force: true });
+			}
 		}
 	});
 
@@ -214,33 +303,63 @@ mac("owned SQLite fixed control", () => {
 			const created = createModelRequestJournalDatabase(filename);
 			try {
 				created.database.exec("CREATE TABLE evidence(value TEXT) STRICT; INSERT INTO evidence VALUES('retained')");
-				const general = openModelRequestJournalDatabase(filename, {readonly: true, create: false, purpose: "general"});
+				const general = openModelRequestJournalDatabase(filename, {
+					readonly: true,
+					create: false,
+					purpose: "general",
+				});
 				try {
 					general.exec("PRAGMA query_only=ON");
 					try {
 						general.exec("PRAGMA query_only=OFF");
 						general.query("VACUUM INTO ?").run(backupPath);
-					} finally { general.exec("PRAGMA query_only=ON"); }
-					expect(general.query<{query_only: number}, []>("PRAGMA query_only").get()?.query_only).toBe(1);
-					expect(assertModelRequestJournalDatabase(general).inode).toBe(assertModelRequestJournalDatabase(created.database).inode);
+					} finally {
+						general.exec("PRAGMA query_only=ON");
+					}
+					expect(general.query<{ query_only: number }, []>("PRAGMA query_only").get()?.query_only).toBe(1);
+					expect(assertModelRequestJournalDatabase(general).inode).toBe(
+						assertModelRequestJournalDatabase(created.database).inode,
+					);
 					expect(() => general.exec("UPDATE evidence SET value='forbidden'")).toThrow();
-				} finally { general.close(); }
-				const backup = openModelRequestJournalDatabase(backupPath, {readonly: true, create: false});
+				} finally {
+					general.close();
+				}
+				const backup = openModelRequestJournalDatabase(backupPath, { readonly: true, create: false });
 				try {
-					expect(backup.query<{value: string}, []>("SELECT value FROM evidence").get()?.value).toBe("retained");
-					expect(assertModelRequestJournalDatabase(backup).inode).not.toBe(assertModelRequestJournalDatabase(created.database).inode);
-				} finally { backup.close(); }
-				const authority = openModelRequestJournalDatabase(filename, {readonly: true, create: false, purpose: "authority-control"});
+					expect(backup.query<{ value: string }, []>("SELECT value FROM evidence").get()?.value).toBe("retained");
+					expect(assertModelRequestJournalDatabase(backup).inode).not.toBe(
+						assertModelRequestJournalDatabase(created.database).inode,
+					);
+				} finally {
+					backup.close();
+				}
+				const authority = openModelRequestJournalDatabase(filename, {
+					readonly: true,
+					create: false,
+					purpose: "authority-control",
+				});
 				try {
-					expect(authority.query<{query_only: number}, []>("PRAGMA query_only").get()?.query_only).toBe(1);
-					expect(authority.query<{trusted_schema: number}, []>("PRAGMA trusted_schema").get()?.trusted_schema).toBe(0);
-					expect(authority.query<{value: string}, []>("SELECT value FROM evidence").get()?.value).toBe("retained");
+					expect(authority.query<{ query_only: number }, []>("PRAGMA query_only").get()?.query_only).toBe(1);
+					expect(
+						authority.query<{ trusted_schema: number }, []>("PRAGMA trusted_schema").get()?.trusted_schema,
+					).toBe(0);
+					expect(authority.query<{ value: string }, []>("SELECT value FROM evidence").get()?.value).toBe(
+						"retained",
+					);
 					expect(() => authority.exec("PRAGMA query_only=OFF")).toThrow();
 					expect(() => authority.query("VACUUM INTO ?").run(forbiddenPath)).toThrow();
 					expect(fs.existsSync(forbiddenPath)).toBe(false);
-					expect(assertModelRequestJournalDatabase(authority).inode).toBe(assertModelRequestJournalDatabase(created.database).inode);
-				} finally { authority.close(); }
-			} finally { created.database.close(); }
-		} finally { fs.rmSync(directory, {recursive: true, force: true}); }
+					expect(assertModelRequestJournalDatabase(authority).inode).toBe(
+						assertModelRequestJournalDatabase(created.database).inode,
+					);
+				} finally {
+					authority.close();
+				}
+			} finally {
+				created.database.close();
+			}
+		} finally {
+			fs.rmSync(directory, { recursive: true, force: true });
+		}
 	});
 });

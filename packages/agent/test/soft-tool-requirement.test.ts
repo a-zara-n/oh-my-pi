@@ -1,12 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { type } from "@oh-my-pi/omptype";
 import { agentLoop } from "@oh-my-pi/pi-agent-core/agent-loop";
-import type {
-	AgentContext,
-	AgentLoopConfig,
-	AgentTool,
-	SoftToolRequirement,
-} from "@oh-my-pi/pi-agent-core/types";
+import type { AgentContext, AgentLoopConfig, AgentTool, SoftToolRequirement } from "@oh-my-pi/pi-agent-core/types";
 import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import type { ToolChoice } from "@oh-my-pi/pi-ai";
 import type { Message } from "@oh-my-pi/pi-utils/model-data";

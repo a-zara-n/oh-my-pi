@@ -99,15 +99,17 @@ async function assertSdkRefusesCandidate(foreignRuntime: boolean): Promise<void>
 				stream.push({ type: "done", reason: "stop", message });
 				return stream;
 			},
-			models: [{
-				id: modelId,
-				name: "Model request context journal probe",
-				reasoning: false,
-				input: ["text"],
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-				contextWindow: 128_000,
-				maxTokens: 8192,
-			}],
+			models: [
+				{
+					id: modelId,
+					name: "Model request context journal probe",
+					reasoning: false,
+					input: ["text"],
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+					contextWindow: 128_000,
+					maxTokens: 8192,
+				},
+			],
 		});
 	};
 	const settings = Settings.isolated({ "compaction.enabled": false });
@@ -116,34 +118,37 @@ async function assertSdkRefusesCandidate(foreignRuntime: boolean): Promise<void>
 		? { runtimeIdentity: {}, rootSessionId: manager.getSessionId() }
 		: candidateFor(manager.getSessionId());
 	try {
-		await assert.rejects(async () => {
-			const result = await createAgentSession({
-				cwd: tempDir.path(),
-				agentDir: tempDir.path(),
-				sessionManager: manager,
-				agentRegistry: new AgentRegistry(),
-				authStorage,
-				modelRegistry,
-				settings,
-				extensions: [providerExtension],
-				disableExtensionDiscovery: true,
-				skills: [],
-				contextFiles: [],
-				promptTemplates: [],
-				slashCommands: [],
-				enableMCP: false,
-				enableLsp: false,
-				skipPythonPreflight: true,
-				agentId: ROOT_AGENT_ID,
-				modelRequestJournalLeaseBinding: candidate as ModelRequestJournalLeaseBinding,
-			});
-			publishedSession = result.session;
-		}, error => {
-			assert(error instanceof Error);
-			assert.match(error.message, foreignRuntime ? /different authority runtime/ : /Journal binding unverified/);
-			startupFailure = error;
-			return true;
-		});
+		await assert.rejects(
+			async () => {
+				const result = await createAgentSession({
+					cwd: tempDir.path(),
+					agentDir: tempDir.path(),
+					sessionManager: manager,
+					agentRegistry: new AgentRegistry(),
+					authStorage,
+					modelRegistry,
+					settings,
+					extensions: [providerExtension],
+					disableExtensionDiscovery: true,
+					skills: [],
+					contextFiles: [],
+					promptTemplates: [],
+					slashCommands: [],
+					enableMCP: false,
+					enableLsp: false,
+					skipPythonPreflight: true,
+					agentId: ROOT_AGENT_ID,
+					modelRequestJournalLeaseBinding: candidate as ModelRequestJournalLeaseBinding,
+				});
+				publishedSession = result.session;
+			},
+			error => {
+				assert(error instanceof Error);
+				assert.match(error.message, foreignRuntime ? /different authority runtime/ : /Journal binding unverified/);
+				startupFailure = error;
+				return true;
+			},
+		);
 		assert.equal(publishedSession, undefined);
 		assert.equal(providerRequests, 0);
 		// Even the rejected SDK candidate leaves the process required; creating an unbound context cannot undo it.
@@ -242,11 +247,16 @@ function assertFakeExecutionCannotReady(): void {
 	assert.throws(() => assertJournalExecutionIdentity(execution, fake as ModelRequestExecution), unavailable);
 	assert.throws(() => assertJournalExecutionReady(fake as ModelRequestExecution), unavailable);
 	assert.throws(() => childModelRequestRootOf(fake as ModelRequestExecution), unavailable);
-	assert.throws(() => resolveModelRequestRootSource({
-		kind: "child", rootSessionId: "root",
-		modelRequestJournalLeaseBinding: execution.modelRequestJournalLeaseBinding,
-		parentExecution: fake as ModelRequestExecution,
-	}), unavailable);
+	assert.throws(
+		() =>
+			resolveModelRequestRootSource({
+				kind: "child",
+				rootSessionId: "root",
+				modelRequestJournalLeaseBinding: execution.modelRequestJournalLeaseBinding,
+				parentExecution: fake as ModelRequestExecution,
+			}),
+		unavailable,
+	);
 	assertPending(execution);
 }
 
@@ -264,7 +274,8 @@ async function assertGenuineParentHandover(): Promise<void> {
 	const hash = createHash("sha256").update(token).digest("hex");
 	const physicalBindingId = randomUUID();
 	retainModelRequestWriterCredential(requester, { writerId, token, role: "operator-command", capabilities: [] });
-	const common = "seq INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL UNIQUE,tx_seq INTEGER NOT NULL,created_at_ms INTEGER NOT NULL";
+	const common =
+		"seq INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL UNIQUE,tx_seq INTEGER NOT NULL,created_at_ms INTEGER NOT NULL";
 	db.exec(`PRAGMA journal_mode=WAL; PRAGMA application_id=1330856277; PRAGMA user_version=20;
 		CREATE TABLE store_meta(singleton INTEGER PRIMARY KEY,store_id TEXT) STRICT;
 		CREATE TABLE tx_log(tx_seq INTEGER PRIMARY KEY,writer_id TEXT,op_name TEXT,sealed INTEGER) STRICT;
@@ -272,10 +283,16 @@ async function assertGenuineParentHandover(): Promise<void> {
 		CREATE TABLE writer_event(${common},writer_id TEXT NOT NULL,event TEXT NOT NULL,reason TEXT) STRICT;
 		CREATE TABLE store_config_event(${common},key TEXT NOT NULL,value_json TEXT NOT NULL,approval_id TEXT,writer_id TEXT NOT NULL) STRICT;`);
 	db.query("INSERT INTO store_meta VALUES(1,?)").run(storeId);
-	db.query("INSERT INTO tx_log VALUES(1,?,'store.init',1),(2,?,'bootstrapModelRequestJournalAuthority',1)").run(writerId, writerId);
-	db.query("INSERT INTO writer(id,tx_seq,created_at_ms,role,capabilities_json,token_hash) VALUES(?,1,1,'operator-command','[]',?)").run(writerId, hash);
-	db.query("INSERT INTO store_config_event(id,tx_seq,created_at_ms,key,value_json,approval_id,writer_id) VALUES('epoch-1',2,2,'budget_authority_epoch',?,NULL,?)")
-		.run(JSON.stringify({ schemaVersion: 1, authorityEpoch: 1, physicalBindingId }), writerId);
+	db.query("INSERT INTO tx_log VALUES(1,?,'store.init',1),(2,?,'bootstrapModelRequestJournalAuthority',1)").run(
+		writerId,
+		writerId,
+	);
+	db.query(
+		"INSERT INTO writer(id,tx_seq,created_at_ms,role,capabilities_json,token_hash) VALUES(?,1,1,'operator-command','[]',?)",
+	).run(writerId, hash);
+	db.query(
+		"INSERT INTO store_config_event(id,tx_seq,created_at_ms,key,value_json,approval_id,writer_id) VALUES('epoch-1',2,2,'budget_authority_epoch',?,NULL,?)",
+	).run(JSON.stringify({ schemaVersion: 1, authorityEpoch: 1, physicalBindingId }), writerId);
 	let namespace: string | undefined;
 	const cells: FileJournalCell[] = [];
 	const openCell = () => {
@@ -287,98 +304,134 @@ async function assertGenuineParentHandover(): Promise<void> {
 		await withRawModelRequestJournalLeases({ storeId, control: "exclusive", maintenance: "exclusive" }, async raw => {
 			namespace = raw.namespacePath;
 			const identity = fs.statSync(databasePath);
-			fs.writeFileSync(raw.recordPath, JSON.stringify({
-				schemaVersion: 1, storeId, authorityEpoch: 1, physicalBindingId,
-				dbDevice: identity.dev, dbInode: identity.ino, state: "active",
-			}), { mode: 0o600 });
+			fs.writeFileSync(
+				raw.recordPath,
+				JSON.stringify({
+					schemaVersion: 1,
+					storeId,
+					authorityEpoch: 1,
+					physicalBindingId,
+					dbDevice: identity.dev,
+					dbInode: identity.ino,
+					state: "active",
+				}),
+				{ mode: 0o600 },
+			);
 		});
 		const root = openCell();
-		await withVerifiedModelRequestJournalBinding({
-			resources: { storeId, databasePath }, requester, mode: "bootstrap-new", rootSessionId: root.getSessionId(),
-		}, async binding => {
-			const parent = createSessionModelRequestExecution({
-				getSessionId: () => root.getSessionId(), root: resolveModelRequestRootSource(undefined, binding), agent,
-			});
-			await composeJournalSession({ cell: root, root, binding, execution: parent });
-			const handover = childModelRequestRootOf(parent);
-			assert(Object.isFrozen(handover));
-			assert.equal(handover.parentExecution, parent);
-			assert.equal(handover.rootSessionId, root.getSessionId());
-			const explicitSource = resolveModelRequestRootSource(handover);
-			assert.equal(explicitSource.kind, "inherited");
-			if (explicitSource.kind !== "inherited") throw new Error("expected inherited root");
-			assert.equal(explicitSource.parentExecution, parent);
-			const childCell = openCell();
-			const child = createSessionModelRequestExecution({
-				getSessionId: () => childCell.getSessionId(), root: explicitSource,
-				agent: { kind: "sub", id: "Child", name: "child", depth: 1, parentId: ROOT_AGENT_ID },
-			});
-			await composeJournalSession({ cell: childCell, root, binding, execution: child });
-			assertJournalExecutionReady(child);
-			assert.equal(childModelRequestRootOf(child).parentExecution, child);
-			const alias = deriveModelRequestExecution(parent, { purpose: "advisor" });
-			assert.notEqual(alias, parent);
-			assertJournalExecutionIdentity(parent, alias);
-			assertJournalExecutionIdentity(alias, parent);
-			const aliasHandover = childModelRequestRootOf(alias);
-			assert.equal(aliasHandover.parentExecution, alias);
-			runWithModelRequestExecution(parent, () => {
-				const source = resolveModelRequestRootSource(aliasHandover);
-				assert.equal(source.kind === "inherited" && source.parentExecution, alias);
-			});
-			await runWithModelRequestExecution(alias, async () => {
-				const source = resolveModelRequestRootSource(handover);
-				assert.equal(source.kind === "inherited" && source.parentExecution, parent);
-				const derivedChildCell = openCell();
-				const derivedChild = createSessionModelRequestExecution({
-					getSessionId: () => derivedChildCell.getSessionId(), root: source,
-					agent: { kind: "sub", id: "DerivedChild", name: "child", depth: 1, parentId: ROOT_AGENT_ID },
+		await withVerifiedModelRequestJournalBinding(
+			{
+				resources: { storeId, databasePath },
+				requester,
+				mode: "bootstrap-new",
+				rootSessionId: root.getSessionId(),
+			},
+			async binding => {
+				const parent = createSessionModelRequestExecution({
+					getSessionId: () => root.getSessionId(),
+					root: resolveModelRequestRootSource(undefined, binding),
+					agent,
 				});
-				await composeJournalSession({ cell: derivedChildCell, root, binding, execution: derivedChild });
-				assertJournalExecutionReady(derivedChild);
-				assert.equal(childModelRequestRootOf(derivedChild).parentExecution, derivedChild);
-				await derivedChildCell.close();
-			});
-			// A child has its own family even though the actual binding and root are shared.
-			assert.equal(child.modelRequestJournalLeaseBinding, parent.modelRequestJournalLeaseBinding);
-			assert.equal(resolveModelRequestScope(child).rootSessionId, resolveModelRequestScope(parent).rootSessionId);
-			assertJournalExecutionIdentity(child);
-			assert.throws(() => assertJournalExecutionIdentity(parent, child), unavailable);
-			assert.throws(() => assertJournalExecutionIdentity(child, parent), unavailable);
-			const childHandover = childModelRequestRootOf(child);
-			assert.throws(
-				() => runWithModelRequestExecution(child, () => resolveModelRequestRootSource(handover)),
-				unavailable,
-			);
-			assert.throws(
-				() => runWithModelRequestExecution(parent, () => resolveModelRequestRootSource(childHandover)),
-				unavailable,
-			);
-			assert.throws(
-				() => runWithModelRequestExecution(alias, () => resolveModelRequestRootSource({
-					...handover, parentExecution: undefined,
-				})),
-				/genuine parent/,
-			);
-			const fake: unknown = Object.freeze({ ...parent });
-			assert.throws(() => assertJournalExecutionIdentity(fake, parent), unavailable);
-			assert.throws(() => assertJournalExecutionIdentity(parent, fake as ModelRequestExecution), unavailable);
-			assert.throws(() => runWithModelRequestExecution(alias, () => resolveModelRequestRootSource({
-				...handover, parentExecution: fake as ModelRequestExecution,
-			})), unavailable);
-			assert.throws(() => resolveModelRequestRootSource({ ...handover, parentExecution: undefined }), /genuine parent/);
-			assert.throws(() => resolveModelRequestRootSource({ ...handover, rootSessionId: "another-root" }), /differs/);
-			await childCell.close();
-			await root.close();
-			// Pure family identity survives revocation but never grants readiness or revives a handover.
-			assertJournalExecutionIdentity(parent);
-			assertJournalExecutionIdentity(parent, alias);
-			assertJournalExecutionIdentity(alias, parent);
-			assert.throws(() => assertJournalExecutionReady(parent), unavailable);
-			assert.throws(() => assertJournalExecutionReady(alias), unavailable);
-			assert.throws(() => resolveModelRequestRootSource(handover), unavailable);
-			assert.throws(() => childModelRequestRootOf(child), unavailable);
-		});
+				await composeJournalSession({ cell: root, root, binding, execution: parent });
+				const handover = childModelRequestRootOf(parent);
+				assert(Object.isFrozen(handover));
+				assert.equal(handover.parentExecution, parent);
+				assert.equal(handover.rootSessionId, root.getSessionId());
+				const explicitSource = resolveModelRequestRootSource(handover);
+				assert.equal(explicitSource.kind, "inherited");
+				if (explicitSource.kind !== "inherited") throw new Error("expected inherited root");
+				assert.equal(explicitSource.parentExecution, parent);
+				const childCell = openCell();
+				const child = createSessionModelRequestExecution({
+					getSessionId: () => childCell.getSessionId(),
+					root: explicitSource,
+					agent: { kind: "sub", id: "Child", name: "child", depth: 1, parentId: ROOT_AGENT_ID },
+				});
+				await composeJournalSession({ cell: childCell, root, binding, execution: child });
+				assertJournalExecutionReady(child);
+				assert.equal(childModelRequestRootOf(child).parentExecution, child);
+				const alias = deriveModelRequestExecution(parent, { purpose: "advisor" });
+				assert.notEqual(alias, parent);
+				assertJournalExecutionIdentity(parent, alias);
+				assertJournalExecutionIdentity(alias, parent);
+				const aliasHandover = childModelRequestRootOf(alias);
+				assert.equal(aliasHandover.parentExecution, alias);
+				runWithModelRequestExecution(parent, () => {
+					const source = resolveModelRequestRootSource(aliasHandover);
+					assert.equal(source.kind === "inherited" && source.parentExecution, alias);
+				});
+				await runWithModelRequestExecution(alias, async () => {
+					const source = resolveModelRequestRootSource(handover);
+					assert.equal(source.kind === "inherited" && source.parentExecution, parent);
+					const derivedChildCell = openCell();
+					const derivedChild = createSessionModelRequestExecution({
+						getSessionId: () => derivedChildCell.getSessionId(),
+						root: source,
+						agent: { kind: "sub", id: "DerivedChild", name: "child", depth: 1, parentId: ROOT_AGENT_ID },
+					});
+					await composeJournalSession({ cell: derivedChildCell, root, binding, execution: derivedChild });
+					assertJournalExecutionReady(derivedChild);
+					assert.equal(childModelRequestRootOf(derivedChild).parentExecution, derivedChild);
+					await derivedChildCell.close();
+				});
+				// A child has its own family even though the actual binding and root are shared.
+				assert.equal(child.modelRequestJournalLeaseBinding, parent.modelRequestJournalLeaseBinding);
+				assert.equal(resolveModelRequestScope(child).rootSessionId, resolveModelRequestScope(parent).rootSessionId);
+				assertJournalExecutionIdentity(child);
+				assert.throws(() => assertJournalExecutionIdentity(parent, child), unavailable);
+				assert.throws(() => assertJournalExecutionIdentity(child, parent), unavailable);
+				const childHandover = childModelRequestRootOf(child);
+				assert.throws(
+					() => runWithModelRequestExecution(child, () => resolveModelRequestRootSource(handover)),
+					unavailable,
+				);
+				assert.throws(
+					() => runWithModelRequestExecution(parent, () => resolveModelRequestRootSource(childHandover)),
+					unavailable,
+				);
+				assert.throws(
+					() =>
+						runWithModelRequestExecution(alias, () =>
+							resolveModelRequestRootSource({
+								...handover,
+								parentExecution: undefined,
+							}),
+						),
+					/genuine parent/,
+				);
+				const fake: unknown = Object.freeze({ ...parent });
+				assert.throws(() => assertJournalExecutionIdentity(fake, parent), unavailable);
+				assert.throws(() => assertJournalExecutionIdentity(parent, fake as ModelRequestExecution), unavailable);
+				assert.throws(
+					() =>
+						runWithModelRequestExecution(alias, () =>
+							resolveModelRequestRootSource({
+								...handover,
+								parentExecution: fake as ModelRequestExecution,
+							}),
+						),
+					unavailable,
+				);
+				assert.throws(
+					() => resolveModelRequestRootSource({ ...handover, parentExecution: undefined }),
+					/genuine parent/,
+				);
+				assert.throws(
+					() => resolveModelRequestRootSource({ ...handover, rootSessionId: "another-root" }),
+					/differs/,
+				);
+				await childCell.close();
+				await root.close();
+				// Pure family identity survives revocation but never grants readiness or revives a handover.
+				assertJournalExecutionIdentity(parent);
+				assertJournalExecutionIdentity(parent, alias);
+				assertJournalExecutionIdentity(alias, parent);
+				assert.throws(() => assertJournalExecutionReady(parent), unavailable);
+				assert.throws(() => assertJournalExecutionReady(alias), unavailable);
+				assert.throws(() => resolveModelRequestRootSource(handover), unavailable);
+				assert.throws(() => childModelRequestRootOf(child), unavailable);
+			},
+		);
 	} finally {
 		for (const cell of cells.reverse()) await cell.close();
 		retireModelRequestWriterCredential(requester);

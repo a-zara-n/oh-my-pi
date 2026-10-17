@@ -2167,7 +2167,6 @@ export const taskToolRenderer = {
 /** Source of an agent definition */
 export type AgentSource = "bundled" | "user" | "project";
 
-
 /** Origin of the schema selected for a structured subagent invocation. */
 export type StructuredSubagentSchemaSource = "caller" | "agent" | "session" | "none";
 

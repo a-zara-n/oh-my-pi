@@ -1,8 +1,4 @@
-import {
-	type Context,
-	type Model,
-	type SimpleStreamOptions,
-} from "@oh-my-pi/pi-ai";
+import { type Context, type Model, type SimpleStreamOptions } from "@oh-my-pi/pi-ai";
 import type { Api, AssistantMessage, Message, Usage } from "@oh-my-pi/pi-utils/model-data";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { registerCustomApi } from "@oh-my-pi/pi-ai/api-registry";

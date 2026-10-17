@@ -59,7 +59,8 @@ export function replyBody(reply: LoopbackReply): string {
 function sseFrames(events: readonly unknown[], withEventName: boolean): string[] {
 	return events.map(event => {
 		const data = typeof event === "string" ? event : JSON.stringify(event);
-		const name = withEventName && typeof event === "object" && event !== null && "type" in event ? event.type : undefined;
+		const name =
+			withEventName && typeof event === "object" && event !== null && "type" in event ? event.type : undefined;
 		return `${name === undefined ? "" : `event: ${String(name)}\n`}data: ${data}\n\n`;
 	});
 }
@@ -72,7 +73,11 @@ export function sseReply(events: readonly unknown[], options: { readonly eventNa
 }
 
 /** A JSON error reply in the shape the provider SDKs parse. */
-export function errorReply(status: number, message: string, headers: Readonly<Record<string, string>> = {}): LoopbackReply {
+export function errorReply(
+	status: number,
+	message: string,
+	headers: Readonly<Record<string, string>> = {},
+): LoopbackReply {
 	return {
 		status,
 		headers: { "content-type": "application/json", ...headers },

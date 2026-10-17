@@ -11,13 +11,7 @@ import {
 } from "@oh-my-pi/pi-ai/model-request-gate";
 import type { ModelRequestModelRef } from "@oh-my-pi/pi-utils/model-request-data";
 import { complete, completeSimple, stream, streamSimple } from "@oh-my-pi/pi-ai/stream";
-import type {
-	AssistantMessageEvent,
-	Context,
-	FetchImpl,
-	Model,
-	SimpleStreamOptions,
-} from "@oh-my-pi/pi-ai/types";
+import type { AssistantMessageEvent, Context, FetchImpl, Model, SimpleStreamOptions } from "@oh-my-pi/pi-ai/types";
 import type { Api, AssistantMessage, Usage } from "@oh-my-pi/pi-utils/model-data";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import * as bedrockProvider from "@oh-my-pi/pi-ai/providers/amazon-bedrock";
@@ -277,11 +271,14 @@ for (const api of APIS) {
 						const lying: unknown = answer;
 						gate.setHandler(lying as FixtureGateHandler);
 
-						const result = await entry.run(loopbackModel(api, loopback.origin), helloContext(), { apiKey: SECRET });
+						const result = await entry.run(loopbackModel(api, loopback.origin), helloContext(), {
+							apiKey: SECRET,
+						});
 
 						expect(loopback.requests).toHaveLength(0);
 						expect(isDenied(result)).toBe(true);
-						if (result.thrown instanceof AIError.ModelRequestDeniedError) expect(result.thrown.code).toBe("gate-error");
+						if (result.thrown instanceof AIError.ModelRequestDeniedError)
+							expect(result.thrown.code).toBe("gate-error");
 						// Terminal: a gate failure is not retried or resent.
 						expect(gate.attempts).toHaveLength(1);
 					},
@@ -501,7 +498,11 @@ describe("credential rotation reaches the gate as a separate attempt", () => {
 
 	test("a denial of the first attempt does not rotate the credential or reach the loopback", async () => {
 		const loopback = serve(scripted(textReplyFor("openai-completions", REPLY_TEXT)));
-		gate.setHandler(async () => ({ type: "deny", code: "no", message: "401 invalid api key, try another credential" }));
+		gate.setHandler(async () => ({
+			type: "deny",
+			code: "no",
+			message: "401 invalid api key, try another credential",
+		}));
 		const resolved: string[] = [];
 		const apiKey: SimpleStreamOptions["apiKey"] = async context => {
 			resolved.push(context.error === undefined ? "first" : "rotated");
@@ -574,7 +575,10 @@ describe("request bodies the core cannot read", () => {
 		];
 	}
 
-	const gates: ReadonlyArray<{ readonly name: string; readonly build: (base: FetchImpl, origin: string) => FetchImpl }> = [
+	const gates: ReadonlyArray<{
+		readonly name: string;
+		readonly build: (base: FetchImpl, origin: string) => FetchImpl;
+	}> = [
 		{ name: "gateFetch", build: base => gateFetch(MODEL_REF, "chat", base) },
 		{
 			name: "transportFetch",
@@ -635,7 +639,12 @@ describe("request bodies the core cannot read", () => {
 		expect(gate.attempts[0]?.wire).toBeUndefined();
 		expect(loopback.requests).toHaveLength(1);
 		expect(leases).toHaveLength(1);
-		expect(leases[0]?.events.map(event => event.type)).toEqual(["beginSend", "observeResponse", "observeChunk", "settle"]);
+		expect(leases[0]?.events.map(event => event.type)).toEqual([
+			"beginSend",
+			"observeResponse",
+			"observeChunk",
+			"settle",
+		]);
 		expect(leases[0]?.settled).toEqual([{ type: "response-ended", status: 200 }]);
 	});
 
@@ -747,7 +756,10 @@ describe("transports the core cannot instrument", () => {
 	});
 
 	/** A transport entry that counts how often it is started and answers at once, in place of the provider's own. */
-	function countingTransport(): { readonly start: (model: Model<Api>) => AssistantMessageEventStream; readonly started: () => number } {
+	function countingTransport(): {
+		readonly start: (model: Model<Api>) => AssistantMessageEventStream;
+		readonly started: () => number;
+	} {
 		let count = 0;
 		return {
 			start(model) {
@@ -810,7 +822,11 @@ describe("transports the core cannot instrument", () => {
 				test(`${entry.name}: the gate is asked once with no wire, and a deny keeps the transport from being started`, async () => {
 					const model = target.model();
 					const started = target.probe();
-					gate.setHandler(async () => ({ type: "deny", code: "loopback-denied", message: "no transport for you" }));
+					gate.setHandler(async () => ({
+						type: "deny",
+						code: "loopback-denied",
+						message: "no transport for you",
+					}));
 
 					const result = await entry.run(model, helloContext(), { apiKey: SECRET });
 

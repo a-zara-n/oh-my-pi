@@ -613,23 +613,22 @@ export class MnemopiSessionState {
 		// The session emits events in its own context, which is not necessarily the one that registered this
 		// listener (and this runs from `/memory reset|rebuild|sync` with no session context active at all). Run each
 		// event under the owning session's context, declared as memory work, rather than whatever is active here.
-		this.unsubscribe = this.session.subscribe(
-			(event: AgentSessionEvent) =>
-				this.session.runInModelRequestContext(() => {
-					if (event.type === "agent_start") {
-						void this.maybeRecallOnAgentStart().catch(error => {
-							this.#logLifecycleFailure(
-								"agent_start recall",
-								this.scoped.recall.map(target => target.bank),
-								error,
-							);
-						});
-					} else if (event.type === "agent_end") {
-						void this.maybeRetainOnAgentEnd(event.messages).catch(error => {
-							this.#logLifecycleFailure("agent_end retention", [this.scoped.retain.bank], error);
-						});
-					}
-				}, "memory"),
+		this.unsubscribe = this.session.subscribe((event: AgentSessionEvent) =>
+			this.session.runInModelRequestContext(() => {
+				if (event.type === "agent_start") {
+					void this.maybeRecallOnAgentStart().catch(error => {
+						this.#logLifecycleFailure(
+							"agent_start recall",
+							this.scoped.recall.map(target => target.bank),
+							error,
+						);
+					});
+				} else if (event.type === "agent_end") {
+					void this.maybeRetainOnAgentEnd(event.messages).catch(error => {
+						this.#logLifecycleFailure("agent_end retention", [this.scoped.retain.bank], error);
+					});
+				}
+			}, "memory"),
 		);
 	}
 	#logLifecycleFailure(operation: string, banks: readonly string[], error: unknown): void {

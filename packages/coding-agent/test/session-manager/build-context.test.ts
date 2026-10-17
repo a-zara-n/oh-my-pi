@@ -2,12 +2,14 @@ import { describe, expect, it, spyOn } from "bun:test";
 import { defaultConvertToLlm } from "@oh-my-pi/pi-agent-core/compaction";
 import type { AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import { buildSessionContext } from "@oh-my-pi/pi-coding-agent/session/session-context";
-import type { BranchSummaryEntry,
+import type {
+	BranchSummaryEntry,
 	CompactionEntry,
 	ModelChangeEntry,
 	SessionEntry,
 	SessionMessageEntry,
-	ThinkingLevelChangeEntry, } from "@oh-my-pi/pi-utils/session-entries";
+	ThinkingLevelChangeEntry,
+} from "@oh-my-pi/pi-utils/session-entries";
 import * as snapcompact from "@oh-my-pi/snapcompact";
 
 function msg(id: string, parentId: string | null, role: "user" | "assistant", text: string): SessionMessageEntry {

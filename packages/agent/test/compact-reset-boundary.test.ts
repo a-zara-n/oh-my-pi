@@ -1,8 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-	DEFAULT_COMPACTION_SETTINGS,
-	prepareCompaction,
-} from "@oh-my-pi/pi-agent-core/compaction";
+import { DEFAULT_COMPACTION_SETTINGS, prepareCompaction } from "@oh-my-pi/pi-agent-core/compaction";
 import type { CompactionEntry, SessionEntry } from "@oh-my-pi/pi-utils/compaction-entries";
 import { createAssistantMessage, createUserMessage } from "./helpers";
 

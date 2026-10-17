@@ -34,7 +34,10 @@ function ordinaryHeader(cwd: string): SessionHeader {
 
 function userEntry(id: string, parentId: string | null = null): SessionMessageEntry {
 	return {
-		type: "message", id, parentId, timestamp: ISO,
+		type: "message",
+		id,
+		parentId,
+		timestamp: ISO,
 		message: { role: "user", content: `message ${id}`, timestamp: 1 },
 	};
 }
@@ -79,39 +82,78 @@ function managedFixture(cwd: string): ManagedFixture {
 	// These bytes neither issue an owner nor register a ready execution.
 	const sessionId = crypto.randomUUID();
 	const header: SessionHeader = {
-		type: "session", version: 3, id: sessionId, timestamp: ISO, cwd,
+		type: "session",
+		version: 3,
+		id: sessionId,
+		timestamp: ISO,
+		cwd,
 		modelRequestJournal: {
-			schemaVersion: 1, journalId: JOURNAL, sessionId,
+			schemaVersion: 1,
+			journalId: JOURNAL,
+			sessionId,
 			epochs: [{ journalOwnerId: OWNER, journalEpoch: EPOCH }],
 		},
 	};
 	const decision: ModelRequestLifecycleRecord = {
-		schemaVersion: 1, event: "decision", coreAttemptId: ATTEMPT, requestId: REQUEST, coreRetryOf: null,
-		rootSessionId: sessionId, sessionId, purpose: "main",
+		schemaVersion: 1,
+		event: "decision",
+		coreAttemptId: ATTEMPT,
+		requestId: REQUEST,
+		coreRetryOf: null,
+		rootSessionId: sessionId,
+		sessionId,
+		purpose: "main",
 		modelRef: { provider: "openai", id: "gpt-5", api: "openai-responses" },
-		atMs: 1, decision: "pass",
+		atMs: 1,
+		decision: "pass",
 	};
 	const metadata: ModelRequestMetadataEntry = {
-		type: "model_request_metadata", id: "metadata1", parentId: null, timestamp: ISO,
-		schemaVersion: 1, journalId: JOURNAL, sessionId, journalOwnerId: OWNER, journalEpoch: EPOCH,
-		seq: 1, record: decision,
+		type: "model_request_metadata",
+		id: "metadata1",
+		parentId: null,
+		timestamp: ISO,
+		schemaVersion: 1,
+		journalId: JOURNAL,
+		sessionId,
+		journalOwnerId: OWNER,
+		journalEpoch: EPOCH,
+		seq: 1,
+		record: decision,
 	};
 	const assistant: SessionMessageEntry = {
-		type: "message", id: "assistant1", parentId: null, timestamp: ISO,
+		type: "message",
+		id: "assistant1",
+		parentId: null,
+		timestamp: ISO,
 		message: {
-			role: "assistant", api: "openai-responses", provider: "openai", model: "gpt-5",
-			stopReason: "stop", timestamp: 1, content: [{ type: "text", text: "reader fixture" }],
+			role: "assistant",
+			api: "openai-responses",
+			provider: "openai",
+			model: "gpt-5",
+			stopReason: "stop",
+			timestamp: 1,
+			content: [{ type: "text", text: "reader fixture" }],
 			usage: {
-				input: 1, output: 2, cacheRead: 0, cacheWrite: 0, totalTokens: 3,
+				input: 1,
+				output: 2,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 3,
 				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 			},
 		},
 	};
 	const linked: ModelRequestMetadataEntry = {
-		...metadata, id: "metadata2", seq: 2,
+		...metadata,
+		id: "metadata2",
+		seq: 2,
 		record: {
-			schemaVersion: 1, sourceKind: "assistant", sourceSessionId: sessionId,
-			sourceEntryId: assistant.id, resultId: null, provenance: { kind: "non-wire", reason: "cache" },
+			schemaVersion: 1,
+			sourceKind: "assistant",
+			sourceSessionId: sessionId,
+			sourceEntryId: assistant.id,
+			resultId: null,
+			provenance: { kind: "non-wire", reason: "cache" },
 		},
 	};
 	return { header, decision, metadata, assistant, linked };
@@ -132,7 +174,8 @@ describe("File principal consumer compatibility regressions", () => {
 	it("creates and persists through the natural TempDir path without a caller realpath workaround", async () => {
 		using dir = TempDir.createSync("@principal-natural-directory-");
 		const manager = await atStage("setup: SessionManager.create with unmodified TempDir.path()", () =>
-			SessionManager.create(dir.path(), dir.path(), new FileSessionStorage()));
+			SessionManager.create(dir.path(), dir.path(), new FileSessionStorage()),
+		);
 		const sessionFile = manager.getSessionFile();
 		if (!sessionFile) throw new Error("Expected a file-backed session");
 		const cell = openFileJournalCell({ cwd: dir.path(), sessionFile });
@@ -144,9 +187,16 @@ describe("File principal consumer compatibility regressions", () => {
 			if (!file) throw new Error("Expected a file-backed session");
 			expect(fs.realpathSync(path.dirname(file))).toBe(fs.realpathSync(dir.path()));
 			expect(manager.getEntry(id)).toBeDefined();
-			expect<readonly (FileEntry | null)[]>((await loadSessionFile(file)).entries).toEqual([manager.getHeader(), ...manager.getEntries()]);
+			expect<readonly (FileEntry | null)[]>((await loadSessionFile(file)).entries).toEqual([
+				manager.getHeader(),
+				...manager.getEntries(),
+			]);
 		} finally {
-			try { await manager.close(); } finally { cell.releaseRetainedEntries(); }
+			try {
+				await manager.close();
+			} finally {
+				cell.releaseRetainedEntries();
+			}
 		}
 	});
 
@@ -155,9 +205,10 @@ describe("File principal consumer compatibility regressions", () => {
 		const file = dir.join("session.jsonl");
 		const header = ordinaryHeader(dir.path());
 		const bytes = await persist(file, [header, userEntry("first")]);
-		const child = Bun.spawn([
-			process.execPath, path.join(import.meta.dir, "fixtures/file-principal-lease-holder.ts"), header.id,
-		], { stdin: "pipe", stdout: "pipe", stderr: "pipe", env: process.env });
+		const child = Bun.spawn(
+			[process.execPath, path.join(import.meta.dir, "fixtures/file-principal-lease-holder.ts"), header.id],
+			{ stdin: "pipe", stdout: "pipe", stderr: "pipe", env: process.env },
+		);
 		let manager: SessionManager | undefined;
 		let cell: FileJournalCell | undefined;
 		try {
@@ -168,16 +219,22 @@ describe("File principal consumer compatibility regressions", () => {
 			expect(new TextDecoder().decode(ready.value).trim()).toBe("READY");
 			// Proves OS lease contention, rather than merely trusting child output.
 			const unexpectedLease = tryAcquireSessionLease(header.id);
-			try { expect(unexpectedLease).toBeNull(); } finally { unexpectedLease?.release(); }
+			try {
+				expect(unexpectedLease).toBeNull();
+			} finally {
+				unexpectedLease?.release();
+			}
 			expect((await loadSessionFile(file)).entries).toEqual([header, userEntry("first")]);
 			manager = await atStage("target: open facade under actual foreign lease", () =>
-				SessionManager.open(file, dir.path(), undefined, { suppressBreadcrumb: true }));
+				SessionManager.open(file, dir.path(), undefined, { suppressBreadcrumb: true }),
+			);
 			cell = openFileJournalCell({ cwd: dir.path(), sessionFile: file });
 			expect(manager.getHeader()).toEqual(header);
 			expect(manager.getEntries()).toEqual([userEntry("first")]);
 			expect(manager.getLeafId()).toBe("first");
 			const html = await exportSessionToHtml(manager, undefined, {
-				outputPath: dir.join("export.html"), includeSubSessions: false,
+				outputPath: dir.join("export.html"),
+				includeSubSessions: false,
 			});
 			expect(await Bun.file(html).text()).toContain("<!DOCTYPE html>");
 			expect(await Bun.file(file).text()).toBe(bytes);
@@ -194,7 +251,10 @@ describe("File principal consumer compatibility regressions", () => {
 			expect(fs.realpathSync(notices[0]!.from)).toBe(fs.realpathSync(file));
 			expect(fs.realpathSync(notices[0]!.to)).toBe(fs.realpathSync(sibling));
 			expect(manager.getEntry(id)).toMatchObject({ id, parentId: "first" });
-			expect<readonly (FileEntry | null)[]>((await loadSessionFile(sibling)).entries).toEqual([manager.getHeader(), ...manager.getEntries()]);
+			expect<readonly (FileEntry | null)[]>((await loadSessionFile(sibling)).entries).toEqual([
+				manager.getHeader(),
+				...manager.getEntries(),
+			]);
 			expect(await Bun.file(file).text()).toBe(bytes);
 		} finally {
 			try {
@@ -215,15 +275,19 @@ describe("File principal consumer compatibility regressions", () => {
 		const oldBytes = await persist(oldFile, [ordinaryHeader(dir.path()), userEntry("old")]);
 		await persist(nextFile, [ordinaryHeader(dir.path()), userEntry("new")]);
 		const manager = await atStage("setup: open old facade before inducing its write failure", () =>
-			SessionManager.open(oldFile, dir.path(), undefined, { suppressBreadcrumb: true }));
+			SessionManager.open(oldFile, dir.path(), undefined, { suppressBreadcrumb: true }),
+		);
 		const old = openFileJournalCell({ cwd: dir.path(), sessionFile: oldFile });
 		const failures: Error[] = [];
 		manager.onPersistenceError(error => failures.push(error));
 		try {
 			// A real failed freshness precondition: no fabricated backend failure.
-			await expect(old.writeTextAtomic(oldFile, oldBytes, {
-				expectedSize: -1, requireAtomicReplace: true,
-			})).rejects.toThrow(SessionWriteConflictError);
+			await expect(
+				old.writeTextAtomic(oldFile, oldBytes, {
+					expectedSize: -1,
+					requireAtomicReplace: true,
+				}),
+			).rejects.toThrow(SessionWriteConflictError);
 			expect(await Bun.file(oldFile).text()).toBe(oldBytes);
 			await atStage("target: switch away from old failed cell and flush new facade", async () => {
 				await manager.setSessionFile(nextFile);
@@ -239,7 +303,9 @@ describe("File principal consumer compatibility regressions", () => {
 			expect(await Bun.file(oldFile).text()).toBe(oldBytes);
 			expect(failures).toEqual([]);
 		} finally {
-			try { await manager.close(); } finally {
+			try {
+				await manager.close();
+			} finally {
 				old.releaseRetainedEntries();
 				openFileJournalCell({ cwd: dir.path(), sessionFile: nextFile }).releaseRetainedEntries();
 			}
@@ -250,14 +316,17 @@ describe("File principal consumer compatibility regressions", () => {
 		using dir = TempDir.createSync("@principal-hot-append-");
 		const file = dir.join("session.jsonl");
 		const history = Array.from({ length: 128 }, (_, index) =>
-			userEntry(`history-${index}`, index ? `history-${index - 1}` : null));
+			userEntry(`history-${index}`, index ? `history-${index - 1}` : null),
+		);
 		await persist(file, [ordinaryHeader(dir.path()), ...history]);
 		const cell = await atStage("setup: open actual hot-append cell", () =>
-			openFileJournalCell({ cwd: dir.path(), sessionFile: file }));
+			openFileJournalCell({ cwd: dir.path(), sessionFile: file }),
+		);
 		try {
 			const writer = await atStage("setup: open actual hot-append writer", () => cell.openWriter(file));
 			await atStage("setup: warm actual hot-append writer", () =>
-				writer.append(`${JSON.stringify(userEntry("warm", "history-127"))}\n`));
+				writer.append(`${JSON.stringify(userEntry("warm", "history-127"))}\n`),
+			);
 			const beforeSize = fs.statSync(file).size;
 			const entry = userEntry("hot", "warm");
 			const line = `${JSON.stringify(entry)}\n`;
@@ -284,16 +353,23 @@ describe("File principal consumer compatibility regressions", () => {
 			expect(cell.getEntries()).toEqual([...history, userEntry("warm", "history-127"), entry]);
 			expect(cell.getLeafId()).toBe(entry.id);
 			expect<readonly FileEntry[]>((await loadSessionFile(file)).entries.slice(1)).toEqual(cell.getEntries());
-		} finally { await disposeCell(cell); }
+		} finally {
+			await disposeCell(cell);
+		}
 	});
 
 	it("keeps v1 migrated IDs and the caller's exact new ID when adopting a raw writer", async () => {
 		using dir = TempDir.createSync("@principal-legacy-writer-");
 		const file = dir.join("session.jsonl");
 		const header = { ...ordinaryHeader(dir.path()), version: 1 };
-		await Bun.write(file, `${JSON.stringify(header)}\n${JSON.stringify({
-			type: "message", timestamp: ISO, message: { role: "user", content: "legacy", timestamp: 1 },
-		})}\n`);
+		await Bun.write(
+			file,
+			`${JSON.stringify(header)}\n${JSON.stringify({
+				type: "message",
+				timestamp: ISO,
+				message: { role: "user", content: "legacy", timestamp: 1 },
+			})}\n`,
+		);
 		const writer = new FileSessionStorage().openWriter(file);
 		const cell = openFileJournalCell({ cwd: dir.path(), sessionFile: file });
 		try {
@@ -312,7 +388,11 @@ describe("File principal consumer compatibility regressions", () => {
 			expect(loaded.entries.slice(1)).toEqual([...prefix, entry]);
 			expect(cell.getExpectedDiskSize()).toBe(Buffer.byteLength(await Bun.file(file).text()));
 		} finally {
-			try { await disposeCell(cell); } finally { await writer.close(); }
+			try {
+				await disposeCell(cell);
+			} finally {
+				await writer.close();
+			}
 		}
 	});
 
@@ -329,7 +409,9 @@ describe("File principal consumer compatibility regressions", () => {
 			const opens = spyOn(fs, "openSync");
 			let writer: SessionStorageWriter | undefined;
 			try {
-				expect(() => { writer = new FileSessionStorage().openWriter(target, { flags: "w" }); }).toThrow();
+				expect(() => {
+					writer = new FileSessionStorage().openWriter(target, { flags: "w" });
+				}).toThrow();
 				const truncations = opens.mock.calls.filter(args => {
 					if (String(args[0]) !== target) return false;
 					const flags = args[1];
@@ -355,16 +437,25 @@ describe("File principal consumer compatibility regressions", () => {
 			const entries = managedEntries(fixture);
 			const bytes = await persist(file, entries);
 			const cell = await atStage("setup: open managed persisted-reader cell", () =>
-				openFileJournalCell({ cwd: dir.path(), sessionFile: file }));
+				openFileJournalCell({ cwd: dir.path(), sessionFile: file }),
+			);
 			try {
 				const options = { expectedSize: Buffer.byteLength(bytes), requireAtomicReplace: true };
 				await atStage(`target: managed no-op ${format} atomic wrapper`, async () => {
 					if (format === "text") await cell.writeTextAtomic(file, bytes, options);
-					else await cell.writeLinesAtomic!(file, entries.map(entry => `${JSON.stringify(entry)}\n`), options);
+					else
+						await cell.writeLinesAtomic!(
+							file,
+							entries.map(entry => `${JSON.stringify(entry)}\n`),
+							options,
+						);
 				});
 				expect(await Bun.file(file).text()).toBe(bytes);
 				expect<readonly FileEntry[]>(cell.getEntries()).toEqual(entries.slice(1));
-				expect((await loadModelRequestJournalFromFile(file)).metadataEntries).toEqual([fixture.metadata, fixture.linked]);
+				expect((await loadModelRequestJournalFromFile(file)).metadataEntries).toEqual([
+					fixture.metadata,
+					fixture.linked,
+				]);
 				// An exact managed copy is still forbidden through raw storage, including a new destination.
 				const copied = dir.join("raw-copy.jsonl");
 				await expect(new FileSessionStorage().writeTextAtomic(copied, bytes)).rejects.toThrow();
@@ -374,7 +465,11 @@ describe("File principal consumer compatibility regressions", () => {
 				const snapshot = cell.getEntries();
 				for (const replacement of [
 					snapshot.filter(entry => entry.id !== fixture.metadata.id),
-					snapshot.map(entry => entry.id === fixture.metadata.id ? { ...fixture.metadata, timestamp: "2026-10-17T00:00:00.000Z" } : entry),
+					snapshot.map(entry =>
+						entry.id === fixture.metadata.id
+							? { ...fixture.metadata, timestamp: "2026-10-17T00:00:00.000Z" }
+							: entry,
+					),
 					[...snapshot, { ...fixture.metadata, id: "forged-metadata", seq: 3 }],
 					[...snapshot, { ...fixture.assistant, id: "forged-source" }],
 				]) {
@@ -382,7 +477,9 @@ describe("File principal consumer compatibility regressions", () => {
 					expect(cell.getEntries()).toEqual(snapshot);
 				}
 				expect(await Bun.file(file).text()).toBe(bytes);
-			} finally { await disposeCell(cell); }
+			} finally {
+				await disposeCell(cell);
+			}
 		},
 	);
 
@@ -391,14 +488,16 @@ describe("File principal consumer compatibility regressions", () => {
 		const file = dir.join("session.jsonl");
 		const bytes = await persist(file, [ordinaryHeader(dir.path()), userEntry("first"), userEntry("second", "first")]);
 		const cell = await atStage("setup: open existing branch cell", () =>
-			openFileJournalCell({ cwd: dir.path(), sessionFile: file }));
+			openFileJournalCell({ cwd: dir.path(), sessionFile: file }),
+		);
 		await atStage("setup: stage draft before reconnect", () => cell.appendEntry(userEntry("draft", "second")));
 		await atStage("setup: select non-tail branch before reconnect", () => cell.branch("first"));
 		const snapshot = cell.getEntries();
 		let manager: SessionManager | undefined;
 		try {
 			manager = await atStage("target: reconnect facade over drafted live cell", () =>
-				SessionManager.open(file, dir.path(), undefined, { suppressBreadcrumb: true }));
+				SessionManager.open(file, dir.path(), undefined, { suppressBreadcrumb: true }),
+			);
 			expect(openFileJournalCell({ cwd: dir.path(), sessionFile: file })).toBe(cell);
 			expect(cell.getEntries()).toEqual(snapshot);
 			expect<readonly FileEntry[]>(manager.getEntries()).toEqual(snapshot);
@@ -406,7 +505,11 @@ describe("File principal consumer compatibility regressions", () => {
 			expect(manager.getLeafId()).toBe("first");
 			expect(await Bun.file(file).text()).toBe(bytes);
 		} finally {
-			try { await manager?.close(); } finally { await disposeCell(cell); }
+			try {
+				await manager?.close();
+			} finally {
+				await disposeCell(cell);
+			}
 		}
 	});
 
@@ -422,7 +525,9 @@ describe("File principal consumer compatibility regressions", () => {
 			const current = openFileJournalCell({ cwd: dir.path(), sessionFile: file });
 			try {
 				expect(current).not.toBe(stale);
-				await atStage("setup: stage draft in reopened current cell", () => current.appendEntry(userEntry("draft", "first")));
+				await atStage("setup: stage draft in reopened current cell", () =>
+					current.appendEntry(userEntry("draft", "first")),
+				);
 				// Refusing a stale operation is fine; silently evicting another current cell is not.
 				try {
 					if (action === "release") stale.releaseRetainedEntries();
@@ -432,7 +537,9 @@ describe("File principal consumer compatibility regressions", () => {
 						await persist(next, [ordinaryHeader(dir.path()), userEntry("other")]);
 						await stale.setSessionFile(next);
 					}
-				} catch { /* A terminal stale handle may reject reuse. */ }
+				} catch {
+					/* A terminal stale handle may reject reuse. */
+				}
 				expect(openFileJournalCell({ cwd: dir.path(), sessionFile: file })).toBe(current);
 				expect(current.getEntries()).toEqual([userEntry("first"), userEntry("draft", "first")]);
 				expect(current.getLeafId()).toBe("draft");
@@ -440,7 +547,11 @@ describe("File principal consumer compatibility regressions", () => {
 				current.appendEntry(userEntry("still-current", "draft"));
 				expect(current.getLeafId()).toBe("still-current");
 			} finally {
-				try { await disposeCell(current); } finally { await disposeCell(stale); }
+				try {
+					await disposeCell(current);
+				} finally {
+					await disposeCell(stale);
+				}
 			}
 		},
 	);

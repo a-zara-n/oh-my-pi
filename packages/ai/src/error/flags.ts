@@ -762,7 +762,8 @@ export function isModelRequestDenied(value: unknown): boolean {
 	let link: unknown = value;
 	while (typeof link === "object" && link !== null && !seen.has(link)) {
 		seen.add(link);
-		if ("errorId" in link && typeof link.errorId === "number" && is(link.errorId, Flag.ModelRequestDenied)) return true;
+		if ("errorId" in link && typeof link.errorId === "number" && is(link.errorId, Flag.ModelRequestDenied))
+			return true;
 		link = "cause" in link ? link.cause : undefined;
 	}
 	return false;

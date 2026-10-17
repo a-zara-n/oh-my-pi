@@ -528,8 +528,11 @@ export function prepareEntryForPersistence(entry: FileEntry, blobStore: BlobStor
 		if (!isModelRequestMetadataEntry(entry)) throw new Error("Invalid model request journal metadata");
 		return entry;
 	}
-	if (entry.type === "session" && entry.modelRequestJournal !== undefined &&
-		!isModelRequestJournalDescriptor(entry.modelRequestJournal, entry.id)) {
+	if (
+		entry.type === "session" &&
+		entry.modelRequestJournal !== undefined &&
+		!isModelRequestJournalDescriptor(entry.modelRequestJournal, entry.id)
+	) {
 		throw new Error("Invalid model request journal descriptor");
 	}
 	return truncateForPersistence(projected, blobStore) as FileEntry;

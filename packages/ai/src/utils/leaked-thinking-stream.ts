@@ -43,7 +43,12 @@ import type {
 	ToolCall,
 } from "@oh-my-pi/pi-utils/model-data";
 import { copyCursorExecResolved } from "./block-symbols";
-import { clearStreamingPartialJson, getStreamingPartialJson, setStreamingPartialJson, type StreamingPartialJsonCarrier } from "@oh-my-pi/pi-utils/model-data";
+import {
+	clearStreamingPartialJson,
+	getStreamingPartialJson,
+	setStreamingPartialJson,
+	type StreamingPartialJsonCarrier,
+} from "@oh-my-pi/pi-utils/model-data";
 import { AssistantMessageEventStream } from "./event-stream";
 
 type StreamingToolCall = ToolCall & StreamingPartialJsonCarrier;

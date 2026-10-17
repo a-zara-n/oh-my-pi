@@ -193,9 +193,7 @@ describe("FileSessionStorage managed journal durability", () => {
 				await storage.drain();
 				expect(renameSpy).toHaveBeenCalledTimes(1);
 				expect(await reader.readText(sessionPath)).toBe(old);
-				expect(fs.readdirSync(tempDir).filter(name => name.endsWith(".tmp") || name.endsWith(".bak"))).toEqual(
-					[],
-				);
+				expect(fs.readdirSync(tempDir).filter(name => name.endsWith(".tmp") || name.endsWith(".bak"))).toEqual([]);
 			});
 		}
 	}

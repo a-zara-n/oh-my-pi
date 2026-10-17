@@ -1,8 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { renderDemotedThinking } from "../dialect/demotion";
-import type {
-	Model,
-} from "../types";
+import type { Model } from "../types";
 import type {
 	Api,
 	AssistantMessage,

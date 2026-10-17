@@ -1005,7 +1005,9 @@ function streamDispatch<TApi extends Api>(
 	limited: boolean,
 ): AssistantMessageEventStream {
 	if (UNINSTRUMENTED_APIS.has(model.api) || isExternalCustomApi(model)) {
-		return gateUninstrumentedTransport(model, options?.signal, () => streamDispatchRequest(model, context, options, limited));
+		return gateUninstrumentedTransport(model, options?.signal, () =>
+			streamDispatchRequest(model, context, options, limited),
+		);
 	}
 	return streamDispatchRequest(model, context, options, limited);
 }

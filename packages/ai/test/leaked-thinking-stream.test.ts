@@ -1,11 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { stream } from "@oh-my-pi/pi-ai/stream";
-import type {
-	AssistantMessageEvent,
-	Context,
-	FetchImpl,
-	Model,
-} from "@oh-my-pi/pi-ai/types";
+import type { AssistantMessageEvent, Context, FetchImpl, Model } from "@oh-my-pi/pi-ai/types";
 import type {
 	AnthropicServerToolContent,
 	AssistantMessage,

@@ -110,7 +110,10 @@ type ParsedDecision =
 	| { readonly type: "allow"; readonly lease: ModelRequestLease }
 	| { readonly type: "deny"; readonly code: string; readonly message: string };
 
-type RaceResult = { readonly kind: "decision"; readonly value: unknown } | { readonly kind: "aborted" } | { readonly kind: "timeout" };
+type RaceResult =
+	| { readonly kind: "decision"; readonly value: unknown }
+	| { readonly kind: "aborted" }
+	| { readonly kind: "timeout" };
 
 interface GateRegistration {
 	readonly owner: string;
@@ -252,7 +255,9 @@ export class ModelRequestRuntime {
 			if (existing.owner === owner && existing.gate === gate && existing.authorizeTimeoutMs === authorizeTimeoutMs) {
 				return;
 			}
-			throw new Error(`a model request gate is already registered by "${existing.owner}"; it cannot be replaced or removed`);
+			throw new Error(
+				`a model request gate is already registered by "${existing.owner}"; it cannot be replaced or removed`,
+			);
 		}
 		this.#registration = Object.freeze({ owner, gate, authorizeTimeoutMs });
 		void this.verifyContext();
@@ -321,10 +326,12 @@ export class ModelRequestRuntime {
 		if (parent !== undefined) assertJournalExecutionIdentity(parent);
 		let binding = root.modelRequestJournalLeaseBinding;
 		const currentRequired = current !== undefined && current.journalState !== "untracked";
-		const required = currentRequired || binding !== undefined || (parent !== undefined && parent.journalState !== "untracked");
+		const required =
+			currentRequired || binding !== undefined || (parent !== undefined && parent.journalState !== "untracked");
 		if (inherited !== undefined) {
 			if (parent === undefined) {
-				if (required) throw new TypeError("required child model request execution needs an explicit genuine parent");
+				if (required)
+					throw new TypeError("required child model request execution needs an explicit genuine parent");
 				// This also rejects an otherwise missing context after the process
 				// latched required; it does not add File requirements to untracked use.
 				assertJournalExecutionReady(undefined);
@@ -469,7 +476,10 @@ export class ModelRequestRuntime {
 			throw signal?.reason ?? new AbortError("model request aborted while awaiting authorization");
 		}
 		if (raced.kind === "timeout") {
-			throw new ModelRequestDeniedError("gate-error", "model request gate did not answer within the configured timeout");
+			throw new ModelRequestDeniedError(
+				"gate-error",
+				"model request gate did not answer within the configured timeout",
+			);
 		}
 		const decision = parseDecision(raced.value);
 		if (decision === undefined) {
@@ -503,7 +513,9 @@ export class ModelRequestRuntime {
 			try {
 				scope = this.#scopeOf(execution);
 			} catch (error) {
-				throw new ModelRequestDeniedError("gate-error", "model request scope could not be resolved", { cause: error });
+				throw new ModelRequestDeniedError("gate-error", "model request scope could not be resolved", {
+					cause: error,
+				});
 			}
 		} else if (this.#standalone) {
 			origin = "standalone";
@@ -554,7 +566,9 @@ export class ModelRequestRuntime {
 				gateCall.then((value): RaceResult => ({ kind: "decision", value })),
 				interrupt,
 			]).catch(error => {
-				throw new ModelRequestDeniedError("gate-error", "model request gate failed while authorizing", { cause: error });
+				throw new ModelRequestDeniedError("gate-error", "model request gate failed while authorizing", {
+					cause: error,
+				});
 			});
 		} finally {
 			raceOver = true;
@@ -639,7 +653,12 @@ export class ModelRequestRuntime {
 		const registeredOutsideSeen: Array<ModelRequestExecution | undefined> = [];
 		emitter.on("registered-outside", () => registeredOutsideSeen.push(this.#currentExecution()));
 		this.runWith(inner, () => emitter.emit("registered-outside"));
-		return seen.length === 1 && seen[0] === undefined && registeredOutsideSeen.length === 1 && registeredOutsideSeen[0] === inner;
+		return (
+			seen.length === 1 &&
+			seen[0] === undefined &&
+			registeredOutsideSeen.length === 1 &&
+			registeredOutsideSeen[0] === inner
+		);
 	}
 }
 
@@ -660,7 +679,8 @@ function isRuntime(value: unknown): value is ModelRequestRuntime {
 export function getModelRequestRuntime(): ModelRequestRuntime {
 	const existing: unknown = Reflect.get(globalThis, RUNTIME_KEY);
 	if (isRuntime(existing)) return existing;
-	if (existing !== undefined) throw new Error("globalThis holds a non-runtime value under the model request runtime key");
+	if (existing !== undefined)
+		throw new Error("globalThis holds a non-runtime value under the model request runtime key");
 	const created = new ModelRequestRuntime({ newAttemptId: () => crypto.randomUUID() });
 	Reflect.set(globalThis, RUNTIME_KEY, created);
 	return created;

@@ -3,10 +3,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { type AgentToolResult, Tokenizer } from "@oh-my-pi/pi-agent-core";
-import {
-	pruneSupersededToolResults,
-	readToolSupersedeKey,
-} from "@oh-my-pi/pi-agent-core/compaction";
+import { pruneSupersededToolResults, readToolSupersedeKey } from "@oh-my-pi/pi-agent-core/compaction";
 import type { SessionEntry } from "@oh-my-pi/pi-utils/compaction-entries";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";

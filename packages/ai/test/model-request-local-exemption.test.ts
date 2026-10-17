@@ -32,7 +32,10 @@ function emptyUsage(): Usage {
 }
 
 /** A transport that answers at once and counts how often it was started. */
-function transport(): { readonly start: (model: Model<Api>) => AssistantMessageEventStream; readonly started: () => number } {
+function transport(): {
+	readonly start: (model: Model<Api>) => AssistantMessageEventStream;
+	readonly started: () => number;
+} {
 	let count = 0;
 	return {
 		start(model) {

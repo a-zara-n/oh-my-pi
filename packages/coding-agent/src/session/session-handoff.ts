@@ -1,12 +1,7 @@
 /** Handoff document generation. Committing the document as a compaction entry is owned by SessionMaintenance. */
 
 import * as path from "node:path";
-import {
-	type Agent,
-	resolveTelemetry,
-	type StreamFn,
-	type ThinkingLevel,
-} from "@oh-my-pi/pi-agent-core";
+import { type Agent, resolveTelemetry, type StreamFn, type ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import { generateHandoffFromContext, renderHandoffPrompt } from "@oh-my-pi/pi-agent-core/compaction";
 import type { Model, SimpleStreamOptions } from "@oh-my-pi/pi-ai";

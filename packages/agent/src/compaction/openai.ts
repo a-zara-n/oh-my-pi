@@ -16,7 +16,11 @@
  */
 
 import { attach, create, Flag, ModelRequestDeniedError, ProviderHttpError } from "@oh-my-pi/pi-ai/error";
-import { gateFetch, getModelRequestExecution, runWithModelRequestLineage } from "@oh-my-pi/pi-ai/model-request-execution";
+import {
+	gateFetch,
+	getModelRequestExecution,
+	runWithModelRequestLineage,
+} from "@oh-my-pi/pi-ai/model-request-execution";
 import { getCodexAttestationHeader } from "@oh-my-pi/pi-ai/providers/openai-codex-attestation";
 import { createOpenAICodexCompactionRequestContext } from "@oh-my-pi/pi-ai/providers/openai-codex-compaction";
 import { applyCodexResponsesLiteShape } from "@oh-my-pi/pi-ai/providers/openai-codex/request-transformer";
@@ -30,12 +34,7 @@ import {
 	parseTextSignature,
 } from "@oh-my-pi/pi-ai/providers/openai-shared";
 import { transformMessages } from "@oh-my-pi/pi-ai/providers/transform-messages";
-import type {
-	CodexCompactionContext,
-	FetchImpl,
-	Model,
-	ProviderSessionState,
-} from "@oh-my-pi/pi-ai/types";
+import type { CodexCompactionContext, FetchImpl, Model, ProviderSessionState } from "@oh-my-pi/pi-ai/types";
 import type { AssistantMessage, Message } from "@oh-my-pi/pi-utils/model-data";
 import {
 	dropMalformedOpenAIResponsesToolCalls,
@@ -994,7 +993,10 @@ export async function requestRemoteCompaction(
 	assertJournalExecutionReady(execution);
 	const required = execution !== undefined && execution.journalState !== "untracked";
 	if (required && opts?.model === undefined) {
-		throw new ModelRequestDeniedError("transport-unsupported", "required remote compaction needs a model-bound builtin dispatch");
+		throw new ModelRequestDeniedError(
+			"transport-unsupported",
+			"required remote compaction needs a model-bound builtin dispatch",
+		);
 	}
 	let endpointPath = endpoint;
 	try {

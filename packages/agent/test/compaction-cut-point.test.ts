@@ -1,9 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-	DEFAULT_COMPACTION_SETTINGS,
-	findCutPoint,
-	prepareCompaction,
-} from "@oh-my-pi/pi-agent-core/compaction";
+import { DEFAULT_COMPACTION_SETTINGS, findCutPoint, prepareCompaction } from "@oh-my-pi/pi-agent-core/compaction";
 import type {
 	BranchSummaryEntry,
 	CustomMessageEntry,

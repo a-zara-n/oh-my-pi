@@ -6,12 +6,7 @@ import { runRootCommand } from "@oh-my-pi/pi-coding-agent/main";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import * as pickerModule from "@oh-my-pi/pi-tui/apps/session-picker";
 import { TempDir } from "@oh-my-pi/pi-utils";
-import {
-	__resetDirsFromEnvForTests,
-	getProjectDir,
-	setAgentDir,
-	setProjectDir,
-} from "@oh-my-pi/pi-utils/dirs";
+import { __resetDirsFromEnvForTests, getProjectDir, setAgentDir, setProjectDir } from "@oh-my-pi/pi-utils/dirs";
 
 it("loads the native resume picker dependencies and supplies working file storage", async () => {
 	using tempDir = TempDir.createSync("@omp-picker-loading-");

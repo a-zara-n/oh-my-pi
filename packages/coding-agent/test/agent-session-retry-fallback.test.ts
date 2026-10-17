@@ -4,12 +4,7 @@ import { scheduler } from "node:timers/promises";
 import { type } from "@oh-my-pi/omptype";
 import { Agent, type AgentTool } from "@oh-my-pi/pi-agent-core";
 import { createCompactionSummaryMessage } from "@oh-my-pi/pi-agent-core/compaction";
-import {
-	Effort,
-	type Model,
-	type ModelUsageHealth,
-	type ProviderSessionState,
-} from "@oh-my-pi/pi-ai";
+import { Effort, type Model, type ModelUsageHealth, type ProviderSessionState } from "@oh-my-pi/pi-ai";
 import type {
 	AnthropicFallbackCreditHandle,
 	Api,
