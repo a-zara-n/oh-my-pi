@@ -121,7 +121,7 @@ import {
 	THINKING_BINDING_CONTROLS_BETA,
 	type TextBlockParam,
 } from "./anthropic-wire";
-import type { Usage as AnthropicWireUsage } from "@oh-my-pi/pi-utils/model-data";
+import type { Usage as AnthropicWireUsage } from "./anthropic-wire";
 import {
 	claudeCodeSdkVersion,
 	claudeCodeSystemInstruction,
