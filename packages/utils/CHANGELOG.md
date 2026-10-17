@@ -22,6 +22,14 @@
   callback overloads retain their settlement lifetime. Verified scope `ownerId` now projects
   the credential's actual raw writer-owner identity, not a journal-owner UUID. New regressions
   and the real-scope/OS-lock smoke artifact are for parent execution, not worker verification.
+- Connected File composition to registry v2 writer-owner mappings, genuine parent execution
+  families and one-use retained-root send admission. Registration/header readback and each
+  source/lifecycle acknowledgement check the same verified writer mapping; historical v1
+  registries remain readable but cannot compose a managed owner.
+- Journal logical close rejects new work, joins accepted source queues and descendant closes,
+  and shares its actual completion promise with concurrent close callers. This is not the
+  separate startup binding-lifetime join or the pending cross-ALS family-comparison contract.
+  Worker-side verification was not run; managed sending is not accepted by these notes.
 - Added the isolated audit SQLite preload, a fixed source-owned VFS control codec, exclusive
   STORE_ID/database creation and per-connection identity/generation registry. The authority reader
   now verifies actual owned main/WAL/shm and live writer generations in one real RO snapshot rather

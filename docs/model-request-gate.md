@@ -222,6 +222,18 @@ root synchronously in `finally`, including an unused admission and a throwing
 lease/begin/builtin; only afterwards is the returned fetch Promise awaited.
 Release/start failures are retained together, not converted to success.
 
+The leaf binds each admission to the exact execution and permit objects, current
+File/root generations, registry epoch and verified writer-owner mapping. Ending
+an admission is synchronous and irreversible; neither repeated `end` nor a new
+`prepare` with an already attempted permit restores it. Source descriptors and
+metadata stay at schema 1; only registry descriptors/entries use schema 2.
+
+Journal logical close stops new work and joins its accepted queues and descendant
+logical closes before recording termination. This does not by itself connect an
+outer startup binding callback to all session lifetimes. That private lifetime
+join and exact cross-ALS same-family comparison remain separate contract work;
+these changes are not a declaration of managed-send acceptance.
+
 Before builtin invocation, failure settles the lease as `not-sent`. Once
 invocation has begun, even a synchronous throw or a failed release is
 `request-failed` with `sent: "maybe"`, never proof of zero charge. Existing
