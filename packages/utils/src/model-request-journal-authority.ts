@@ -4,8 +4,10 @@ import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync } fr
 import { isAbsolute } from "node:path";
 import {
 	beginClosingBindingLifetime,
+	connectBindingWorkAuth,
 	finishBindingLifetime,
 	initializeBindingLifetime,
+	joinBindingOuterWorkDrains,
 	joinBindingPrincipalDrains,
 } from "../internal/model-request-journal-binding-lifetime";
 import {
@@ -709,6 +711,9 @@ export async function withVerifiedModelRequestJournalBinding<T>(
 				});
 				bindings.set(verifiedBinding, state);
 				initializeBindingLifetime(verifiedBinding);
+				connectBindingWorkAuth(verifiedBinding, () => {
+					verify(state);
+				});
 				binding = verifiedBinding;
 				const result = await use(verifiedBinding);
 				verify(state);
@@ -725,6 +730,11 @@ export async function withVerifiedModelRequestJournalBinding<T>(
 					}
 					// Keep genuine authority and the outer native leases alive for accepted
 					// continuations and logical close; closing rejects new work privately.
+					try {
+						await joinBindingOuterWorkDrains(binding);
+					} catch (error) {
+						failures.push(error);
+					}
 					try {
 						await joinBindingPrincipalDrains(binding);
 					} catch (error) {

@@ -26,6 +26,7 @@ import {
 	type ModelRequestJournalLeaseBinding,
 	type ModelRequestJournalRootLeaseScope,
 	type ModelRequestJournalRetainedRootScope,
+	modelRequestJournalAuthorityRuntimeIdentity,
 	retainVerifiedModelRequestJournalRoot,
 	withVerifiedModelRequestJournalLeases,
 } from "./model-request-journal-authority";
@@ -55,7 +56,11 @@ import { getSessionsDir } from "./dirs";
 import { parseSessionContent } from "./session-file-reader";
 import { migrateToCurrentVersion } from "./session-migrations";
 import { validateModelRequestRegistry } from "./model-request-registry";
-import { registerBindingPrincipal } from "../internal/model-request-journal-binding-lifetime";
+import {
+	registerBindingPrincipal,
+	registerJournalOuterWork,
+	settleJournalOuterWork,
+} from "../internal/model-request-journal-binding-lifetime";
 
 interface FileMutationGuard {
 	body(content: string): void;
@@ -2105,6 +2110,56 @@ export function createJournalExecution(
 	const execution = Object.freeze(new JournalExecutionImpl());
 	executionStates.set(execution, { family, agent: Object.freeze({ ...agent }), purpose: input.purpose });
 	return execution;
+}
+
+const journalWorkBrand: unique symbol = Symbol("journal-work");
+
+export type JournalWorkOutcome =
+	| { readonly type: "fulfilled" }
+	| { readonly type: "rejected"; readonly error: unknown };
+
+export interface JournalWorkHandle {
+	readonly [journalWorkBrand]: true;
+}
+
+function createJournalWorkHandle(): JournalWorkHandle {
+	return Object.freeze({ [journalWorkBrand]: true }) as JournalWorkHandle;
+}
+
+function assertGenuineBindingForOuterWork(binding: ModelRequestJournalLeaseBinding): void {
+	if (
+		!binding ||
+		typeof binding !== "object" ||
+		binding.runtimeIdentity !== modelRequestJournalAuthorityRuntimeIdentity ||
+		typeof binding.rootSessionId !== "string" ||
+		!binding.rootSessionId
+	)
+		unavailable();
+}
+
+export function beginJournalBindingWork(binding: ModelRequestJournalLeaseBinding): JournalWorkHandle {
+	assertGenuineBindingForOuterWork(binding);
+	const handle = createJournalWorkHandle();
+	registerJournalOuterWork(binding, handle);
+	return handle;
+}
+
+export function beginJournalExecutionWork(execution: ModelRequestExecution): JournalWorkHandle | undefined {
+	const state = requireExecution(execution);
+	const status = familyState(state.family);
+	if (status === "untracked") return undefined;
+	if (status === "required-faulted" || status === "required-revoked") unavailable();
+	const binding = state.family.binding;
+	if (!binding) unavailable();
+	assertGenuineBindingForOuterWork(binding);
+	const handle = createJournalWorkHandle();
+	registerJournalOuterWork(binding, handle);
+	return handle;
+}
+
+export function endJournalWork(handle: JournalWorkHandle, outcome: JournalWorkOutcome): void {
+	if (!handle || typeof handle !== "object" || (handle as JournalWorkHandle)[journalWorkBrand] !== true) unavailable();
+	settleJournalOuterWork(handle, outcome);
 }
 
 export function deriveJournalExecution(

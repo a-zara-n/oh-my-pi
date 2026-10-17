@@ -16,10 +16,14 @@ test("public composition resolves and the actual private lifetime remains availa
 	);
 	expect(Object.keys(lifetime).sort()).toEqual([
 		"beginClosingBindingLifetime",
+		"connectBindingWorkAuth",
 		"finishBindingLifetime",
 		"initializeBindingLifetime",
+		"joinBindingOuterWorkDrains",
 		"joinBindingPrincipalDrains",
 		"registerBindingPrincipal",
+		"registerJournalOuterWork",
+		"settleJournalOuterWork",
 	]);
 	for (const operation of Object.values(lifetime)) expect(typeof operation).toBe("function");
 });

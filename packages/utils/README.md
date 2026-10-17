@@ -160,6 +160,28 @@ DES-004 revision 11 adds synchronous retained-root operations on the same kernel
 Existing verified callback APIs and raw synchronous/native-Promise overloads keep their callback
 settlement lifetimes for compose/append/ack. The retained API is for the send admission's synchronous
 end, not a substitute for joining principal work/drain before ending the binding's writer lifetime.
+
+DES-004 revision 13 / ADR-012 adds **outer work lifetime** on the existing
+`@oh-my-pi/pi-utils/model-request-journal-composition` subpath only (no package index re-export):
+
+- `JournalWorkOutcome`, `JournalWorkHandle`, `beginJournalBindingWork(binding)`,
+  `beginJournalExecutionWork(execution)` (genuine untracked returns `undefined` only),
+  `endJournalWork(handle, outcome)`.
+- Handles are opaque branded objects tracked in a private `WeakMap` for **terminal accounting only**.
+  They are not a second auth surface for compose/send/I/O. `end` accepts exact active handles even
+  after closing/retire/fault; it does not re-require binding=open or execution ready.
+- `beginJournalBindingWork` synchronously reuses the authority-installed live binding closure before
+  the first `await`. `beginJournalExecutionWork` resolves binding from composition private state and
+  rejects forged executions, required rows without a genuine binding, and fault/revoked families.
+- Authority termination order: synchronous closing (new `begin`/compose/send rejected) → join all
+  registered outer work settlements → existing File principal drain → retained root cleanup → binding
+  end → raw lease release. Outer work must not enqueue the authority/principal queue or register the
+  authority join promise as work (no self-wait).
+- Unsettled actual producers keep the binding alive; timeouts are not converted to success. Missing
+  `end`/`begin` pairs are an availability risk, not a sandbox boundary. **Implementation acceptance
+  (AC-OL-01〜14, E/S caller wiring, separate-process lease) is not claimed here.**
+- `package.json` explicitly denies `./internal/model-request-journal-binding-lifetime` (and `.js`/`.ts`
+  aliases). The internal lifetime module remains relative-import only.
 No public proof/setter/registration or secret getter is added. Private identity registries are
 not a sandbox against arbitrary code or FFI already running inside the host process.
 

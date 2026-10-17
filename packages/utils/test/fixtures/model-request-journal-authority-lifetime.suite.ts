@@ -9,16 +9,24 @@ import {
 	type ModelRequestJournalRetainedRootScope,
 } from "../../src/model-request-journal-authority";
 import {
+	modelRequestJournalAuthorityRuntimeIdentity,
+	type ModelRequestJournalLeaseBinding,
+} from "../../src/model-request-journal-authority";
+import {
 	appendJournalMetadata,
+	beginJournalBindingWork,
+	beginJournalExecutionWork,
 	beginJournalSend,
 	composeJournalSession,
 	createJournalExecution,
 	endJournalSendStart,
+	endJournalWork,
 	prepareJournalSend,
 	tryAcquireSessionLease,
 	type ClosedCoreAttemptIdentity,
 	type FileJournalCell,
 	type JournalSession,
+	type JournalWorkHandle,
 	type ModelRequestExecution,
 	type OpaqueSendAdmission,
 } from "../../src/model-request-journal-composition";
@@ -265,6 +273,131 @@ mac("authority private binding lifetime with actual File principals", () => {
 			endJournalSendStart(prepared.admission);
 		} finally {
 			await fixture.close();
+		}
+	});
+
+	test("outer journal work rejects forged bindings and handles while accepting genuine active ends", async () => {
+		const fixture = new R11JournalFixture();
+		try {
+			const root = fixture.open();
+			await fixture.withBinding(root, async binding => {
+				const forged = Object.freeze({
+					runtimeIdentity: modelRequestJournalAuthorityRuntimeIdentity,
+					rootSessionId: root.getSessionId(),
+				}) as ModelRequestJournalLeaseBinding;
+				expect(() => beginJournalBindingWork(forged)).toThrow("Journal binding unverified");
+				const work = beginJournalBindingWork(binding);
+				const copy = { ...work } as JournalWorkHandle;
+				expect(() => endJournalWork(copy, { type: "fulfilled" })).toThrow();
+				endJournalWork(work, { type: "fulfilled" });
+				expect(() => endJournalWork(work, { type: "fulfilled" })).toThrow("Journal work handle rejected");
+			});
+		} finally {
+			await fixture.close();
+		}
+	});
+
+	test("beginJournalExecutionWork returns undefined only for genuine untracked executions", async () => {
+		const fixture = new R11JournalFixture();
+		try {
+			const root = fixture.open();
+			await fixture.withBinding(root, async binding => {
+				const untracked = createJournalExecution({
+					agent: { id: randomUUID(), kind: "main", name: "untracked", depth: 0 },
+					purpose: "main",
+				});
+				expect(beginJournalExecutionWork(untracked)).toBeUndefined();
+				const pending = createJournalExecution({
+					binding,
+					agent: { id: randomUUID(), kind: "main", name: "pending", depth: 0 },
+					purpose: "main",
+				});
+				const work = beginJournalExecutionWork(pending);
+				if (!work) throw new Error("Expected pending outer work handle");
+				endJournalWork(work, { type: "fulfilled" });
+			});
+		} finally {
+			await fixture.close();
+		}
+	});
+
+	test("required pending without a genuine binding rejects beginJournalExecutionWork", async () => {
+		const fixture = new R11JournalFixture();
+		try {
+			const root = fixture.open();
+			await fixture.withBinding(root, async binding => {
+				createJournalExecution({
+					binding,
+					agent: { id: randomUUID(), kind: "main", name: "latch", depth: 0 },
+					purpose: "main",
+				});
+				const missing = createJournalExecution({
+					agent: { id: randomUUID(), kind: "main", name: "missing-binding", depth: 0 },
+					purpose: "main",
+				});
+				expect(() => beginJournalExecutionWork(missing)).toThrow();
+			});
+		} finally {
+			await fixture.close();
+		}
+	});
+
+	test("unsettled outer work keeps authority alive and rejected child work survives a fulfilled sibling", async () => {
+		const fixture = new R11JournalFixture();
+		const externalEnd = Promise.withResolvers<void>();
+		let operation: Promise<void> | undefined;
+		const childFailure = new Error("child outer work rejected");
+		try {
+			const root = fixture.open();
+			operation = fixture.withBinding(root, async binding => {
+				const rejected = beginJournalBindingWork(binding);
+				const fulfilled = beginJournalBindingWork(binding);
+				endJournalWork(rejected, { type: "rejected", error: childFailure });
+				await externalEnd.promise;
+				endJournalWork(fulfilled, { type: "fulfilled" });
+			});
+			void operation.catch(() => {});
+			await Promise.resolve();
+			expect(closedSessions(root)).toEqual([]);
+			externalEnd.resolve();
+			await expect(operation).rejects.toBe(childFailure);
+			expect(closedSessions(root)).toEqual([root.getSessionId()]);
+		} finally {
+			externalEnd.resolve();
+			try {
+				await operation;
+			} finally {
+				await fixture.close();
+			}
+		}
+	});
+
+	test("closing rejects new outer work while an active handle can still end", async () => {
+		const fixture = new R11JournalFixture();
+		const hold = Promise.withResolvers<void>();
+		let operation: Promise<void> | undefined;
+		let binding!: ModelRequestJournalLeaseBinding;
+		let work!: JournalWorkHandle;
+		try {
+			const root = fixture.open();
+			operation = fixture.withBinding(root, async verified => {
+				binding = verified;
+				work = beginJournalBindingWork(verified);
+				hold.resolve();
+			});
+			void operation.catch(() => {});
+			await hold.promise;
+			await Promise.resolve();
+			expect(() => beginJournalBindingWork(binding)).toThrow("Journal binding no longer accepts work");
+			endJournalWork(work, { type: "fulfilled" });
+			await operation;
+		} finally {
+			hold.resolve();
+			try {
+				await operation;
+			} finally {
+				await fixture.close();
+			}
 		}
 	});
 

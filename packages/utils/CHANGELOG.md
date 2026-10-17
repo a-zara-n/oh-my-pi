@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Outer work lifetime on `@oh-my-pi/pi-utils/model-request-journal-composition`: `JournalWorkOutcome`,
+  `JournalWorkHandle`, `beginJournalBindingWork`, `beginJournalExecutionWork`, and `endJournalWork`.
+  Authority wires a package-private live-binding closure at initialization; termination joins outer work
+  before the existing principal drain. Explicit `package.json` null exports block the internal lifetime
+  subpath. AC-OL runtime acceptance and E/S canonical caller wiring remain separate work.
+
 - Isolated native journal lifetime/composition suites in dedicated Bun processes so their
   irreversible required-process state cannot leak into ordinary transport tests. Original
   assertions and child failures remain visible; production readiness checks are unchanged.
