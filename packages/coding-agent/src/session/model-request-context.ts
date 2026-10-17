@@ -67,6 +67,9 @@ export function resolveModelRequestRootSource(
 		activeExecution !== undefined && activeExecution.journalState !== "untracked";
 	if (required) {
 		if (activeExecution !== undefined) {
+			if (parentExecution !== undefined) {
+				assertJournalExecutionIdentity(parentExecution, activeExecution);
+			}
 			assertJournalExecutionReady(activeExecution);
 			if (modelRequestJournalLeaseBinding !== activeExecution.modelRequestJournalLeaseBinding) {
 				throw new Error("a managed child must explicitly retain its parent's model request journal binding");

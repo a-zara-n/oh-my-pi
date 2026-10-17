@@ -57,6 +57,7 @@ function createExecution(candidate?: unknown): ModelRequestExecution {
 
 function assertPending(execution: ModelRequestExecution): void {
 	assertJournalExecutionIdentity(execution);
+	assertJournalExecutionIdentity(execution, execution);
 	assert.equal(execution.journalState, "required-pending");
 	assert.equal(execution.modelRequestScope, undefined);
 	assert.throws(() => assertJournalExecutionReady(execution), unavailable);
@@ -215,6 +216,8 @@ function assertFakeExecutionCannotReady(): void {
 		modelRequestScope: { sessionId: "root", rootSessionId: "root", purpose: "main", agent },
 	});
 	assert.throws(() => assertJournalExecutionIdentity(fake), unavailable);
+	assert.throws(() => assertJournalExecutionIdentity(fake, execution), unavailable);
+	assert.throws(() => assertJournalExecutionIdentity(execution, fake as ModelRequestExecution), unavailable);
 	assert.throws(() => assertJournalExecutionReady(fake as ModelRequestExecution), unavailable);
 	assert.throws(() => childModelRequestRootOf(fake as ModelRequestExecution), unavailable);
 	assert.throws(() => resolveModelRequestRootSource({
@@ -292,15 +295,65 @@ async function assertGenuineParentHandover(): Promise<void> {
 			assertJournalExecutionReady(child);
 			assert.equal(childModelRequestRootOf(child).parentExecution, child);
 			const alias = deriveModelRequestExecution(parent, { purpose: "advisor" });
-			runWithModelRequestExecution(alias, () => {
+			assert.notEqual(alias, parent);
+			assertJournalExecutionIdentity(parent, alias);
+			assertJournalExecutionIdentity(alias, parent);
+			const aliasHandover = childModelRequestRootOf(alias);
+			assert.equal(aliasHandover.parentExecution, alias);
+			runWithModelRequestExecution(parent, () => {
+				const source = resolveModelRequestRootSource(aliasHandover);
+				assert.equal(source.kind === "inherited" && source.parentExecution, alias);
+			});
+			await runWithModelRequestExecution(alias, async () => {
 				const source = resolveModelRequestRootSource(handover);
 				assert.equal(source.kind === "inherited" && source.parentExecution, parent);
-				createSessionModelRequestExecution({ getSessionId: () => "pending-same-family", root: source, agent });
+				const derivedChildCell = openCell();
+				const derivedChild = createSessionModelRequestExecution({
+					getSessionId: () => derivedChildCell.getSessionId(), root: source,
+					agent: { kind: "sub", id: "DerivedChild", name: "child", depth: 1, parentId: ROOT_AGENT_ID },
+				});
+				await composeJournalSession({ cell: derivedChildCell, root, binding, execution: derivedChild });
+				assertJournalExecutionReady(derivedChild);
+				assert.equal(childModelRequestRootOf(derivedChild).parentExecution, derivedChild);
+				await derivedChildCell.close();
 			});
+			// A child has its own family even though the actual binding and root are shared.
+			assert.equal(child.modelRequestJournalLeaseBinding, parent.modelRequestJournalLeaseBinding);
+			assert.equal(resolveModelRequestScope(child).rootSessionId, resolveModelRequestScope(parent).rootSessionId);
+			assertJournalExecutionIdentity(child);
+			assert.throws(() => assertJournalExecutionIdentity(parent, child), unavailable);
+			assert.throws(() => assertJournalExecutionIdentity(child, parent), unavailable);
+			const childHandover = childModelRequestRootOf(child);
+			assert.throws(
+				() => runWithModelRequestExecution(child, () => resolveModelRequestRootSource(handover)),
+				unavailable,
+			);
+			assert.throws(
+				() => runWithModelRequestExecution(parent, () => resolveModelRequestRootSource(childHandover)),
+				unavailable,
+			);
+			assert.throws(
+				() => runWithModelRequestExecution(alias, () => resolveModelRequestRootSource({
+					...handover, parentExecution: undefined,
+				})),
+				/genuine parent/,
+			);
+			const fake: unknown = Object.freeze({ ...parent });
+			assert.throws(() => assertJournalExecutionIdentity(fake, parent), unavailable);
+			assert.throws(() => assertJournalExecutionIdentity(parent, fake as ModelRequestExecution), unavailable);
+			assert.throws(() => runWithModelRequestExecution(alias, () => resolveModelRequestRootSource({
+				...handover, parentExecution: fake as ModelRequestExecution,
+			})), unavailable);
 			assert.throws(() => resolveModelRequestRootSource({ ...handover, parentExecution: undefined }), /genuine parent/);
 			assert.throws(() => resolveModelRequestRootSource({ ...handover, rootSessionId: "another-root" }), /differs/);
 			await childCell.close();
 			await root.close();
+			// Pure family identity survives revocation but never grants readiness or revives a handover.
+			assertJournalExecutionIdentity(parent);
+			assertJournalExecutionIdentity(parent, alias);
+			assertJournalExecutionIdentity(alias, parent);
+			assert.throws(() => assertJournalExecutionReady(parent), unavailable);
+			assert.throws(() => assertJournalExecutionReady(alias), unavailable);
 			assert.throws(() => resolveModelRequestRootSource(handover), unavailable);
 			assert.throws(() => childModelRequestRootOf(child), unavailable);
 		});

@@ -84,7 +84,7 @@ describe("managed model request context isolation", () => {
 		["rejected-promise", "keeps a managed child root unavailable before and after a caller promise rejects"],
 		["resolved-promise", "does not grant readiness when a caller promise resolves to a readiness-shaped DTO"],
 		["fake-execution", "does not accept a readiness-shaped execution DTO as canonical identity"],
-		["genuine-parent", "retains a live genuine required parent and rejects missing, fake, mismatched and revoked handovers"],
+		["genuine-parent", "composes distinct same-family handovers and rejects cross-family, fake, missing and revoked parents"],
 	] as const;
 
 	for (const [scenario, title] of cases) {
