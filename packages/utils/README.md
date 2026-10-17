@@ -86,6 +86,11 @@ system-SQLite connections cannot pass it. Reader assertions independently rechec
 writers on the same path; a reader on A cannot bless a writer still holding B after swap-back.
 Ordinary factory opens without the custom library retain Bun behavior; exclusive creation then
 returns `identity: undefined`, not a substitute pathname-fd proof.
+Inspection includes safe `main`/`wal`/`shm` records (presence `0` pending, `1` present,
+`2` not used; generation/device/inode/uid/mode/nlink), never a native pointer or fd.
+Only unregistered diagnostics carry `error.code = "ERR_JOURNAL_SQLITE_UNREGISTERED"`.
+Ordinary, non-managed callers may classify that code as unsupported only when the audit preload's
+non-writable required-library latch is absent; they must never swallow a native fault or managed claim.
 
 The authority verifier now self-opens an owned RO connection, installs the fixed native authorizer,
 and reads its closed control codec in one actual SELECT-established read transaction. It compares the
