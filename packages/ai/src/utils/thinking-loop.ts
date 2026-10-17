@@ -54,6 +54,7 @@ import * as AIError from "../error";
 import type { Model, StreamOptions } from "../types";
 import type { Api, AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import { AssistantMessageEventStream } from "./event-stream";
+import { beginCurrentExecutionOuterWork } from "./journal-outer-work";
 
 /** Stable lead phrase of the guard's error message; exported for tests. The
  *  message also carries "stream stall" so the session + transport retry
@@ -399,6 +400,7 @@ export function guardThinkingLoopStream(
 	const checkAssistantContent = options?.loopGuard?.checkAssistantContent !== false;
 
 	void (async () => {
+		const transferWork = beginCurrentExecutionOuterWork();
 		let thinkingArmed = true;
 		let textArmed = checkAssistantContent;
 		let textStarted = false;
@@ -460,13 +462,17 @@ export function guardThinkingLoopStream(
 			}
 			if (!outer.done) {
 				try {
-					outer.end(await inner.result());
+					outer.end(await transferWork.track(inner.result()));
 				} catch (err) {
+					transferWork.noteFailure(err);
 					outer.fail(err);
 				}
 			}
 		} catch (err) {
+			transferWork.noteFailure(err);
 			if (!outer.done) outer.fail(err);
+		} finally {
+			await transferWork.end();
 		}
 	})();
 

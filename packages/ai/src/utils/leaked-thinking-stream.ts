@@ -50,6 +50,7 @@ import {
 	type StreamingPartialJsonCarrier,
 } from "@oh-my-pi/pi-utils/model-data";
 import { AssistantMessageEventStream } from "./event-stream";
+import { beginCurrentExecutionOuterWork } from "./journal-outer-work";
 
 type StreamingToolCall = ToolCall & StreamingPartialJsonCarrier;
 
@@ -77,6 +78,7 @@ function syncToolCall(target: StreamingToolCall, source: StreamingToolCall): voi
 export function wrapLeakedThinkingStream(inner: AssistantMessageEventStream): AssistantMessageEventStream {
 	const out = new AssistantMessageEventStream();
 	void (async () => {
+		const transferWork = beginCurrentExecutionOuterWork();
 		try {
 			let projector: LeakedThinkingProjector | undefined;
 			for await (const event of inner) {
@@ -149,13 +151,16 @@ export function wrapLeakedThinkingStream(inner: AssistantMessageEventStream): As
 			}
 			// Inner ended via end(result) without a terminal event.
 			if (!out.done) {
-				const result = await inner.result();
+				const result = await transferWork.track(inner.result());
 				projector ??= new LeakedThinkingProjector(out, result);
 				const content = projector.finish(result);
 				out.end({ ...result, content });
 			}
 		} catch (err) {
+			transferWork.noteFailure(err);
 			if (!out.done) out.fail(err);
+		} finally {
+			await transferWork.end();
 		}
 	})();
 	return out;
