@@ -175,6 +175,54 @@ the existing lease. Parent acceptance must exercise checkpoint,
 recovery/busy/kill, lazy sidecars, multi-process locking, swap-back, same-snapshot
 reads, writer COMMIT, callback faults, and loader/export/allocator compatibility.
 
+### Core-owned VACUUM INTO copies
+
+The pinned `src/vacuum.c:223–258` creates/attaches its own output Btree and
+checks its initial size; `:397–426` closes that Btree before returning.
+The patch adds a source-owned guard **before** that ATTACH, forces exclusive
+output creation, and binds the actual output unixFile to the already-armed,
+live source before the output transaction. No caller destination setter,
+credential, phase flag, public opcode or Bun Database registration is added.
+
+This is only a non-authoritative copy. Its native state is purpose-marked and
+cannot be re-armed using public command 2 or become a backup source itself.
+Only a new, exclusively-created, zero-size, nofollow/trusted-directory output
+is eligible. Its expected identity comes from its actual owned fd; all normal
+main/journal/WAL/shm and usage-time guards still apply. Output callbacks also
+guard the retained source lifetime. Output binding/I/O/void-callback faults
+propagate sticky failure to source state. A core finish guard runs before
+output close, close errors propagate, and a final source guard runs after
+close and before SQL success. Existing SQL error does not become success.
+
+The source may be an actual read-only fd: ordinary Store backup readers can
+use their existing query-only-OFF/copy/query-only-ON sequence, and only the
+new output owns write permission. Source mutations still fail the native RO
+guard. This does not exempt command-3 authority readers: their fixed
+authorizer/query-only policy continues to reject VACUUM and ATTACH. The JS
+factory must distinguish authority-policy readers from generic Store readers;
+native copy code neither removes nor weakens an installed authorizer.
+
+The Store must still re-inspect its registered source connection immediately
+after `VACUUM INTO` and before backup acknowledgment. The copy is not in the JS
+authority/factory registry, and this native exception mints no authority,
+initialization eligibility, binding or ready permission. Failed partial copies
+remain unacknowledged and are not silently removed or promoted.
+
+Parent fixture proposal (not executed): keep a real armed Store writer open
+with committed WAL events, open a separate armed **actual-readonly** generic
+Store reader (without authority command 3), run the existing backup sequence
+into a new leaf of another private 0700 directory, restore query-only, and
+verify source acknowledgment and copied schema/store ID/event chain through an
+ordinary read-only query connection. Repeat with an armed RW source and cover
+the existing pre-migration backup. A command-3 authority reader must reject
+the same VACUUM request; source-native write attempts must also reject.
+Require failure/no backup acknowledgment for existing/empty destination,
+symlink destination, untrusted parent, source identity replacement, output
+identity replacement during I/O, and output close/void-callback fault. Opening
+the resulting copy must not create fresh Store bootstrap eligibility or permit
+authority binding. Also cover `VACUUM INTO` SQL failure before and after output
+binding, and verify source post-operation inspection catches output failure.
+
 ## Artifact manifest
 
 Schema 1 fixes platform/arch, deployment floor, Bun revision, SQLite identity,

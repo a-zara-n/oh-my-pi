@@ -14,6 +14,8 @@ struct OmpSqliteState {
   struct unixFile *mainFile;
   struct unixFile *walFile;
   struct unixFile *journalFile;
+  OmpSqliteState *backupSource;
+  int backupOutput;
   sqlite3_uint64 connectionGeneration;
   sqlite3_uint64 transactionGeneration;
   sqlite3_uint64 shmGeneration;

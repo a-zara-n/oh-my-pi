@@ -6,8 +6,30 @@ static sqlite3_uint64 ompSqliteGeneration(void){
   return n;
 }
 static int ompSqliteFault(OmpSqliteState *s){
-  if( s ) s->fault = 1;
+  if( s ){
+    s->fault = 1;
+    if( s->backupSource ){
+      sqlite3_mutex_enter(s->backupSource->mutex);
+      s->backupSource->fault=1;
+      sqlite3_mutex_leave(s->backupSource->mutex);
+    }
+  }
   return SQLITE_IOERR_AUTH;
+}
+static void ompSqliteRelease(OmpSqliteState *s){
+  int release;
+  OmpSqliteState *parent;
+  sqlite3_mutex_enter(s->mutex);
+  release=--s->references==0;
+  parent=s->backupSource;
+  sqlite3_mutex_leave(s->mutex);
+  if( release ){
+    close(s->parentFd);
+    sqlite3_mutex_free(s->mutex);
+    sqlite3_free(s->parentPath);
+    sqlite3_free(s);
+    if( parent ) ompSqliteRelease(parent);
+  }
 }
 static int ompSqliteStat(int fd, struct stat *st){
   return fd>=0 && fstat(fd, st)==0 && S_ISREG(st->st_mode)
@@ -87,6 +109,14 @@ static int ompSqliteCheck(unixFile *p){
   int rc;
   if( !s || s->fault || !s->mainFile || p->ompDeleted )
     return ompSqliteFault(s);
+  if( s->backupSource ){
+    OmpSqliteState *parent=s->backupSource;
+    sqlite3_mutex_enter(parent->mutex);
+    rc=parent->mainFile && parent->armed && !parent->backupOutput
+        ? ompSqliteCheck(parent->mainFile) : ompSqliteFault(parent);
+    sqlite3_mutex_leave(parent->mutex);
+    if( rc!=SQLITE_OK ) return ompSqliteFault(s);
+  }
   rc = ompSqliteNamespace(s);
   if( rc==SQLITE_OK ) rc = ompSqliteFileCheck(s->mainFile);
   if( rc==SQLITE_OK && s->walFile ) rc = ompSqliteFileCheck(s->walFile);
@@ -172,7 +202,7 @@ static int ompSqliteControl(unixFile *p, void *argument){
   rc = ompSqliteCheck(p);
   if( cmd<1 || cmd>3 ) rc = SQLITE_MISUSE;
   if( rc==SQLITE_OK && cmd==2 ){
-    if( dev!=(sqlite3_uint64)p->ompStat.st_dev
+    if( s->backupOutput || dev!=(sqlite3_uint64)p->ompStat.st_dev
         || ino!=(sqlite3_uint64)p->ompStat.st_ino
         || (s->armed && (dev!=s->expectedDevice || ino!=s->expectedInode)) ){
       rc = ompSqliteFault(s);
@@ -199,7 +229,7 @@ static int ompSqliteClose(sqlite3_file *id){
   unixFile *p = (unixFile*)id;
   OmpSqliteState *s = p->ompState;
   const sqlite3_io_methods *base = p->ompMethods;
-  int rc, invalid, release;
+  int rc, invalid;
   sqlite3_mutex_enter(s->mutex);
   invalid = ompSqliteCheck(p->ompDeleted && s->mainFile ? s->mainFile : p);
   /* Cleanup must run even after a sticky fault. No successful proof survives. */
@@ -209,20 +239,17 @@ static int ompSqliteClose(sqlite3_file *id){
   if( p==s->walFile ) s->walFile = 0;
   if( p==s->journalFile ) s->journalFile = 0;
   rc = base->xClose(id);
-  release = --s->references==0;
+  if( rc!=SQLITE_OK && s->backupSource ) (void)ompSqliteFault(s);
   sqlite3_mutex_leave(s->mutex);
-  if( release ){
-    close(s->parentFd);
-    sqlite3_mutex_free(s->mutex);
-    sqlite3_free(s->parentPath);
-    sqlite3_free(s);
-  }
+  ompSqliteRelease(s);
   return invalid==SQLITE_OK ? rc : invalid;
 }
 #define OMP_CALL(P, CHECK, CALL) \
   OmpSqliteState *s = (P)->ompState; int rc; \
   sqlite3_mutex_enter(s->mutex); rc = CHECK(P); \
   if( rc==SQLITE_OK ) rc = (CALL); \
+  if( rc!=SQLITE_OK && rc!=SQLITE_IOERR_SHORT_READ && s->backupSource ) \
+    (void)ompSqliteFault(s); \
   sqlite3_mutex_leave(s->mutex); return rc
 static int ompSqliteRead(sqlite3_file *id, void *buf, int n, i64 off){
   unixFile *p=(unixFile*)id;
@@ -391,7 +418,7 @@ static int ompSqliteAttach(unixFile *p, const char *path, int flags){
   }
   sqlite3_mutex_enter(s->mutex);
   p->ompState=s; p->ompMethods=p->pMethod; p->ompStat=st;
-  p->ompGeneration=ompSqliteGeneration(); p->ompType=type;
+  p->ompGeneration=ompSqliteGeneration(); p->ompOpenFlags=flags;
   s->references++;
   if( type==SQLITE_OPEN_WAL ){
     if( s->walFile || (s->walSeen && s->transactionState
@@ -411,4 +438,74 @@ static int ompSqliteAttach(unixFile *p, const char *path, int flags){
     rc=ompSqliteFault(s);
   sqlite3_mutex_leave(s->mutex);
   return rc;
+}
+/* These functions are called only by the patched VACUUM core. They are not
+** exported symbols or file-control commands and accept no JS destination DTO. */
+static int ompSqliteVacuumSourceCheck(sqlite3_file *id, int result){
+  unixFile *p;
+  OmpSqliteState *s;
+  int rc;
+  if( !id || id->pMethods!=&ompSqliteMethods ) return SQLITE_IOERR_AUTH;
+  p=(unixFile*)id; s=p->ompState;
+  sqlite3_mutex_enter(s->mutex);
+  rc=ompSqliteCheck(p);
+  if( result!=SQLITE_OK || !s->armed || s->backupOutput )
+    rc=ompSqliteFault(s);
+  sqlite3_mutex_leave(s->mutex);
+  return rc;
+}
+static int ompSqliteVacuumBind(sqlite3_file *source, sqlite3_file *destination){
+  unixFile *from, *to;
+  OmpSqliteState *parent, *child;
+  struct stat actual;
+  int rc;
+  int creation=SQLITE_OPEN_CREATE|SQLITE_OPEN_EXCLUSIVE|SQLITE_OPEN_READWRITE;
+  if( !source || !destination || source->pMethods!=&ompSqliteMethods
+      || destination->pMethods!=&ompSqliteMethods || source==destination )
+    return SQLITE_IOERR_AUTH;
+  from=(unixFile*)source; to=(unixFile*)destination;
+  parent=from->ompState; child=to->ompState;
+  if( parent==child ) return SQLITE_IOERR_AUTH;
+  /* Every backup callback uses child -> parent order, never parent -> child. */
+  sqlite3_mutex_enter(child->mutex);
+  sqlite3_mutex_enter(parent->mutex);
+  rc=ompSqliteCheck(from);
+  if( rc==SQLITE_OK ) rc=ompSqliteCheck(to);
+  if( rc==SQLITE_OK && (!parent->armed || parent->backupOutput
+      || child->armed || child->backupOutput || child->backupSource
+      || child->readonly || to!=child->mainFile
+      || child->walFile || child->journalFile || to->pShm
+      || (to->ompOpenFlags&creation)!=creation
+      || !ompSqliteStat(to->h,&actual) || actual.st_size!=0) )
+    rc=ompSqliteFault(parent);
+  if( rc==SQLITE_OK ){
+    child->expectedDevice=(sqlite3_uint64)actual.st_dev;
+    child->expectedInode=(sqlite3_uint64)actual.st_ino;
+    child->backupOutput=1;
+    child->backupSource=parent;
+    child->armed=1;
+    parent->references++; /* Retain source state through output's final close. */
+  }else{
+    (void)ompSqliteFault(parent);
+    (void)ompSqliteFault(child);
+  }
+  sqlite3_mutex_leave(parent->mutex);
+  sqlite3_mutex_leave(child->mutex);
+  return rc;
+}
+static int ompSqliteVacuumFinish(sqlite3_file *source, sqlite3_file *destination,
+                                int result){
+  unixFile *to;
+  OmpSqliteState *s;
+  int rc;
+  if( !destination || destination->pMethods!=&ompSqliteMethods )
+    return ompSqliteVacuumSourceCheck(source,SQLITE_IOERR_AUTH);
+  to=(unixFile*)destination; s=to->ompState;
+  sqlite3_mutex_enter(s->mutex);
+  rc=ompSqliteCheck(to);
+  if( result!=SQLITE_OK || !s->backupOutput || !s->backupSource )
+    rc=ompSqliteFault(s);
+  sqlite3_mutex_leave(s->mutex);
+  if( rc!=SQLITE_OK ) return ompSqliteVacuumSourceCheck(source,rc);
+  return ompSqliteVacuumSourceCheck(source,SQLITE_OK);
 }

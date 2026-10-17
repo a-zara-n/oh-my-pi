@@ -12,12 +12,26 @@ export function patchAmalgamation(canonical: string): string {
 		return readFileSync(join(import.meta.dir, name), "utf8");
 	}
 	replace("typedef struct unixFile unixFile;\nstruct unixFile {", `${fragment("owned-types.h")}\ntypedef struct unixFile unixFile;\nstruct unixFile {`);
-	replace("  int h;                              /* The file descriptor */", "  int h;                              /* The file descriptor */\n  OmpSqliteState *ompState;\n  const sqlite3_io_methods *ompMethods;\n  sqlite3_uint64 ompGeneration;\n  struct stat ompStat;\n  int ompType;\n  int ompDeleted;");
+	replace("  int h;                              /* The file descriptor */", "  int h;                              /* The file descriptor */\n  OmpSqliteState *ompState;\n  const sqlite3_io_methods *ompMethods;\n  sqlite3_uint64 ompGeneration;\n  struct stat ompStat;\n  int ompOpenFlags;\n  int ompDeleted;");
 	replace("struct unixShmNode {\n", "struct unixShmNode {\n  sqlite3_uint64 ompGeneration;\n  struct stat ompStat;\n");
 	// The implementation is below all real callbacks, above the methods table.
 	replace("#define IOMETHODS(FINDER,METHOD,VERSION,CLOSE,LOCK,UNLOCK,CKLOCK,SHMMAP)", `${fragment("owned-vfs.c")}\n#define IOMETHODS(FINDER,METHOD,VERSION,CLOSE,LOCK,UNLOCK,CKLOCK,SHMMAP)`);
 	// Reject alternate locking implementations before their first open.
-	replace("  memset(p, 0, sizeof(unixFile));\n\n#ifdef SQLITE_ASSERT_NO_FILES", "  memset(p, 0, sizeof(unixFile));\n  if( strcmp(pVfs->zName,\"unix\")!=0 ) return SQLITE_CANTOPEN;\n\n#ifdef SQLITE_ASSERT_NO_FILES");
+	replace("  memset(p, 0, sizeof(unixFile));\n\n#ifdef SQLITE_ASSERT_NO_FILES", `  memset(p, 0, sizeof(unixFile));
+  if( strcmp(pVfs->zName,"unix")!=0 ) return SQLITE_CANTOPEN;
+  {
+    char parent[MAX_PATHNAME+1];
+    const char *slash=zPath ? strrchr(zPath,'/') : 0;
+    int directory;
+    if( !slash || slash==zPath || (size_t)(slash-zPath)>MAX_PATHNAME )
+      return SQLITE_CANTOPEN;
+    memcpy(parent,zPath,(size_t)(slash-zPath)); parent[slash-zPath]=0;
+    directory=ompSqliteParent(parent);
+    if( directory<0 ) return SQLITE_CANTOPEN;
+    close(directory);
+  }
+
+#ifdef SQLITE_ASSERT_NO_FILES`);
 	replace("open_finished:\n  if( rc!=SQLITE_OK ){\n    sqlite3_free(p->pPreallocatedUnused);\n  }\n  return rc;", "open_finished:\n  if( rc==SQLITE_OK ){\n    rc=ompSqliteAttach(p,zPath,flags);\n    if( rc!=SQLITE_OK ){\n      p->pMethod->xClose(pFile);\n      return rc;\n    }\n  }else{\n    sqlite3_free(p->pPreallocatedUnused);\n  }\n  return rc;");
 	// A read-only connection never creates/repairs/rebuilds shm implicitly.
 	replace("if( 0==sqlite3_uri_boolean(pDbFd->zPath, \"readonly_shm\", 0) ){", "if( !pDbFd->ompState->readonly && 0==sqlite3_uri_boolean(pDbFd->zPath, \"readonly_shm\", 0) ){");
@@ -61,6 +75,38 @@ export function patchAmalgamation(canonical: string): string {
       if( rc==SQLITE_OK ) rc=closed;
     }`);
 	replace("      osUnlink(pShmNode->zFilename);", "      if( ompSqliteShmCheck(pDbFd,pShmNode)==SQLITE_OK )\n        osUnlink(pShmNode->zFilename);");
+	// VACUUM INTO is a core-owned, non-authoritative output, not a JS factory
+	// registration. Authenticate source before output creation; force O_EXCL.
+	replace("    db->openFlags |= SQLITE_OPEN_CREATE|SQLITE_OPEN_READWRITE;", "    db->openFlags |= SQLITE_OPEN_CREATE|SQLITE_OPEN_READWRITE|SQLITE_OPEN_EXCLUSIVE;");
+	replace("  nDb = db->nDb;\n  rc = execSqlF(db, pzErrMsg, \"ATTACH %Q AS %s\", zOut, zDbVacuum);", `  if( pOut ){
+    rc=ompSqliteVacuumSourceCheck(sqlite3PagerFile(sqlite3BtreePager(pMain)),SQLITE_OK);
+    if( rc!=SQLITE_OK ) goto end_of_vacuum;
+  }
+  nDb = db->nDb;
+  rc = execSqlF(db, pzErrMsg, "ATTACH %Q AS %s", zOut, zDbVacuum);`);
+	replace("    db->mDbFlags |= DBFLAG_VacuumInto;", `    rc=ompSqliteVacuumBind(
+        sqlite3PagerFile(sqlite3BtreePager(pMain)),id);
+    if( rc!=SQLITE_OK ) goto end_of_vacuum;
+    db->mDbFlags |= DBFLAG_VacuumInto;`);
+	replace("  if( pDb ){\n    sqlite3BtreeClose(pDb->pBt);\n    pDb->pBt = 0;", `  if( pDb ){
+    if( pOut ){
+      int guard=ompSqliteVacuumFinish(
+          sqlite3PagerFile(sqlite3BtreePager(pMain)),
+          sqlite3PagerFile(sqlite3BtreePager(pDb->pBt)),rc);
+      if( rc==SQLITE_OK ) rc=guard;
+    }
+    sqlite3BtreeClose(pDb->pBt);
+    pDb->pBt = 0;`);
+	replace("  sqlite3ResetAllSchemasOfConnection(db);\n\n  return rc;\n}\n\n#endif  /* SQLITE_OMIT_VACUUM", `  sqlite3ResetAllSchemasOfConnection(db);
+  if( pOut ){
+    int guard=ompSqliteVacuumSourceCheck(
+        sqlite3PagerFile(sqlite3BtreePager(pMain)),rc);
+    if( rc==SQLITE_OK ) rc=guard;
+  }
+  return rc;
+}
+
+#endif  /* SQLITE_OMIT_VACUUM`);
 	const originalBegin = "SQLITE_PRIVATE int sqlite3BtreeBeginTrans(Btree *p, int wrflag, int *pSchemaVersion){";
 	replace(originalBegin, "static int ompOriginalBtreeBeginTrans(Btree *p, int wrflag, int *pSchemaVersion){");
 	const beginTail = "#ifndef SQLITE_OMIT_AUTOVACUUM\n\n/*\n** Set the pointer-map entries for all children of page pPage.";
