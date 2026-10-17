@@ -3308,7 +3308,7 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 			this.#assertOwnerScope(state, scope);
 			this.#assertManagedPhysical(); state.root.#assertManagedPhysical();
 			if (this.#assertSessionState(session, execution) !== state) unavailable();
-			const admission: OpaqueSendAdmission = Object.freeze({ [JOURNAL_SEND_ADMISSION]: true });
+			const admission = Object.freeze<OpaqueSendAdmission>({ [JOURNAL_SEND_ADMISSION]: true });
 			const admissions = this.#bindingAdmissions ??= new Set();
 			admissions.add(admission);
 			const root = this.#bindingRoot;

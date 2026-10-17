@@ -1,4 +1,5 @@
 import type { AgentMessage } from "./agent-messages";
+import type {} from "./compaction-entries";
 import type { AssistantMessage, ImageContent, MessageAttribution, ServiceTierByFamily, StopReason, TextContent, Usage } from "./model-data";
 import type { ModelRequestModelRef, ModelRequestOutcome, ModelRequestPurpose } from "./model-request-data";
 export const CURRENT_SESSION_VERSION = 3;

@@ -134,7 +134,7 @@ describe("canonical model request registry versions", () => {
 		} };
 		const pair = entries(registration(3, 4));
 		const valid = [root, ...pair];
-		expect(validateModelRequestJournal(valid).descriptor).toEqual(root.modelRequestJournal);
+		expect<SessionHeader["modelRequestJournal"]>(validateModelRequestJournal(valid).descriptor).toEqual(root.modelRequestJournal);
 		expect(migrateToCurrentVersion(valid)).toBe(false);
 		const ordinary: SessionEntry = { type: "custom", id: "ordinary", parentId: null,
 			timestamp: ISO, customType: "correlation" };

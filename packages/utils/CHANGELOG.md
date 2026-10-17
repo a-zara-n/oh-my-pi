@@ -86,6 +86,9 @@
 
 ### Fixed
 
+- Preserve literal brands through contextual typing of frozen genuine capabilities.
+  Keep managed registry records outside mutable legacy ID migration, and load the
+  canonical compaction augmentation in type-only dependency consumers.
 - Preserve physical member/owner registration adjacency through canonical journal validation
   and migration, rather than filtering away intervening ordinary rows. Both whole-file and
   streaming readers reject malformed managed snapshots and incomplete reserved top-level

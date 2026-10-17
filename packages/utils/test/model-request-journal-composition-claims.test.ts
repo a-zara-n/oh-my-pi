@@ -243,7 +243,7 @@ mac("actual File historical composition mappings", () => {
 						if (mode === "same-root") {
 							const session = await pending;
 							assertJournalExecutionReady(execution);
-							expect(childCell.getHeader().modelRequestJournal?.epochs.slice(0, 2)).toEqual(oldEpochs);
+							expect<typeof oldEpochs | undefined>(childCell.getHeader().modelRequestJournal?.epochs.slice(0, 2)).toEqual(oldEpochs);
 							expect(childCell.getEntries()).toEqual(childEntries);
 							for (const entry of childEntries) expect(fs.readFileSync(childCell.getSessionFile(), "utf8")).toContain(`${JSON.stringify(entry)}\n`);
 							await appendJournalMetadata(session, execution, decision(childCell, rootCell));

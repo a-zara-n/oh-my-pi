@@ -335,7 +335,7 @@ export async function withVerifiedModelRequestJournalBinding<T>(request: Readonl
 		const failures: unknown[] = [];
 		try {
 			verify(state);
-			const verifiedBinding: ModelRequestJournalLeaseBinding = Object.freeze({[bindingBrand]: true, runtimeIdentity: modelRequestJournalAuthorityRuntimeIdentity, rootSessionId: request.rootSessionId});
+			const verifiedBinding = Object.freeze<ModelRequestJournalLeaseBinding>({[bindingBrand]: true, runtimeIdentity: modelRequestJournalAuthorityRuntimeIdentity, rootSessionId: request.rootSessionId});
 			bindings.set(verifiedBinding, state);
 			initializeBindingLifetime(verifiedBinding);
 			binding = verifiedBinding;
@@ -395,7 +395,7 @@ export function retainVerifiedModelRequestJournalRoot(binding: ModelRequestJourn
 		raw.assertHeld();
 		if (ownerIdFor(state, raw) !== ownerId || raw.registryId !== registryId || raw.storeId !== state.resources.storeId) throw new Error("Journal retained root binding rejected");
 	};
-	const scope: ModelRequestJournalRetainedRootScope = Object.freeze({
+	const scope = Object.freeze<ModelRequestJournalRetainedRootScope>({
 		[privateRetainedRootBrand]: true,
 		binding,
 		runtimeIdentity: modelRequestJournalAuthorityRuntimeIdentity,

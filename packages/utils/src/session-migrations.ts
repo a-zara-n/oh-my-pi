@@ -22,7 +22,7 @@ function migrateV1ToV2(entries: FileEntry[]): void {
 			entry.version = 2;
 			continue;
 		}
-		if (entry.type === "model_request_metadata") throw new Error("Cannot migrate managed model request journal");
+		if (entry.type === "model_request_metadata" || entry.type === "model_request_registry") throw new Error("Cannot migrate managed model request journal");
 
 		entry.id = generateId(ids);
 		entry.parentId = prevId;

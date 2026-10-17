@@ -316,6 +316,7 @@ mac("r11 actual File logical principal ownership", () => {
 				// fabricate a logical-close acknowledgement or hide that failure.
 				await expect(operation).rejects.toBeInstanceOf(AggregateError);
 				expect(rejectionChecked).toBe(true);
+				if (changed === undefined) throw new Error("Persisted corruption was not installed");
 				expect(fs.readFileSync(cell.getSessionFile(), "utf8")).toBe(changed);
 			} finally { await fixture.close(); }
 		});

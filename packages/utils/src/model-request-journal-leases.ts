@@ -204,7 +204,7 @@ export function retainRawModelRequestJournalRoot(ownerScope: RawModelRequestJour
 	const handle = tryAcquireRawModelRequestJournalFileLease(join(current.scope.namespacePath, "accounting", `${registryId}.lock`), "exclusive", uid());
 	if (handle === undefined) throw new Error("Journal lease unavailable");
 	let open = true;
-	const retained: RawModelRequestJournalRetainedRootScope = Object.freeze({
+	const retained = Object.freeze<RawModelRequestJournalRetainedRootScope>({
 		[privateRawRetainedRootBrand]: true,
 		storeId: request.storeId,
 		namespacePath: current.scope.namespacePath,
