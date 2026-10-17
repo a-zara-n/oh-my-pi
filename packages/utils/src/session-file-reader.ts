@@ -70,6 +70,67 @@ function applyTitleSlot(entry: FileEntry | undefined, slot: SessionTitleUpdate |
 	}
 }
 
+type ManagedHint = "journal" | "registry";
+
+function managedEntryHint(entry: FileEntry): ManagedHint | undefined {
+	if (entry?.type === "model_request_metadata" || entry?.type === "session" && entry.modelRequestJournal !== undefined) return "journal";
+	if (entry?.type === "model_request_registry" || entry?.type === "session" && entry.modelRequestRegistry !== undefined) return "registry";
+	return undefined;
+}
+
+function jsonStringEnd(line: string, start: number): number {
+	for (let index = start + 1; index < line.length; index++) {
+		if (line[index] === "\\") index++;
+		else if (line[index] === "\"") return index + 1;
+	}
+	return -1;
+}
+
+/** Recover only top-level reserved keys/type values from a broken physical record. */
+function managedRawHint(line: string): ManagedHint | undefined {
+	let objects = 0;
+	let arrays = 0;
+	for (let index = 0; index < line.length; index++) {
+		const character = line[index];
+		if (character === "{") { objects++; continue; }
+		if (character === "}") { objects--; continue; }
+		if (character === "[") { arrays++; continue; }
+		if (character === "]") { arrays--; continue; }
+		if (character !== "\"") continue;
+		const end = jsonStringEnd(line, index);
+		if (end < 0) break;
+		if (objects === 1 && arrays === 0) {
+			let colon = end;
+			while (colon < line.length && /\s/.test(line[colon]!)) colon++;
+			if (line[colon] === ":") {
+				let key: unknown;
+				try { key = JSON.parse(line.slice(index, end)); } catch { index = end - 1; continue; }
+				if (key === "modelRequestJournal") return "journal";
+				if (key === "modelRequestRegistry") return "registry";
+				if (key === "type") {
+					let start = colon + 1;
+					while (start < line.length && /\s/.test(line[start]!)) start++;
+					if (line[start] === "\"") {
+						const valueEnd = jsonStringEnd(line, start);
+						if (valueEnd > 0) {
+							let value: unknown;
+							try { value = JSON.parse(line.slice(start, valueEnd)); } catch { index = end - 1; continue; }
+							if (value === "model_request_metadata") return "journal";
+							if (value === "model_request_registry") return "registry";
+						}
+					}
+				}
+			}
+		}
+		index = end - 1;
+	}
+	return undefined;
+}
+
+function malformedManagedSnapshot(hint: ManagedHint): never {
+	throw new Error(`Invalid model request ${hint}`);
+}
+
 /** Parse session JSONL while stripping and folding the optional fixed title slot. */
 export function parseSessionContent(content: string): SessionLoadResult {
 	const { body, slot } = splitTitleSlot(content);
@@ -79,6 +140,12 @@ export function parseSessionContent(content: string): SessionLoadResult {
 			malformedRecords++;
 		},
 	}) as FileEntry[];
+	if (malformedRecords > 0) {
+		for (const line of content.split("\n")) {
+			const hint = managedRawHint(line);
+			if (hint) malformedManagedSnapshot(hint);
+		}
+	}
 	applyTitleSlot(entries[0], slot);
 	return {
 		entries,
@@ -127,6 +194,8 @@ export async function visitEntriesFromFileStream(
 	let bytesSinceYield = 0;
 	let entriesSinceYield = 0;
 	let recordsSeen = 0;
+	let managedHint: ManagedHint | undefined;
+	let sawMalformed = false;
 	const maxRecords = Math.max(0, options.maxRecords ?? Number.POSITIVE_INFINITY);
 	let stopped = false;
 	let visitorThrew = false;
@@ -182,6 +251,8 @@ export async function visitEntriesFromFileStream(
 					break;
 				}
 				const entry = value as FileEntry;
+				managedHint = managedEntryHint(entry) ?? managedHint;
+				if (managedHint && sawMalformed) malformedManagedSnapshot(managedHint);
 				if (!sawFirstEntry) {
 					sawFirstEntry = true;
 					applyTitleSlot(entry, titleSlot);
@@ -216,7 +287,13 @@ export async function visitEntriesFromFileStream(
 						break;
 					}
 				}
-				if (nonWhitespace) options.onMalformedRecord?.();
+				if (nonWhitespace) {
+					sawMalformed = true;
+					const lineStart = buffer.lastIndexOf(0x0a, Math.max(0, read - 1)) + 1;
+					const hint = managedHint ?? managedRawHint(decoder.decode(buffer.subarray(lineStart, nextNewline)));
+					if (hint) malformedManagedSnapshot(hint);
+					options.onMalformedRecord?.();
+				}
 				recordsSeen++;
 				advance(nextNewline + 1);
 				if (recordsSeen >= maxRecords) {

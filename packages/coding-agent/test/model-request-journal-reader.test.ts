@@ -131,6 +131,19 @@ describe("managed model request journal persisted reader boundary", () => {
 		expect((await loadModelRequestJournalFromFile(file)).metadataEntries).toEqual([metadata]);
 		expect(`${ordinary.map(entry => JSON.stringify(entry)).join("\n")}\n`).toBe(bytes);
 		expect(bytes.includes("writerOwnerId")).toBe(schemaVersion === 2);
+		if (schemaVersion === 2) {
+			const nonadjacent: FileEntry[] = [root, registry[0]!, {
+				type: "custom", id: "interposed", parentId: null, timestamp: ISO, customType: "correlation",
+			}, ...registry.slice(1), structuredClone(metadata)];
+			await persist(file, nonadjacent);
+			const interposedBytes = await readFile(file, "utf8");
+			await expect(loadEntriesFromFile(file)).rejects.toThrow("Invalid model request registry");
+			await expect(loadSessionFile(file)).rejects.toThrow("Invalid model request registry");
+			await expect(loadModelRequestJournalFromFile(file)).rejects.toThrow("Invalid model request registry");
+			const rawStream = await loadEntriesFromFileStream(file);
+			expect(() => migrateSessionEntries(rawStream.entries)).toThrow("Invalid model request registry");
+			expect(await readFile(file, "utf8")).toBe(interposedBytes);
+		}
 	});
 
 	it("rejects mixed registry history in the canonical journal reader without rewriting persisted data", async () => {
@@ -155,18 +168,62 @@ describe("managed model request journal persisted reader boundary", () => {
 	it("retains the ordinary lenient legacy reader while rejecting malformed managed snapshots", async () => {
 		using dir = TempDir.createSync("@model-request-corrupt-");
 		const file = path.join(dir.path(), "session.jsonl");
-		await Bun.write(file, `${JSON.stringify(header)}\n${JSON.stringify(metadata)}\n{BROKEN\n`);
-		expect((await loadEntriesFromFile(file)).length).toBe(2);
-		expect((await loadSessionFile(file)).malformedRecords).toBe(1);
+		const corruptBytes = `${JSON.stringify(header)}\n${JSON.stringify(metadata)}\n{BROKEN\n`;
+		await Bun.write(file, corruptBytes);
+		await expect(loadEntriesFromFile(file)).rejects.toThrow("Invalid model request journal");
+		await expect(loadSessionFile(file)).rejects.toThrow("Invalid model request journal");
 		await expect(loadModelRequestJournalFromFile(file)).rejects.toThrow("Invalid model request journal");
-		const streaming = await loadEntriesFromFileStream(file);
-		expect(() => validateModelRequestJournal(streaming.entries, streaming)).toThrow();
+		await expect(loadEntriesFromFileStream(file)).rejects.toThrow("Invalid model request journal");
+		expect(await readFile(file, "utf8")).toBe(corruptBytes);
 		const legacyHeader: SessionHeader = { type: "session", version: 3, id: "legacy", timestamp: ISO, cwd: "/tmp" };
 		await persist(file, [legacyHeader, assistant]);
+		const legacyBytes = `${await readFile(file, "utf8")}{BROKEN\n`;
+		await Bun.write(file, legacyBytes);
 		const legacy = await loadEntriesFromFile(file);
 		migrateSessionEntries(legacy);
 		expect(legacy[0]).toEqual(legacyHeader);
 		expect(JSON.stringify(legacy)).not.toContain("journalEpoch");
+		expect((await loadSessionFile(file)).malformedRecords).toBe(1);
+		const streamedLegacy = await loadEntriesFromFileStream(file);
+		expect(streamedLegacy.entries).toEqual(legacy);
+		expect(streamedLegacy.malformedRecords).toBe(1);
+		expect(await readFile(file, "utf8")).toBe(legacyBytes);
+	});
+
+	it.each([
+		'{"type":"model_request_metadata","id":',
+		'{"id":"partial","ty\\u0070e":"model_request_metadata","record":',
+		'{"type":"session","id":"partial","modelRequestJournal":',
+		'{"type":"model_request_registry","record":',
+	])("rejects an incomplete reserved top-level record in both physical readers: %s", async tail => {
+		using dir = TempDir.createSync("@model-request-raw-hint-");
+		const file = path.join(dir.path(), "session.jsonl");
+		const plain: SessionHeader = { type: "session", version: 3, id: "legacy", timestamp: ISO, cwd: "/tmp" };
+		const bytes = `${JSON.stringify(plain)}\n${tail}`;
+		await Bun.write(file, bytes);
+		await expect(loadSessionFile(file)).rejects.toThrow();
+		await expect(loadEntriesFromFileStream(file)).rejects.toThrow();
+		expect(await readFile(file, "utf8")).toBe(bytes);
+	});
+
+	it("does not treat nested payloads or quoted managed spellings as top-level history", async () => {
+		using dir = TempDir.createSync("@model-request-ordinary-hints-");
+		const file = path.join(dir.path(), "session.jsonl");
+		const plain: SessionHeader = { type: "session", version: 3, id: "legacy", timestamp: ISO, cwd: "/tmp" };
+		const ordinary: FileEntry = { type: "custom", id: "ordinary", parentId: null, timestamp: ISO,
+			customType: "correlation", data: {
+				nested: { type: "model_request_metadata", modelRequestJournal: {} },
+				quoted: '{"type":"model_request_registry"}',
+			} };
+		const bytes = `${JSON.stringify(plain)}\n${JSON.stringify(ordinary)}\n{BROKEN\n`;
+		await Bun.write(file, bytes);
+		const small = await loadSessionFile(file);
+		const streamed = await loadEntriesFromFileStream(file);
+		expect(small.entries).toEqual([plain, ordinary]);
+		expect(streamed.entries).toEqual(small.entries);
+		expect(small.malformedRecords).toBe(1);
+		expect(streamed.malformedRecords).toBe(1);
+		expect(await readFile(file, "utf8")).toBe(bytes);
 	});
 
 	it.each([

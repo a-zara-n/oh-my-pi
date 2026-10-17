@@ -65,6 +65,11 @@
 
 ### Fixed
 
+- Preserve physical member/owner registration adjacency through canonical journal validation
+  and migration, rather than filtering away intervening ordinary rows. Both whole-file and
+  streaming readers reject malformed managed snapshots and incomplete reserved top-level
+  records without rewriting bytes; ordinary malformed legacy rows and nested/quoted payload
+  spellings retain their existing lenient behavior.
 - Registered audit SQLite connections now always use Bun's immediate, checked `close(true)`,
   including when a caller requests unchecked close; outstanding prepared statements are finalized.
   Ordinary connections outside the fixed native registry retain Bun's existing close behavior.

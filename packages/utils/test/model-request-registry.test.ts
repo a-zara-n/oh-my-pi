@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { validateModelRequestJournal } from "../src/model-request-journal";
 import { validateModelRequestRegistry } from "../src/model-request-registry";
 import { CURRENT_SESSION_VERSION, type ModelRequestRegistryEntry, type ModelRequestRegistryRecord, type SessionEntry, type SessionHeader } from "../src/session-entries";
 import { migrateToCurrentVersion } from "../src/session-migrations";
@@ -124,6 +125,24 @@ describe("canonical model request registry versions", () => {
 			reject([...current, { ...owner, id: "duplicate", seq: 3, record: { ...owner.record, writerOwnerId } }]);
 		}
 		reject(entries([...registration(3, 4), ...registration(5, 6, "child", "root")]).filter((_, index) => index !== 1));
+	});
+
+	test("preserves physical registration adjacency through journal validation and migration", () => {
+		const root: SessionHeader = { ...header(), modelRequestJournal: {
+			schemaVersion: 1, journalId: uuid(8), sessionId: "root",
+			epochs: [{ journalOwnerId: uuid(3), journalEpoch: uuid(4) }],
+		} };
+		const pair = entries(registration(3, 4));
+		const valid = [root, ...pair];
+		expect(validateModelRequestJournal(valid).descriptor).toEqual(root.modelRequestJournal);
+		expect(migrateToCurrentVersion(valid)).toBe(false);
+		const ordinary: SessionEntry = { type: "custom", id: "ordinary", parentId: null,
+			timestamp: ISO, customType: "correlation" };
+		const snapshot = [root, pair[0]!, ordinary, pair[1]!];
+		const before = JSON.stringify(snapshot);
+		expect(() => validateModelRequestJournal(snapshot)).toThrow("Invalid model request registry");
+		expect(() => migrateToCurrentVersion(snapshot)).toThrow("Invalid model request registry");
+		expect(JSON.stringify(snapshot)).toBe(before);
 	});
 
 	test("keeps owner UUID and global epoch uniqueness after logical close", () => {

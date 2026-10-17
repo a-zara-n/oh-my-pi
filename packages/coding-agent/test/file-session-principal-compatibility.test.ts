@@ -188,8 +188,11 @@ describe("File principal consumer compatibility regressions", () => {
 			const sibling = manager.getSessionFile();
 			if (!sibling) throw new Error("Expected a persisted sibling session");
 			expect(sibling).not.toBe(file);
-			expect(path.dirname(sibling)).toBe(dir.path());
-			expect(notices).toEqual([{ reason: "open-elsewhere", from: file, to: sibling }]);
+			expect(fs.realpathSync(path.dirname(sibling))).toBe(fs.realpathSync(dir.path()));
+			expect(notices).toHaveLength(1);
+			expect(notices[0]?.reason).toBe("open-elsewhere");
+			expect(fs.realpathSync(notices[0]!.from)).toBe(fs.realpathSync(file));
+			expect(fs.realpathSync(notices[0]!.to)).toBe(fs.realpathSync(sibling));
 			expect(manager.getEntry(id)).toMatchObject({ id, parentId: "first" });
 			expect((await loadSessionFile(sibling)).entries).toEqual([manager.getHeader(), ...manager.getEntries()]);
 			expect(await Bun.file(file).text()).toBe(bytes);
@@ -226,7 +229,9 @@ describe("File principal consumer compatibility regressions", () => {
 				await manager.setSessionFile(nextFile);
 				await manager.flush();
 			});
-			expect(manager.getSessionFile()).toBe(nextFile);
+			const selectedFile = manager.getSessionFile();
+			if (!selectedFile) throw new Error("Expected the newly selected session");
+			expect(fs.realpathSync(selectedFile)).toBe(fs.realpathSync(nextFile));
 			const id = manager.appendMessage({ role: "user", content: "after switch", timestamp: 2 });
 			await manager.flush();
 			expect(manager.getEntry(id)).toBeDefined();

@@ -374,7 +374,7 @@ describe("actual File session principal", () => {
 				hint === "descriptor" ? "{BROKEN\n" : '{"type":"model_request_metadata","id":'
 			}`;
 			await Bun.write(file, bytes);
-			expect((await loadSessionFile(file)).malformedRecords).toBe(1);
+			await expect(loadSessionFile(file)).rejects.toThrow("Invalid model request journal");
 			expect(() => openFileJournalCell({ cwd: dir.path(), sessionFile: file })).toThrow();
 			expect(await Bun.file(file).text()).toBe(bytes);
 		},

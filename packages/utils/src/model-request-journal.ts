@@ -6,7 +6,6 @@ import type {
 	ModelRequestJournalDescriptor,
 	ModelRequestLifecycleRecord,
 	ModelRequestMetadataEntry,
-	ModelRequestRegistryEntry,
 	ModelRequestSourceLink,
 	ModelRequestSourceLinkInput,
 	ModelRequestSourceProvenance,
@@ -224,7 +223,7 @@ export function validateModelRequestJournal(
 		epochIndices.set(epoch.journalEpoch, index);
 	}
 	const metadataEntries: ModelRequestMetadataEntry[] = [];
-	const registryEntries: ModelRequestRegistryEntry[] = [];
+	let hasRegistryEntries = false;
 	const sources = new Map<string, Record<string, unknown>>();
 	const entryIds = new Set<string>([descriptor.sessionId]);
 	let lastEpochIndex = 0;
@@ -235,7 +234,7 @@ export function validateModelRequestJournal(
 		entryIds.add(entry.id);
 		if (entry.type === "model_request_registry") {
 			// The canonical registry validator below checks the closed persisted shape.
-			registryEntries.push(entry as unknown as ModelRequestRegistryEntry);
+			hasRegistryEntries = true;
 			continue;
 		}
 		if (entry.type !== "model_request_metadata") {
@@ -255,8 +254,10 @@ export function validateModelRequestJournal(
 		throughSeqByEpoch.set(entry.journalEpoch, entry.seq);
 		metadataEntries.push(entry);
 	}
-	if (header.modelRequestRegistry !== undefined || registryEntries.length > 0) {
-		validateModelRequestRegistry(header as unknown as SessionHeader, registryEntries);
+	if (header.modelRequestRegistry !== undefined || hasRegistryEntries) {
+		// Keep physical ordering across every validated entry envelope. The registry
+		// validator owns the closed registry payload checks, including adjacent pairs.
+		validateModelRequestRegistry(header as unknown as SessionHeader, entries.slice(1) as readonly SessionEntry[]);
 	}
 	return { descriptor, metadataEntries, throughSeqByEpoch };
 }
