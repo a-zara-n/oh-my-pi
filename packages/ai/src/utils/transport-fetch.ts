@@ -9,12 +9,22 @@ import type { Api } from "@oh-my-pi/pi-utils/model-data";
 import { getProxyForProvider, withProxyInit } from "./proxy";
 import { gatedSend, markFetchGated } from "./model-request-fetch";
 import { createFetchRequestDebugSession, isRequestDebugEnabled } from "./request-debug";
-import { assertModelRequestBuiltinFetch } from "./model-request-builtin-fetch";
+import { assertModelRequestBuiltinFetch, modelRequestBuiltinFetch } from "./model-request-builtin-fetch";
 
 /** Stamped on a fetch already built by {@link transportFetch}. */
 const TRANSPORT_FETCH = Symbol("omp.transportFetch");
 
 type TransportFetch = FetchImpl & { [TRANSPORT_FETCH]?: true };
+
+function requireBuiltinTransport(base: FetchImpl): void {
+	try {
+		assertModelRequestBuiltinFetch(base);
+	} catch (error) {
+		throw new ModelRequestDeniedError("transport-unsupported", "required model request needs the startup builtin fetch", {
+			cause: error,
+		});
+	}
+}
 
 /**
  * The one fetch every inference request goes through. Per call it applies, in
@@ -34,10 +44,21 @@ type TransportFetch = FetchImpl & { [TRANSPORT_FETCH]?: true };
  * layer (three PI_REQ_DEBUG dumps for one request).
  */
 export function transportFetch(model: Model<Api>, fetchImpl: FetchImpl | undefined): FetchImpl {
+	const execution = getModelRequestRuntime().currentExecution();
+	assertJournalExecutionReady(execution);
+	const required = execution !== undefined && execution.journalState !== "untracked";
+	// Do not resolve a caller's global getter even while constructing a required wrapper.
+	if (required) requireBuiltinTransport(modelRequestBuiltinFetch);
 	const given = fetchImpl as TransportFetch | undefined;
 	if (given?.[TRANSPORT_FETCH]) return given;
 	const base =
-		given ?? (model.provider === "anthropic" && model.api === "anthropic-messages" ? coworkFetch : globalThis.fetch);
+		given ??
+		(required
+			? modelRequestBuiltinFetch
+			: model.provider === "anthropic" && model.api === "anthropic-messages"
+				? coworkFetch
+				: globalThis.fetch);
+	if (required) requireBuiltinTransport(base);
 	const proxyUrl = getProxyForProvider(model.provider);
 
 	const prepare = (input: string | URL | Request, init: RequestInit | undefined): RequestInit | undefined => {
@@ -60,13 +81,7 @@ export function transportFetch(model: Model<Api>, fetchImpl: FetchImpl | undefin
 		const execution = getModelRequestRuntime().currentExecution();
 		assertJournalExecutionReady(execution);
 		if (execution !== undefined && execution.journalState !== "untracked") {
-			try {
-				assertModelRequestBuiltinFetch(base);
-			} catch (error) {
-				throw new ModelRequestDeniedError("transport-unsupported", "required model request needs the startup builtin fetch", {
-					cause: error,
-				});
-			}
+			requireBuiltinTransport(base);
 			// All debug/body snapshot awaits finish before entering the journal admission path.
 			// The required sender never hides an async preparation step inside its I/O callback.
 			const session = isRequestDebugEnabled() ? await createFetchRequestDebugSession(input, sentInit) : undefined;

@@ -7,6 +7,29 @@ import {
 	modelRequestBuiltinFetch,
 } from "../src/utils/model-request-builtin-fetch";
 
+async function factoryProbe(scenario: "untracked" | "required"): Promise<unknown> {
+	const fixture = path.join(import.meta.dir, "fixtures/model-request-factory-getter-process.ts");
+	const bootstrap = path.resolve(import.meta.dir, "../../../scripts/audit-library-bootstrap.ts");
+	const command =
+		scenario === "required"
+			? [process.execPath, "--preload", bootstrap, fixture, scenario]
+			: [process.execPath, fixture, scenario];
+	const child = Bun.spawn(command, { stdout: "pipe", stderr: "pipe" });
+	const [exitCode, stdout, stderr] = await Promise.all([
+		child.exited,
+		new Response(child.stdout).text(),
+		new Response(child.stderr).text(),
+	]);
+	expect(stderr).toBe("");
+	expect(exitCode).toBe(0);
+	const parsed: unknown = JSON.parse(stdout);
+	return parsed;
+}
+
+// Test selection only, never an authority proof. The child still authenticates a
+// real owned SQLite connection, credential and epoch through the fixed verifier.
+const nativePreloaded = Object.getOwnPropertyDescriptor(globalThis, Symbol.for("omp.audit.sqlite.required.v1"))?.value === true;
+
 // These exercise the real Bun builtin. Managed admission/root-release cases belong
 // to the actual authority integration suite, not an injected fetch implementation.
 describe("canonical startup builtin fetch identity", () => {
@@ -41,24 +64,23 @@ describe("canonical startup builtin fetch identity", () => {
 		expect(entered).toBe(false);
 	});
 
-	test("rejects a later global replacement without evaluating a caller getter", () => {
-		const original = Object.getOwnPropertyDescriptor(globalThis, "fetch");
-		if (original === undefined) throw new Error("Bun global fetch descriptor missing");
-		let getterCalled = false;
-		Object.defineProperty(globalThis, "fetch", {
-			configurable: true,
-			get() {
-				getterCalled = true;
-				return modelRequestBuiltinFetch;
-			},
+	test("untracked factory preserves the existing global-fetch getter behavior", async () => {
+		expect(await factoryProbe("untracked")).toMatchObject({
+			journalState: "untracked",
+			getterCalls: 1,
+			constructed: true,
 		});
-		try {
-			expect(() => assertModelRequestBuiltinFetch(modelRequestBuiltinFetch)).toThrow("canonical startup builtin");
-			expect(getterCalled).toBe(false);
-		} finally {
-			Object.defineProperty(globalThis, "fetch", original);
-		}
 	});
+
+	test.skipIf(!nativePreloaded)(
+		"required factory rejects before a global getter, and a previously untracked wrapper rechecks at invocation",
+		async () => {
+			expect(await factoryProbe("required")).toMatchObject({
+				factory: { journalState: "required-pending", getterCalls: 0, constructed: false },
+				previouslyUntracked: { senderCalls: 0, invocationRejected: true },
+			});
+		},
+	);
 
 	test("rejects a separately evaluated physical module copy", async () => {
 		const temporary = await fs.mkdtemp(path.join(os.tmpdir(), "omp-builtin-copy-"));

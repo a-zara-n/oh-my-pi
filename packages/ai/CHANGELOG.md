@@ -16,6 +16,7 @@
 
 ### Changed
 
+- Required `transportFetch` construction now checks journal readiness and the canonical global descriptor before choosing a base, so replacing `globalThis.fetch` with a getter cannot run that getter merely by constructing a required transport. Ordinary untracked global/Cowork selection and invocation-time requirement rechecks remain unchanged.
 - Devin's router assignment (`AssignModel`), which sends the user's prompt to the provider before the chat message, is a gated model request of its own instead of an auxiliary lookup: a gate that refuses it sends nothing of the turn. The gate is shown the wire with the credentials recognisable by name removed; a credential the provider's own protocol puts in the request body (Devin's message metadata) is not redacted.
 - The model an attempt names is the model the request is addressed to after the provider definition prepared it, and its `baseUrl` is redacted like the wire url when it carries a credential.
 - A gate whose `beginSend()` throws is a terminal `gate-error`: the lease is settled as not sent and no retry layer replays the request.

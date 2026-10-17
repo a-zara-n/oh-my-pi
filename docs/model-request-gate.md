@@ -171,6 +171,12 @@ booleans and callback registration are not transport evidence. The leaf itself
 does not select SQLite, load a provider, or change ordinary untracked custom-fetch
 and Cowork behavior.
 
+Required transport construction checks readiness and the global's own descriptor
+before selecting its base; it never evaluates a replacement `fetch` getter.
+Untracked construction retains the normal global/Cowork selection. Every wrapper
+still rechecks its current execution at invocation, including one constructed
+before the process acquired a journal requirement.
+
 For a required transport, request-debug snapshot/file preparation is awaited
 before entering `gatedSend`, and response-debug wrapping stays after the returned
 response. The ordinary untracked sender retains its existing debug/Cowork path.
@@ -185,9 +191,16 @@ one-use admission and actual synchronous short-root release contract.
 Parent verification uses the real builtin, not a fake-fetch wiring test:
 
 1. Run `bun test packages/ai/test/model-request-builtin-fetch.test.ts` and the
-   existing transport-hook suite. The capture suite covers real loopback I/O,
-   queued custom-sender rejection, a replacement getter that must not execute,
-   and a separately evaluated physical module copy.
+   existing transport-hook suite. Also run
+   `bun --preload ./scripts/audit-library-bootstrap.ts test packages/ai/test/model-request-builtin-fetch.test.ts`
+   with the real native artifact to enable the required factory regression.
+   The native child authenticates a real binding and creates a genuine pending
+   execution: construction must reject with zero replacement-getter calls, and
+   an earlier untracked wrapper must reject before invoking its sender.
+   The suite also covers ordinary untracked global-getter compatibility, real
+   builtin loopback I/O, queued custom-sender rejection and a physical module copy.
+   Without the native preload the required-binding case is explicitly skipped;
+   the other cases do not establish that boundary.
 2. With the completed journal admission implementation and native artifact,
    launch the isolated integration fixture through `audit-library-bootstrap.ts`;
    use a fresh real authority database/File principal and only a credential-free
