@@ -1,4 +1,4 @@
-import type { ModelRequestPurpose } from "@oh-my-pi/pi-ai";
+import type { ModelRequestPurpose } from "./model-request-data";
 import type {
 	ModelRequestJournalAck,
 	ModelRequestJournalModelRef,
@@ -22,7 +22,7 @@ const PURPOSES: Record<ModelRequestPurpose, true> = {
 };
 
 const ENTRY_TYPES: Record<SessionEntry["type"], true> = {
-	message: true, model_usage: true, model_request_metadata: true, thinking_level_change: true,
+	message: true, model_usage: true, model_request_metadata: true, model_request_registry: true, thinking_level_change: true,
 	model_change: true, service_tier_change: true, compaction: true, branch_summary: true,
 	custom: true, custom_message: true, label: true, title_change: true, ttsr_injection: true,
 	session_init: true, mode_change: true, credential_pin: true, reset_boundary: true,
