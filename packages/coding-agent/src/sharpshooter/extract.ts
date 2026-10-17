@@ -189,8 +189,7 @@ export function maybeStartSharpshooterExtraction(options: {
 		if (trimmedPrompt.startsWith("/") || trimmedPrompt.length < 16) return;
 
 		const run = session
-			.journalOuterWorkOwner()
-			.run(() => runSharpshooterExtraction(options, envelope))
+			.runJournalOuterWork(() => runSharpshooterExtraction(options, envelope))
 			.catch(error => {
 				logger.debug("Sharpshooter extraction failed", { error: String(error), sessionId: session.sessionId });
 			})

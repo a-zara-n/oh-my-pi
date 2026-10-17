@@ -61,7 +61,7 @@ import {
 	truncateTail,
 } from "@oh-my-pi/pi-tui/tools/streaming-output";
 import { childModelRequestRootOf, resolveModelRequestRootSource } from "../session/model-request-context";
-import { JournalOuterWorkOwner } from "../session/journal-outer-work";
+import { journalOuterWorkFromBinding } from "../session/journal-outer-work";
 import type { SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
 import type { Tool, ToolSession } from "../tools";
 import { BashTool } from "../tools/bash";
@@ -1387,7 +1387,7 @@ export async function createAgentSession(
 	options: LegacyPiCreateAgentSessionOptions = {},
 ): Promise<CreateAgentSessionResult> {
 	const hostResolved = withHostModelRequestRoot(options);
-	const shimOuterWork = JournalOuterWorkOwner.fromBinding(
+	const shimOuterWork = journalOuterWorkFromBinding(
 		resolveModelRequestRootSource(hostResolved.modelRequestRoot, hostResolved.modelRequestJournalLeaseBinding)
 			.modelRequestJournalLeaseBinding,
 	);

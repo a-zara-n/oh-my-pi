@@ -1,7 +1,6 @@
 /**
- * Source-owned outer journal work for coding-agent canonical producers.
- *
- * @internal
+ * Package-private outer journal work scopes for coding-agent canonical producers.
+ * Not a package export (`package.json` denies this subpath); import only via relative paths.
  */
 import type { ModelRequestExecution } from "@oh-my-pi/pi-ai/model-request-execution";
 import type { ModelRequestJournalLeaseBinding } from "@oh-my-pi/pi-utils/model-request-journal-authority";
@@ -19,24 +18,14 @@ function combineJournalWorkErrors(errors: unknown[]): unknown | undefined {
 	return new AggregateError(failures, "Journal outer work failed");
 }
 
-export class JournalOuterWorkOwner {
+class JournalOuterWorkScope {
 	readonly #handle: JournalWorkHandle | undefined;
 	readonly #tracked = new Set<Promise<unknown>>();
 	#failures: unknown[] = [];
 	#ended = false;
 
-	private constructor(handle: JournalWorkHandle | undefined) {
+	constructor(handle: JournalWorkHandle | undefined) {
 		this.#handle = handle;
-	}
-
-	static fromBinding(binding: ModelRequestJournalLeaseBinding | undefined): JournalOuterWorkOwner {
-		if (binding === undefined) return new JournalOuterWorkOwner(undefined);
-		return new JournalOuterWorkOwner(beginJournalBindingWork(binding));
-	}
-
-	static fromExecution(execution: ModelRequestExecution | undefined): JournalOuterWorkOwner {
-		if (execution === undefined) return new JournalOuterWorkOwner(undefined);
-		return new JournalOuterWorkOwner(beginJournalExecutionWork(execution));
 	}
 
 	get active(): boolean {
@@ -86,16 +75,20 @@ export class JournalOuterWorkOwner {
 	}
 }
 
-export async function runJournalOuterWorkFromBinding<T>(
+const noopJournalOuterWorkScope = new JournalOuterWorkScope(undefined);
+
+export function journalOuterWorkFromBinding(
 	binding: ModelRequestJournalLeaseBinding | undefined,
-	work: () => Promise<T>,
-): Promise<T> {
-	return JournalOuterWorkOwner.fromBinding(binding).run(work);
+): JournalOuterWorkScope {
+	if (binding === undefined) return noopJournalOuterWorkScope;
+	return new JournalOuterWorkScope(beginJournalBindingWork(binding));
 }
 
-export async function runJournalOuterWorkFromExecution<T>(
-	execution: ModelRequestExecution | undefined,
-	work: () => Promise<T>,
-): Promise<T> {
-	return JournalOuterWorkOwner.fromExecution(execution).run(work);
+export function journalOuterWorkFromExecution(execution: ModelRequestExecution | undefined): JournalOuterWorkScope {
+	if (execution === undefined) return noopJournalOuterWorkScope;
+	const handle = beginJournalExecutionWork(execution);
+	if (handle === undefined) return noopJournalOuterWorkScope;
+	return new JournalOuterWorkScope(handle);
 }
+
+export type { JournalOuterWorkScope };

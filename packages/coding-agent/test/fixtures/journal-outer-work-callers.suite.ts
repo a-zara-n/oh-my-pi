@@ -1,9 +1,41 @@
 import "../../../../scripts/audit-library-bootstrap";
 import { describe, expect, test } from "bun:test";
-import { JournalOuterWorkOwner } from "../../src/session/journal-outer-work";
+import { beginJournalBindingWork, endJournalWork } from "@oh-my-pi/pi-utils/model-request-journal-composition";
+import { loadMnemopiModules } from "../../src/mnemopi/state";
 import { R11JournalFixture } from "../../../utils/test/fixtures/model-request-journal-r11";
 
 const mac = process.platform === "darwin" ? describe : describe.skip;
+
+async function runBindingOuterWork(
+	binding: Parameters<typeof beginJournalBindingWork>[0],
+	work: (track: (promise: Promise<unknown>) => void) => Promise<void>,
+): Promise<void> {
+	const handle = beginJournalBindingWork(binding);
+	const tracked = new Set<Promise<unknown>>();
+	const failures: unknown[] = [];
+	let primaryError: unknown;
+	try {
+		await work(promise => {
+			tracked.add(promise);
+			void promise.finally(() => tracked.delete(promise)).catch(error => failures.push(error));
+		});
+	} catch (error) {
+		primaryError = error;
+	}
+	const settled = await Promise.allSettled([...tracked]);
+	for (const result of settled) {
+		if (result.status === "rejected") failures.push(result.reason);
+	}
+	const error =
+		primaryError ??
+		(failures.length === 0
+			? undefined
+			: failures.length === 1
+				? failures[0]
+				: new AggregateError(failures, "Journal outer work failed"));
+	endJournalWork(handle, error === undefined ? { type: "fulfilled" } : { type: "rejected", error });
+	if (error !== undefined) throw error;
+}
 
 mac("coding-agent outer journal work callers (AC-OL consumer fixtures)", () => {
 	test("AC-OL-01/S-01: binding startup work stays open until deferred actual settles", async () => {
@@ -11,16 +43,16 @@ mac("coding-agent outer journal work callers (AC-OL consumer fixtures)", () => {
 		try {
 			const root = fixture.open();
 			await fixture.withBinding(root, async binding => {
-				const owner = JournalOuterWorkOwner.fromBinding(binding);
 				const deferred = Promise.withResolvers<void>();
-				owner.trackDetached(deferred.promise);
 				let settled = false;
 				void deferred.promise.finally(() => {
 					settled = true;
 				});
 				expect(settled).toBe(false);
-				deferred.resolve();
-				await owner.complete();
+				await runBindingOuterWork(binding, async track => {
+					track(deferred.promise);
+					deferred.resolve();
+				});
 				expect(settled).toBe(true);
 			});
 		} finally {
@@ -34,15 +66,17 @@ mac("coding-agent outer journal work callers (AC-OL consumer fixtures)", () => {
 			const root = fixture.open();
 			await fixture.withBinding(root, async binding => {
 				const childFailure = new Error("deferred startup failure");
-				const owner = JournalOuterWorkOwner.fromBinding(binding);
 				const deferred = Promise.withResolvers<void>();
-				owner.trackDetached(
-					deferred.promise.then(() => {
-						throw childFailure;
-					}),
-				);
 				deferred.resolve();
-				await expect(owner.complete()).rejects.toBe(childFailure);
+				await expect(
+					runBindingOuterWork(binding, async track => {
+						track(
+							deferred.promise.then(() => {
+								throw childFailure;
+							}),
+						);
+					}),
+				).rejects.toBe(childFailure);
 			});
 		} finally {
 			await fixture.close();
@@ -54,14 +88,16 @@ mac("coding-agent outer journal work callers (AC-OL consumer fixtures)", () => {
 		try {
 			const root = fixture.open();
 			await fixture.withBinding(root, async binding => {
-				const owner = JournalOuterWorkOwner.fromBinding(binding);
 				const first = Promise.withResolvers<void>();
 				const second = Promise.withResolvers<void>();
-				owner.trackDetached(first.promise);
-				owner.trackDetached(second.promise);
 				first.reject(new Error("first candidate failed"));
 				second.resolve();
-				await expect(owner.complete()).rejects.toMatchObject({ message: "first candidate failed" });
+				await expect(
+					runBindingOuterWork(binding, async track => {
+						track(first.promise);
+						track(second.promise);
+					}),
+				).rejects.toMatchObject({ message: "first candidate failed" });
 			});
 		} finally {
 			await fixture.close();
@@ -73,11 +109,11 @@ mac("coding-agent outer journal work callers (AC-OL consumer fixtures)", () => {
 		try {
 			const root = fixture.open();
 			await fixture.withBinding(root, async binding => {
-				const owner = JournalOuterWorkOwner.fromBinding(binding);
 				const consolidate = Promise.withResolvers<void>();
-				owner.trackDetached(consolidate.promise);
-				consolidate.resolve();
-				await owner.complete();
+				await runBindingOuterWork(binding, async track => {
+					track(consolidate.promise);
+					consolidate.resolve();
+				});
 			});
 		} finally {
 			await fixture.close();
@@ -85,7 +121,6 @@ mac("coding-agent outer journal work callers (AC-OL consumer fixtures)", () => {
 	});
 
 	test("AC-OL-14: Mnemopi parallel module load does not fail-fast discard sibling rejection", async () => {
-		const { loadMnemopiModules } = await import("../../src/mnemopi/state");
 		await expect(loadMnemopiModules()).resolves.toBeUndefined();
 	});
 });

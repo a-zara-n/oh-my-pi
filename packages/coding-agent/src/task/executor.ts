@@ -81,7 +81,7 @@ import { ASYNC_RESULT_MESSAGE_TYPE } from "../session/async-job-delivery";
 import type { AuthStorage } from "../session/auth-storage";
 import { SKILL_PROMPT_MESSAGE_TYPE } from "../session/messages";
 import { type ModelRequestRootAssignment, resolveModelRequestRootSource } from "../session/model-request-context";
-import { JournalOuterWorkOwner } from "../session/journal-outer-work";
+import { journalOuterWorkFromBinding } from "../session/journal-outer-work";
 import { hasConversationalHistory, SessionManager } from "../session/session-manager";
 import { truncateTail } from "@oh-my-pi/pi-tui/tools/streaming-output";
 import {
@@ -4418,7 +4418,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 				: undefined;
 			let session: AgentSession;
 			let sessionPromise: Promise<CreateAgentSessionResult> | undefined;
-			const spawnOuterWork = JournalOuterWorkOwner.fromBinding(
+			const spawnOuterWork = journalOuterWorkFromBinding(
 				resolveModelRequestRootSource(
 					sessionSpec.options.modelRequestRoot,
 					sessionSpec.options.modelRequestJournalLeaseBinding,

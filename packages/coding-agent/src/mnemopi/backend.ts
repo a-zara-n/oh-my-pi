@@ -109,7 +109,7 @@ export const mnemopiBackend: MemoryBackend = {
 		const { session, settings, agentDir, modelRegistry } = options;
 		const sessionId = session.sessionId;
 		if (!sessionId) return;
-		await session.journalOuterWorkOwner().run(async () => {
+		await session.runJournalOuterWork(async () => {
 		if (options.taskDepth > 0) {
 			const parent = getMnemopiSessionStateFromParent(options);
 			if (!parent) return;

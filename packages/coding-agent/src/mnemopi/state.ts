@@ -791,8 +791,7 @@ export class MnemopiSessionState {
 	}
 
 	async dispose(options: { consolidate?: boolean; timeoutMs?: number; retain?: boolean } = {}): Promise<void> {
-		const outerWork = this.session.journalOuterWorkOwner();
-		await outerWork.run(async () => {
+		await this.session.runJournalOuterWork(async () => {
 		this.#recallGeneration++;
 		this.unsubscribe?.();
 		this.unsubscribe = undefined;
@@ -831,7 +830,7 @@ export class MnemopiSessionState {
 				// to `postmortem.quit(0)`; if it exits first, the OS reclaims
 				// the handles (and a still-pending embed() goes down with the
 				// embed worker the caller is about to SIGKILL).
-				outerWork.trackDetached(consolidatePromise.finally(closeOwned));
+				this.session.trackJournalOuterWork(consolidatePromise.finally(closeOwned));
 				return;
 			}
 		} else {

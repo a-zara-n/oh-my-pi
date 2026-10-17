@@ -30,7 +30,7 @@ import {
 
 import { cfgSharpshooterIntervalMinutes } from "./settings";
 import { getModelRequestExecution } from "@oh-my-pi/pi-ai/model-request-execution";
-import { JournalOuterWorkOwner } from "../session/journal-outer-work";
+import { journalOuterWorkFromExecution } from "../session/journal-outer-work";
 
 const PROJECT_DOC_TOKEN_LIMIT = 6000;
 
@@ -91,7 +91,7 @@ export async function runSharpshooterConsolidation(options: {
 	sessionId: string;
 	force?: boolean;
 }): Promise<SharpshooterConsolidationResult> {
-	return JournalOuterWorkOwner.fromExecution(getModelRequestExecution()).run(async () => {
+	return journalOuterWorkFromExecution(getModelRequestExecution()).run(async () => {
 	const bankDir = sharpshooterBankDir(options.agentDir, options.cwd);
 	try {
 		await fs.mkdir(bankDir, { recursive: true });

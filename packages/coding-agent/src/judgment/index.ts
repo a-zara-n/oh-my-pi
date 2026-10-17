@@ -54,7 +54,7 @@ import { formatModelStringWithRouting, resolveRoleChain, type RoleChainCandidate
 import { roleCandidatePool } from "../config/model-roles";
 import type { Settings } from "../config/settings";
 import type { SessionManager } from "../session/session-manager";
-import { JournalOuterWorkOwner } from "../session/journal-outer-work";
+import { journalOuterWorkFromExecution } from "../session/journal-outer-work";
 import { getTinyLocalModelSpec } from "../tiny/models";
 import localPromptTemplate from "../prompts/system/judgment-local.md" with { type: "text" };
 import { tinyModelClient } from "../tiny/title-client";
@@ -265,7 +265,7 @@ export class ChainJudge implements Judge {
 	}
 
 	async withCandidate<T>(run: (judge: Judge, kind: JudgeKind) => Promise<T>, options: JudgeOptions = {}): Promise<T> {
-		const outerWork = JournalOuterWorkOwner.fromExecution(getModelRequestExecution());
+		const outerWork = journalOuterWorkFromExecution(getModelRequestExecution());
 		return outerWork.run(async () => {
 		const signal = options.signal;
 		let lastFailure: string | undefined;
