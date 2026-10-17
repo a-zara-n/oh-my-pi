@@ -85,13 +85,17 @@ describe("managed model request context isolation", () => {
 		["resolved-promise", "does not grant readiness when a caller promise resolves to a readiness-shaped DTO"],
 		["fake-execution", "does not accept a readiness-shaped execution DTO as canonical identity"],
 		["genuine-parent", "composes distinct same-family handovers and rejects cross-family, fake, missing and revoked parents"],
+		["warm-parent", "revives a parked managed sibling under its captured genuine parent without relaxing family identity"],
 	] as const;
 
 	for (const [scenario, title] of cases) {
-		const test = scenario === "genuine-parent" && process.platform !== "darwin" ? it.skip : it;
+		const native = scenario === "genuine-parent" || scenario === "warm-parent";
+		const test = native && process.platform !== "darwin" ? it.skip : it;
 		test(title, async () => {
 			const child = Bun.spawn(
-				[process.execPath, path.join(import.meta.dir, "fixtures/model-request-context-journal-probe.ts"), scenario],
+				[process.execPath, path.join(import.meta.dir, scenario === "warm-parent"
+					? "fixtures/model-request-warm-parent-process.ts"
+					: "fixtures/model-request-context-journal-probe.ts"), scenario],
 				{
 					cwd: path.resolve(import.meta.dir, "../../.."),
 					stdin: "ignore",
@@ -109,7 +113,9 @@ describe("managed model request context isolation", () => {
 				if (exitCode !== 0) {
 					throw new Error(`Model request context probe ${scenario} exited ${exitCode}:\n${stdout}\n${stderr}`);
 				}
-				expect(stdout.trim().split("\n")).toContain(`model-request-context:${scenario}:ok`);
+				expect(stdout.trim().split("\n")).toContain(scenario === "warm-parent"
+					? "model-request-warm-parent:ok"
+					: `model-request-context:${scenario}:ok`);
 			} finally {
 				clearTimeout(watchdog);
 				if (child.exitCode === null) {
