@@ -2261,7 +2261,10 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 	}
 
 	ensureDirSync(dir: string): void {
-		if (path.resolve(dir) !== this.#sessionDir) this.#assertPath(dir);
+		const resolved = path.resolve(dir);
+		if (resolved !== this.#sessionDir && (!fs.existsSync(resolved) || fs.realpathSync(resolved) !== this.#sessionDir)) {
+			this.#assertPath(dir);
+		}
 		this.#storage.ensureDirSync(dir);
 	}
 	existsSync(fpath: string): boolean { return this.#storage.existsSync(fpath); }
