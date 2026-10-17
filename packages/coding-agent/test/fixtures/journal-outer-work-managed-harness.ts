@@ -33,6 +33,10 @@ export function expectBindingAcceptsOuterWork(binding: ModelRequestJournalLeaseB
 	endJournalWork(handle, { type: "fulfilled" });
 }
 
+export function expectBindingRejectsOuterWork(binding: ModelRequestJournalLeaseBinding): void {
+	expect(() => beginJournalBindingWork(binding)).toThrow("Journal binding no longer accepts work");
+}
+
 export interface ManagedAgentHarness {
 	readonly principal: ReadyPrincipal;
 	readonly binding: ModelRequestJournalLeaseBinding;
@@ -74,7 +78,7 @@ export async function openManagedAgentHarness(
 		sessionManager: manager,
 		settings:
 			options.settings ??
-			Settings.isolated({ "compaction.enabled": false, "memory.enabled": false }),
+			Settings.isolated({ "compaction.enabled": false, "memory.backend": "off" }),
 		modelRegistry: registry,
 		extensionRunner: runner,
 		modelRequestExecution: principal.execution,

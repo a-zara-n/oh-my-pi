@@ -1,6 +1,7 @@
 import "../../../../scripts/audit-library-bootstrap";
 import * as path from "node:path";
 import { describe, expect, test, vi } from "bun:test";
+import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import * as ai from "@oh-my-pi/pi-ai";
 import type { Model } from "@oh-my-pi/pi-ai";
@@ -26,7 +27,7 @@ import {
 } from "../../src/extensibility/legacy-pi-coding-agent-shim";
 import { journalOuterWorkFromBinding } from "../../src/session/internal/outer-work";
 import { childModelRequestRootOf } from "../../src/session/model-request-context";
-import { resolveModelRequestRootSource } from "../../src/session/model-request-context";
+import { runSubprocess } from "../../src/task/executor";
 import * as computerSupervisor from "../../src/tools/computer/supervisor";
 import * as memoryBackendResolve from "../../src/memory-backend/resolve";
 import type { MemoryBackend } from "../../src/memory-backend/types";
@@ -42,6 +43,7 @@ import { R11JournalFixture } from "../../../utils/test/fixtures/model-request-jo
 import { createInMemoryAuthStorage } from "../helpers/agent-session-setup";
 import {
 	expectBindingAcceptsOuterWork,
+	expectBindingRejectsOuterWork,
 	openManagedAgentHarness,
 	withManagedExecution,
 } from "./journal-outer-work-managed-harness";
@@ -70,7 +72,7 @@ mac("journal outer work canonical source callers", () => {
 			const root = fixture.open();
 			await fixture.withBinding(root, async binding => {
 				const authStorage = createInMemoryAuthStorage();
-				const settings = Settings.isolated({ "compaction.enabled": false, "memory.enabled": false });
+				const settings = Settings.isolated({ "compaction.enabled": false, "memory.backend": "off" });
 				const startup = createAgentSession({
 					modelRequestJournalLeaseBinding: binding,
 					authStorage,
@@ -294,7 +296,7 @@ mac("journal outer work canonical source callers", () => {
 				const harness = await openManagedAgentHarness(principal, binding);
 				const settings = Settings.isolated({
 					"compaction.enabled": false,
-					"memory.enabled": true,
+					"memory.backend": "local",
 				});
 				const registry = new ModelRegistry(harness.authStorage, undefined, { ignoreLocalModelConfig: true });
 				await withManagedExecution(principal.execution, async () => {
@@ -504,7 +506,7 @@ mac("journal outer work canonical source callers", () => {
 						bindProcessState: false,
 						cwd: fixture.directory,
 						agentDir: fixture.directory,
-						settings: Settings.isolated({ "compaction.enabled": false, "memory.enabled": false }),
+						settings: Settings.isolated({ "compaction.enabled": false, "memory.backend": "off" }),
 					});
 					await Promise.resolve();
 					expectBindingAcceptsOuterWork(binding);
@@ -640,7 +642,7 @@ mac("journal outer work canonical source callers", () => {
 			const root = fixture.open();
 			await fixture.withBinding(root, async binding => {
 				const authStorage = createInMemoryAuthStorage();
-				const settings = Settings.isolated({ "compaction.enabled": false, "memory.enabled": false });
+				const settings = Settings.isolated({ "compaction.enabled": false, "memory.backend": "off" });
 				const startup = createAgentSession({
 					modelRequestJournalLeaseBinding: binding,
 					authStorage,
@@ -696,7 +698,7 @@ mac("journal outer work canonical source callers", () => {
 			await fixture.withBinding(root, async binding => {
 				const principal = await fixture.ready(binding, root);
 				const harness = await openManagedAgentHarness(principal, binding, {
-					settings: Settings.isolated({ "compaction.enabled": true, "memory.enabled": false }),
+					settings: Settings.isolated({ "compaction.enabled": true, "memory.backend": "off" }),
 				});
 				const gate = Promise.withResolvers<void>();
 				harness.api.on("session_before_compact", async () => {
@@ -740,7 +742,9 @@ mac("journal outer work canonical source callers", () => {
 			await fixture.withBinding(root, async binding => {
 				const principal = await fixture.ready(binding, root);
 				const authStorage = createInMemoryAuthStorage();
-				const settings = Settings.isolated({ "roles.judge": ["local/qwen2.5-1.5b"] });
+				const settings = Settings.isolated({
+					modelRoles: { judge: LOCAL_JUDGE ? `${LOCAL_JUDGE.provider}/${LOCAL_JUDGE.id}` : "local/qwen2.5-1.5b" },
+				});
 				const registry = new ModelRegistry(authStorage, undefined, { ignoreLocalModelConfig: true });
 				await withManagedExecution(principal.execution, async () => {
 					const judge = new ChainJudge({ settings, registry, purpose: "outer-work-probe" });
@@ -817,9 +821,25 @@ mac("journal outer work canonical source callers", () => {
 
 	test("S-05/AC-OL-11: executor spawn outer work joins late createAgentSession dispose after abort", async () => {
 		const fixture = new R11JournalFixture();
+		const abortController = new AbortController();
 		const createGate = Promise.withResolvers<void>();
+		const createStarted = Promise.withResolvers<void>();
 		const disposeSeen = Promise.withResolvers<void>();
+		const spawnModel = buildModel({
+			provider: "mock",
+			id: "journal-outer-work-spawn",
+			name: "journal-outer-work-spawn",
+			api: "openai-completions",
+			baseUrl: "https://mock.example.test",
+			reasoning: false,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 128000,
+			maxTokens: 8192,
+		});
 		const createSpy = vi.spyOn(sdkModule, "createAgentSession").mockImplementation(async () => {
+			createStarted.resolve();
+			abortController.abort();
 			await createGate.promise;
 			return {
 				session: {
@@ -834,24 +854,44 @@ mac("journal outer work canonical source callers", () => {
 			const root = fixture.open();
 			await fixture.withBinding(root, async binding => {
 				const principal = await fixture.ready(binding, root);
-				const modelRequestRoot = childModelRequestRootOf(principal.execution);
-				const spawnOuterWork = journalOuterWorkFromBinding(
-					resolveModelRequestRootSource(modelRequestRoot, binding).modelRequestJournalLeaseBinding,
-				);
-				const sessionPromise = sdkModule.createAgentSession({
-					modelRequestRoot,
-					modelRequestJournalLeaseBinding: binding,
-					disableExtensionDiscovery: true,
+				const authStorage = createInMemoryAuthStorage();
+				const registry = new ModelRegistry(authStorage, undefined, { ignoreLocalModelConfig: true });
+				vi.spyOn(registry, "getAvailable").mockReturnValue([spawnModel]);
+				await withManagedExecution(principal.execution, async () => {
+					const subprocess = runSubprocess({
+						cwd: fixture.directory,
+						artifactsDir: fixture.directory,
+						agent: {
+							name: "task",
+							description: "outer-work spawn probe",
+							systemPrompt: "test",
+							source: "bundled",
+						},
+						task: "probe",
+						index: 0,
+						id: "journal-outer-work-s05",
+						settings: Settings.isolated({
+							"compaction.enabled": false,
+							"memory.backend": "off",
+							"task.softRequestBudget": 0,
+						}),
+						modelRegistry: registry,
+						modelOverride: `${spawnModel.provider}/${spawnModel.id}`,
+						enableLsp: false,
+						signal: abortController.signal,
+						modelRequestRoot: childModelRequestRootOf(principal.execution),
+						keepAlive: false,
+					});
+					await createStarted.promise;
+					expect(createSpy).toHaveBeenCalled();
+					expectBindingRejectsOuterWork(binding);
+					createGate.resolve();
+					await disposeSeen.promise;
+					const result = await subprocess;
+					expect(result.aborted).toBe(true);
+					expectBindingAcceptsOuterWork(binding);
 				});
-				spawnOuterWork.trackDetached(sessionPromise);
-				createGate.resolve();
-				spawnOuterWork.trackDetached(
-					sessionPromise.then(async created => {
-						await created.session.dispose();
-					}),
-				);
-				await spawnOuterWork.complete(new Error("aborted before session returned"));
-				await disposeSeen.promise;
+				authStorage.close();
 			});
 		} finally {
 			createSpy.mockRestore();

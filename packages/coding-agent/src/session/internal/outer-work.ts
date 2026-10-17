@@ -59,9 +59,7 @@ class JournalOuterWorkScopeImpl implements JournalOuterWorkScope {
 	trackDetached(promise: Promise<unknown>): void {
 		if (!this.active) return;
 		this.#tracked.add(promise);
-		void promise.finally(() => this.#tracked.delete(promise)).catch(error => {
-			this.#failures.push(error);
-		});
+		void promise.finally(() => this.#tracked.delete(promise));
 	}
 
 	async complete(primaryError?: unknown): Promise<void> {
