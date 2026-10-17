@@ -1,5 +1,4 @@
 import { describe, expect, it } from "bun:test";
-import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
@@ -293,7 +292,7 @@ describe("actual File session principal", () => {
 			expect(() => assertJournalExecutionIdentity(fakeExecution)).toThrow(unavailable);
 			expect(() => Reflect.apply(cell.appendModelRequestMetadata, cell, [fakeOwner, fixture.decision])).toThrow(unavailable);
 			expect(() => Reflect.apply(appendJournalMetadata, undefined, [fakeSession, fakeExecution, fixture.decision])).toThrow(unavailable);
-			assert.deepEqual(cell.getEntries(), managedEntries(fixture).slice(1));
+			expect<readonly FileEntry[]>(cell.getEntries()).toEqual(managedEntries(fixture).slice(1));
 			expect(await Bun.file(file).text()).toBe(bytes);
 		} finally {
 			await closeCell(cell);
@@ -321,7 +320,7 @@ describe("actual File session principal", () => {
 			Reflect.set(assistant.message.content[0]!, "text", "caller-mutated");
 			Reflect.set(entries, "length", 0);
 			expect(cell.getHeader()).toEqual(fixture.header);
-			assert.deepEqual(cell.getEntries(), managedEntries(fixture).slice(1));
+			expect<readonly FileEntry[]>(cell.getEntries()).toEqual(managedEntries(fixture).slice(1));
 			expect(cell.getEntry(fixture.metadata.id)).toEqual(fixture.metadata);
 			expect(cell.getEntry(fixture.assistant.id)).toEqual(fixture.assistant);
 			expect(await Bun.file(file).text()).toBe(bytes);
@@ -353,7 +352,7 @@ describe("actual File session principal", () => {
 				await expect(laterWriter.append(line)).rejects.toThrow();
 				expect(() => rawStorage.openWriter(file, { flags: "w" })).toThrow();
 				expect(await Bun.file(file).text()).toBe(bytes);
-				assert.deepEqual(cell.getEntries(), managedEntries(fixture).slice(1));
+				expect<readonly FileEntry[]>(cell.getEntries()).toEqual(managedEntries(fixture).slice(1));
 				expect((await loadModelRequestJournalFromFile(file)).throughSeqByEpoch.get(EPOCH)).toBe(2);
 			} finally {
 				await closeCell(cell);

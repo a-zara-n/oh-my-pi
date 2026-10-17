@@ -1,5 +1,4 @@
 import { describe, expect, it, spyOn } from "bun:test";
-import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { exportSessionToHtml } from "@oh-my-pi/pi-coding-agent/export/html/index";
@@ -145,7 +144,7 @@ describe("File principal consumer compatibility regressions", () => {
 			if (!file) throw new Error("Expected a file-backed session");
 			expect(fs.realpathSync(path.dirname(file))).toBe(fs.realpathSync(dir.path()));
 			expect(manager.getEntry(id)).toBeDefined();
-			assert.deepEqual((await loadSessionFile(file)).entries, [manager.getHeader(), ...manager.getEntries()]);
+			expect<readonly (FileEntry | null)[]>((await loadSessionFile(file)).entries).toEqual([manager.getHeader(), ...manager.getEntries()]);
 		} finally {
 			try { await manager.close(); } finally { cell.releaseRetainedEntries(); }
 		}
@@ -195,7 +194,7 @@ describe("File principal consumer compatibility regressions", () => {
 			expect(fs.realpathSync(notices[0]!.from)).toBe(fs.realpathSync(file));
 			expect(fs.realpathSync(notices[0]!.to)).toBe(fs.realpathSync(sibling));
 			expect(manager.getEntry(id)).toMatchObject({ id, parentId: "first" });
-			assert.deepEqual((await loadSessionFile(sibling)).entries, [manager.getHeader(), ...manager.getEntries()]);
+			expect<readonly (FileEntry | null)[]>((await loadSessionFile(sibling)).entries).toEqual([manager.getHeader(), ...manager.getEntries()]);
 			expect(await Bun.file(file).text()).toBe(bytes);
 		} finally {
 			try {
@@ -281,10 +280,10 @@ describe("File principal consumer compatibility regressions", () => {
 			}
 			expect({ fullReads, historyClones }).toEqual({ fullReads: 0, historyClones: 0 });
 			expect(cell.getExpectedDiskSize()).toBe(beforeSize + Buffer.byteLength(line));
-			assert.equal(fs.statSync(file).size, cell.getExpectedDiskSize());
+			expect<number | null>(fs.statSync(file).size).toBe(cell.getExpectedDiskSize());
 			expect(cell.getEntries()).toEqual([...history, userEntry("warm", "history-127"), entry]);
 			expect(cell.getLeafId()).toBe(entry.id);
-			assert.deepEqual((await loadSessionFile(file)).entries.slice(1), cell.getEntries());
+			expect<readonly FileEntry[]>((await loadSessionFile(file)).entries.slice(1)).toEqual(cell.getEntries());
 		} finally { await disposeCell(cell); }
 	});
 
@@ -364,7 +363,7 @@ describe("File principal consumer compatibility regressions", () => {
 					else await cell.writeLinesAtomic!(file, entries.map(entry => `${JSON.stringify(entry)}\n`), options);
 				});
 				expect(await Bun.file(file).text()).toBe(bytes);
-				assert.deepEqual(cell.getEntries(), entries.slice(1));
+				expect<readonly FileEntry[]>(cell.getEntries()).toEqual(entries.slice(1));
 				expect((await loadModelRequestJournalFromFile(file)).metadataEntries).toEqual([fixture.metadata, fixture.linked]);
 				// An exact managed copy is still forbidden through raw storage, including a new destination.
 				const copied = dir.join("raw-copy.jsonl");
@@ -402,7 +401,7 @@ describe("File principal consumer compatibility regressions", () => {
 				SessionManager.open(file, dir.path(), undefined, { suppressBreadcrumb: true }));
 			expect(openFileJournalCell({ cwd: dir.path(), sessionFile: file })).toBe(cell);
 			expect(cell.getEntries()).toEqual(snapshot);
-			assert.deepEqual(manager.getEntries(), snapshot);
+			expect<readonly FileEntry[]>(manager.getEntries()).toEqual(snapshot);
 			expect(cell.getLeafId()).toBe("first");
 			expect(manager.getLeafId()).toBe("first");
 			expect(await Bun.file(file).text()).toBe(bytes);

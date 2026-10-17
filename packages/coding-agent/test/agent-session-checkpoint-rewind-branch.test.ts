@@ -317,6 +317,9 @@ describe("AgentSession checkpoint rewind branch context", () => {
 					stopReason: "toolUse",
 				};
 				await session.settleInFlightMessagePersistence();
+				// Hot appends retain caller identity in the facade cache. A real
+				// rewrite reloads the File principal's cloned snapshot before rewind.
+				await session.sessionManager.rewriteEntries();
 				const entry = session.sessionManager.getEntries().find(
 					entry =>
 						entry.type === "message" &&
