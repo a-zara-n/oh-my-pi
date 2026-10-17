@@ -1,4 +1,5 @@
-import { DEFAULT_MAX_BYTES, type OutputArtifactError, OutputSink } from "@oh-my-pi/pi-tui/tools/streaming-output";
+import { DEFAULT_MAX_BYTES, OutputSink } from "@oh-my-pi/pi-tui/tools/streaming-output";
+import type { OutputArtifactError } from "@oh-my-pi/pi-utils/agent-messages";
 import type { ToolSession } from "../../tools";
 import {
 	resolveOutputMaxColumns,

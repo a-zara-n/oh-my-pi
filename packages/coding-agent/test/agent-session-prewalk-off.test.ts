@@ -1,8 +1,10 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import * as path from "node:path";
 import { type } from "@oh-my-pi/omptype";
-import { Agent, type AgentMessage, type AgentTool } from "@oh-my-pi/pi-agent-core";
-import { type Api, Effort, type Message, type Model } from "@oh-my-pi/pi-ai";
+import { Agent, type AgentTool } from "@oh-my-pi/pi-agent-core";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
+import { Effort, type Model } from "@oh-my-pi/pi-ai";
+import type { Api, Message } from "@oh-my-pi/pi-utils/model-data";
 import { createMockModel, type MockResponse } from "@oh-my-pi/pi-ai/providers/mock";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";

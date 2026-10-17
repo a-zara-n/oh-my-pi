@@ -1,7 +1,8 @@
 import { $env } from "@oh-my-pi/pi-utils";
 import type { ResponseInput, ResponseInputItem } from "./providers/openai-responses-wire";
 import { isMalformedToolCallName, redactSensitiveCredentials } from "./providers/transform-messages";
-import type { CacheRetention, OpenAIResponsesHistoryPayload, ProviderPayload } from "./types";
+import type { CacheRetention } from "./types";
+import type { OpenAIResponsesHistoryPayload, ProviderPayload } from "@oh-my-pi/pi-utils/model-data";
 
 type OpenAIResponsesReplayItem = ResponseInput[number];
 const NON_WHITESPACE_RE = /\S/;

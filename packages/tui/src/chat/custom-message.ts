@@ -1,7 +1,8 @@
 import { FramedMessageComponent } from "../chrome/message-frame";
 import type { MessageRenderer } from "./extension-types";
 import { theme } from "../theme";
-import { type CustomMessage, LIVE_DELEGATION_MESSAGE_TYPE } from "./messages";
+import { LIVE_DELEGATION_MESSAGE_TYPE } from "./messages";
+import type { CustomMessage } from "@oh-my-pi/pi-utils/agent-messages";
 
 /**
  * Component that renders a custom message entry from extensions.

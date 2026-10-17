@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
-import type { Api, ModelSpec } from "@oh-my-pi/pi-ai";
+import type { ModelSpec } from "@oh-my-pi/pi-ai";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { resetCapabilityForTests } from "@oh-my-pi/pi-coding-agent/capability";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";

@@ -1,19 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as path from "node:path";
 import {
-	type Api,
-	type AssistantMessage,
 	type Context,
 	type Model,
 	type SimpleStreamOptions,
 	streamSimple,
 } from "@oh-my-pi/pi-ai";
+import type { Api, AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import {
 	getModelRequestExecution,
 	resolveModelRequestScope,
 	runWithModelRequestExecution,
 } from "@oh-my-pi/pi-ai/model-request-execution";
-import type { ModelRequestAgent, ModelRequestPurpose } from "@oh-my-pi/pi-ai/model-request-gate";
+import type { ModelRequestAgent, ModelRequestPurpose } from "@oh-my-pi/pi-utils/model-request-data";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";

@@ -5,7 +5,7 @@
 // emits a structured debug event, and the delivered-prefix path reports which
 // message diverged and which fields changed.
 import { describe, expect, it, vi } from "bun:test";
-import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import { logger } from "@oh-my-pi/pi-utils";
 
 import {

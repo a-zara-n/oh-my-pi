@@ -3,7 +3,6 @@
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
-	type AgentMessage,
 	type AgentTool,
 	type AgentToolContext,
 	type AgentToolResult,
@@ -11,14 +10,13 @@ import {
 	isNonBlankContext,
 	joinAdditionalContext,
 } from "@oh-my-pi/pi-agent-core";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import type {
-	AssistantMessage,
 	CredentialDisabledEvent,
-	ImageContent,
 	Model,
 	ProviderResponseMetadata,
-	TextContent,
 } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, ImageContent, TextContent } from "@oh-my-pi/pi-utils/model-data";
 import {
 	getModelRequestExecution,
 	type ModelRequestExecution,

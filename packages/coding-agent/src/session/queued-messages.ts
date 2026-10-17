@@ -1,8 +1,9 @@
-import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import type { AssistantMessage, ImageContent } from "@oh-my-pi/pi-ai";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
+import type { AssistantMessage, ImageContent } from "@oh-my-pi/pi-utils/model-data";
 import { MAGIC_KEYWORDS } from "../modes/magic-keywords";
 import type { RestoredQueuedMessage } from "./agent-session-types";
-import { type CustomMessage, readQueueChipText } from "./messages";
+import { readQueueChipText } from "./messages";
+import type { CustomMessage } from "@oh-my-pi/pi-utils/agent-messages";
 
 function queuedTextContent(message: AgentMessage): string | undefined {
 	if (!("content" in message)) return undefined;

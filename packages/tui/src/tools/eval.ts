@@ -45,8 +45,8 @@ import {
 	truncateToWidth,
 	wrapBrackets,
 } from "../render/render-utils";
-import type { ImageContent } from "@oh-my-pi/pi-ai";
-import type { OutputMeta } from "./output-meta";
+import type { ImageContent } from "@oh-my-pi/pi-utils/model-data";
+import type { OutputMeta } from "@oh-my-pi/pi-utils/agent-messages";
 import { type ConfiguredThinkingLevel, expandKeyHint } from "../render/render-utils";
 
 /** Runtime backend that an eval cell dispatches to. */

@@ -26,7 +26,7 @@
  * one, matching the pre-flag notification.
  */
 import { logger } from "@oh-my-pi/pi-utils";
-import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import type { AgentSessionEvent } from "../../session/agent-session";
 import type { ExtensionRunner } from "./runner";
 import type {

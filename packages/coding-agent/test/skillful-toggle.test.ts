@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { UserMessage } from "@oh-my-pi/pi-ai";
+import type { UserMessage } from "@oh-my-pi/pi-utils/model-data";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import type { Skill } from "@oh-my-pi/pi-coding-agent/extensibility/skills";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";

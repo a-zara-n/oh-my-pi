@@ -26,7 +26,8 @@
  */
 import { parseArgs } from "node:util";
 import { completeSimple } from "@oh-my-pi/pi-ai";
-import type { Api, AssistantMessage, Model } from "@oh-my-pi/pi-ai";
+import type { Model } from "@oh-my-pi/pi-ai";
+import type { Api, AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import type { GeneratedProvider } from "@oh-my-pi/pi-catalog/models";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 

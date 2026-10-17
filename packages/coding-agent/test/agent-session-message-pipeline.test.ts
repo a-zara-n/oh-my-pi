@@ -1,24 +1,20 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
 import {
 	Agent,
-	type AgentMessage,
 	type AgentTool,
 	AppendOnlyContextManager,
 	type StreamFn,
 } from "@oh-my-pi/pi-agent-core";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import {
-	type Api,
 	type Context,
 	clearCustomApis,
-	type ImageContent,
-	type Message,
 	type Model,
 	type ModelSpec,
 	registerCustomApi,
 	type SimpleStreamOptions,
-	type TextContent,
-	type ToolCall,
 } from "@oh-my-pi/pi-ai";
+import type { Api, ImageContent, Message, TextContent, ToolCall } from "@oh-my-pi/pi-utils/model-data";
 import { streamSimple } from "@oh-my-pi/pi-ai/stream";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";

@@ -3,13 +3,13 @@
 import { scheduler } from "node:timers/promises";
 import {
 	type Agent,
-	type AgentMessage,
 	type AgentTurnEndContext,
 	type MessageCountOptions,
 	resolveTelemetry,
 	type StreamFn,
 	type ThinkingLevel,
 } from "@oh-my-pi/pi-agent-core";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import {
 	AGGRESSIVE_SHAKE_CONFIG,
 	AUTO_HANDOFF_THRESHOLD_FOCUS,
@@ -52,13 +52,12 @@ import {
 } from "@oh-my-pi/pi-agent-core/compaction/pruning";
 import type { ProtectedToolMatcher } from "@oh-my-pi/pi-agent-core/compaction/tool-protection";
 import type {
-	AssistantMessage,
 	CodexCompactionContext,
 	Context,
-	Message,
 	Model,
 	ProviderSessionState,
 } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, Message } from "@oh-my-pi/pi-utils/model-data";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { createModelRequestRetryChain, runInModelRequestRetryChain } from "@oh-my-pi/pi-ai/model-request-execution";
 import { resolvePromptCacheLookback } from "@oh-my-pi/pi-catalog/compat/prompt-cache-lookback";

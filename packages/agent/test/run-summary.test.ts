@@ -17,8 +17,9 @@ import {
 	emptyAgentRunSummary,
 } from "@oh-my-pi/pi-agent-core/run-collector";
 import { EXECUTE_TOOL_STATUS_ATTR, GenAIAttr, OmpGenAIAggregateAttr } from "@oh-my-pi/pi-agent-core/telemetry";
-import type { AgentEvent, AgentLoopConfig, AgentMessage, AgentTool } from "@oh-my-pi/pi-agent-core/types";
-import type { AssistantMessage, Message } from "@oh-my-pi/pi-ai";
+import type { AgentEvent, AgentLoopConfig, AgentTool } from "@oh-my-pi/pi-agent-core/types";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
+import type { AssistantMessage, Message } from "@oh-my-pi/pi-utils/model-data";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import type {
 	AttributeValue,

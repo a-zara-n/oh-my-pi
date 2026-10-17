@@ -1,4 +1,5 @@
-import type { Message, Tool } from "@oh-my-pi/pi-ai";
+import type { Tool } from "@oh-my-pi/pi-ai";
+import type { Message } from "@oh-my-pi/pi-utils/model-data";
 
 /**
  * Last wire definition this Agent sent for each tool name, so a provider that keeps

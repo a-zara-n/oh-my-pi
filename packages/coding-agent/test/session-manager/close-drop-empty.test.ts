@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { FileSessionStorage } from "@oh-my-pi/pi-coding-agent/session/session-storage";
+import { FileSessionStorage } from "@oh-my-pi/pi-utils/model-request-journal-composition";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { isEnoent, TempDir } from "@oh-my-pi/pi-utils";
 

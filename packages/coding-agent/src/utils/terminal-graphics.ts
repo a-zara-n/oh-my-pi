@@ -1,5 +1,5 @@
 import { inflateSync } from "node:zlib";
-import type { ImageContent } from "@oh-my-pi/pi-ai";
+import type { ImageContent } from "@oh-my-pi/pi-utils/model-data";
 import { decodeSixelToPngAsync } from "@oh-my-pi/pi-natives";
 import { MAX_IMAGE_INPUT_BYTES, convertImageToPng } from "@oh-my-pi/pi-tui/chat/image-loading";
 import { encodeRawPng, PNG_SIGNATURE } from "./png-encode";

@@ -19,8 +19,8 @@ import type {
 	CursorShellStreamCallbacks,
 	CursorTodoSnapshot,
 	CursorExecHandlers as ICursorExecHandlers,
-	ToolResultMessage,
 } from "@oh-my-pi/pi-ai";
+import type { ToolResultMessage } from "@oh-my-pi/pi-utils/model-data";
 import {
 	cursorRawReadPath,
 	omitUndefinedArgs,

@@ -2,7 +2,8 @@ import { describe, expect, it } from "bun:test";
 import { ThinkingFenceStripper } from "@oh-my-pi/pi-ai/dialect/thinking-fence-strip";
 import { consumeGoogleStream } from "@oh-my-pi/pi-ai/providers/google-shared";
 import type { GenerateContentResponse, Part } from "@oh-my-pi/pi-ai/providers/google-types";
-import type { AssistantMessage, AssistantMessageEvent, Model } from "@oh-my-pi/pi-ai/types";
+import type { AssistantMessageEvent, Model } from "@oh-my-pi/pi-ai/types";
+import type { AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 

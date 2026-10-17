@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { registerCustomApi } from "../../src/api-registry";
 import { createMockModel } from "../../src/providers/mock";
 import { complete, completeSimple } from "../../src/stream";
-import type { AssistantMessage, AssistantMessageEvent } from "../../src/types";
+import type { AssistantMessageEvent } from "../../src/types";
+import type { AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import { AssistantMessageEventStream } from "../../src/utils/event-stream";
 
 const completion = process.argv[2] === "complete" ? complete : completeSimple;

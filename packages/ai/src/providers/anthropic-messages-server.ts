@@ -4,21 +4,23 @@ import { logger } from "@oh-my-pi/pi-utils";
 import { captureRequestHeaders, resolvePromptCacheKey } from "../auth-gateway/http";
 import * as AIError from "../error";
 import type {
+	AssistantMessageEventStream,
+	Tool,
+} from "../types";
+import type {
 	AnthropicMessagePayload,
 	AnthropicServerToolContent,
 	AssistantMessage,
-	AssistantMessageEventStream,
 	DeveloperMessage,
 	Message,
 	RedactedThinkingContent,
 	StopReason,
 	TextContent,
 	ThinkingContent,
-	Tool,
 	ToolCall,
 	ToolResultMessage,
 	UserMessage,
-} from "../types";
+} from "@oh-my-pi/pi-utils/model-data";
 import { isCursorExecResolved } from "../utils/block-symbols";
 import {
 	type AnthropicAssistantContentBlock,

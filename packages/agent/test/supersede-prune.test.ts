@@ -1,11 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { type AgentMessage, Tokenizer } from "@oh-my-pi/pi-agent-core";
+import { Tokenizer } from "@oh-my-pi/pi-agent-core";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import type {
 	BranchSummaryEntry,
 	CustomMessageEntry,
 	SessionEntry,
 	SessionMessageEntry,
-} from "@oh-my-pi/pi-agent-core/compaction";
+} from "@oh-my-pi/pi-utils/compaction-entries";
 import {
 	type CacheLookbackConfig,
 	type ConvertToLlm,
@@ -21,7 +22,13 @@ import {
 	USELESS_NOTICE,
 } from "@oh-my-pi/pi-agent-core/compaction";
 import type { ProtectedToolContext } from "@oh-my-pi/pi-agent-core/compaction/tool-protection";
-import type { AssistantMessage, ImageContent, Message, TextContent, ToolResultMessage } from "@oh-my-pi/pi-ai";
+import type {
+	AssistantMessage,
+	ImageContent,
+	Message,
+	TextContent,
+	ToolResultMessage,
+} from "@oh-my-pi/pi-utils/model-data";
 import { convertAnthropicMessages } from "@oh-my-pi/pi-ai/providers/anthropic";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 

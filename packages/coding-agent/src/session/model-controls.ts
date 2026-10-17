@@ -1,5 +1,6 @@
 import { type Agent, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import type { Model, ProviderSessionState, ServiceTier, ServiceTierByFamily, ServiceTierFamily } from "@oh-my-pi/pi-ai";
+import type { Model, ProviderSessionState } from "@oh-my-pi/pi-ai";
+import type { ServiceTier, ServiceTierByFamily, ServiceTierFamily } from "@oh-my-pi/pi-utils/model-data";
 import {
 	Effort,
 	realizesPriorityServiceTier,

@@ -1,9 +1,8 @@
 import { describe, expect, it } from "bun:test";
-import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import type { AssistantMessage } from "@oh-my-pi/pi-ai";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
+import type { AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import {
 	buildReplanTitleContext,
-	type CustomMessage,
 	convertToLlm,
 	dedupeEphemeralReply,
 	INTERRUPTED_THINKING_MESSAGE_TYPE,
@@ -12,6 +11,7 @@ import {
 	type SkillPromptDetails,
 	stripImagesFromMessage,
 } from "../../src/session/messages";
+import type { CustomMessage } from "@oh-my-pi/pi-utils/agent-messages";
 
 function customMessage(customType: string, attribution: "agent" | "user"): CustomMessage<SkillPromptDetails> {
 	return {

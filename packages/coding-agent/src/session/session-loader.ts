@@ -1,4 +1,4 @@
-import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import { ConcatSink, getBlobsDir, isEisdir, isEnoent, isEnotdir, parseJsonlLenient } from "@oh-my-pi/pi-utils";
 import * as snapcompact from "@oh-my-pi/snapcompact";
 import { Semaphore } from "../task/parallel";
@@ -12,11 +12,11 @@ import {
 	resolveImageDataUrlSync,
 } from "./blob-store";
 import { buildSessionContext } from "./session-context";
-import { validateModelRequestJournal, type ModelRequestJournalValidation } from "./model-request-journal";
+import { validateModelRequestJournal, type ModelRequestJournalValidation } from "@oh-my-pi/pi-utils/model-request-journal";
 import type { FileEntry, RawFileEntry, SessionEntry, SessionHeader } from "@oh-my-pi/pi-utils/session-entries";
 import { migrateToCurrentVersion } from "./session-migrations";
 import { isExternalizableImagePosition, isPersistenceTruncatedString } from "./session-persistence";
-import { FileSessionStorage, type SessionStorage } from "./session-storage";
+import { FileSessionStorage, type SessionStorage } from "@oh-my-pi/pi-utils/model-request-journal-composition";
 import { parseTitleSlotFromContent,
 	parseTitleSlotLine,
 	type SessionTitleUpdate,

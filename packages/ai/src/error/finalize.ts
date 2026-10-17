@@ -1,4 +1,4 @@
-import type { Api } from "../types";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 import type { AbortSourceTracker } from "../utils/abort";
 import type { CapturedHttpErrorResponse, RawHttpRequestDump } from "../utils/http-inspector";
 import { classify, classifyMessage, status } from "./flags";

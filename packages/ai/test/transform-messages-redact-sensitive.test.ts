@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { configureCredentialRedaction, transformMessages } from "@oh-my-pi/pi-ai/providers/transform-messages";
-import type { AssistantMessage, Message, Model, ToolCall, ToolResultMessage } from "@oh-my-pi/pi-ai/types";
+import type { Model } from "@oh-my-pi/pi-ai/types";
+import type { AssistantMessage, Message, ToolCall, ToolResultMessage } from "@oh-my-pi/pi-utils/model-data";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 
 function makeModel(): Model<"openai-responses"> {

@@ -3,7 +3,8 @@
  */
 
 import type { FluentType } from "@oh-my-pi/omptype";
-import type { Api, ModelSpec } from "@oh-my-pi/pi-ai/types";
+import type { ModelSpec } from "@oh-my-pi/pi-ai/types";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 import { AXES } from "@oh-my-pi/pi-catalog/compat/axes";
 import { type ModelKind, servedKinds } from "@oh-my-pi/pi-catalog/types";
 import { isRecord, once } from "@oh-my-pi/pi-utils";

@@ -1,5 +1,5 @@
 import { Snowflake } from "@oh-my-pi/pi-utils";
-import { validateModelRequestJournal } from "./model-request-journal";
+import { validateModelRequestJournal } from "@oh-my-pi/pi-utils/model-request-journal";
 import { type CompactionEntry, CURRENT_SESSION_VERSION, type FileEntry, type SessionHeader } from "@oh-my-pi/pi-utils/session-entries";
 
 /** Generate a unique short ID (8 hex chars, collision-checked) */

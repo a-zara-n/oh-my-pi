@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "bun:test";
 import { AuthStorage, SqliteAuthCredentialStore } from "@oh-my-pi/pi-ai/auth-storage";
 import { convertMessages } from "@oh-my-pi/pi-ai/providers/openai-completions";
 import { getOAuthProviders } from "@oh-my-pi/pi-ai/registry/oauth";
-import type { AssistantMessage, ThinkingContent, ToolCall } from "@oh-my-pi/pi-ai/types";
+import type { AssistantMessage, ThinkingContent, ToolCall } from "@oh-my-pi/pi-utils/model-data";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { xiaomiModelManagerOptions } from "@oh-my-pi/pi-catalog/provider-models/openai-compat";
 import { getBundledModels } from "@oh-my-pi/pi-catalog/models";

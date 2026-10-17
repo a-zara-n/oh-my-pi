@@ -11,7 +11,7 @@
  * bridge ({@link TextJudge}) renders the same questions into keyword prompts
  * for an ordinary chat model.
  */
-import type { Usage } from "../types";
+import type { Usage } from "@oh-my-pi/pi-utils/model-data";
 
 /** JSON-compatible value; readonly containers are accepted so `as const` state passes through. */
 export type JsonValue = string | number | boolean | null | readonly JsonValue[] | { readonly [key: string]: JsonValue };

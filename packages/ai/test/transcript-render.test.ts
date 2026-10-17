@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import type { Message, Usage } from "@oh-my-pi/pi-ai";
+import type { Message, Usage } from "@oh-my-pi/pi-utils/model-data";
 import { getDialectDefinition } from "@oh-my-pi/pi-ai/dialect";
 
 function usage(): Usage {

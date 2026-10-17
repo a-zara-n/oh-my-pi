@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
-import type { ImageContent } from "@oh-my-pi/pi-ai";
+import type { ImageContent } from "@oh-my-pi/pi-utils/model-data";
 import { encodeTspMessage } from "@oh-my-pi/pi-tui/native/encode";
 import { nativeComponentId } from "@oh-my-pi/pi-tui/native/reconcile";
 import { CustomEditor } from "@oh-my-pi/pi-tui/prompt/custom-editor";

@@ -1,5 +1,5 @@
 import { escapeXmlText, parseJsonWithRepair } from "@oh-my-pi/pi-utils";
-import type { Message, ToolCall } from "../types";
+import type { Message, ToolCall } from "@oh-my-pi/pi-utils/model-data";
 import dialectPrompt from "./anthropic.md" with { type: "text" };
 import { buildArgShapes, buildStringArgsResolver, mintToolCallId } from "./coercion";
 import { renderDelimitedThinking, renderInvoke, renderInvokes, renderLegacyTextTranscript } from "./rendering";

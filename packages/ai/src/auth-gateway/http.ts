@@ -7,7 +7,8 @@
 import { timingSafeEqual as nodeTimingSafeEqual } from "node:crypto";
 import * as os from "node:os";
 import { getInstallId } from "@oh-my-pi/pi-utils";
-import type { Api, Model } from "../types";
+import type { Model } from "../types";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 import type { ClientUsageIdentity } from "../usage";
 
 const JSON_HEADERS = {

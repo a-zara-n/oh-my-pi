@@ -13,14 +13,15 @@ import type {
 	AgentContext,
 	AgentEvent,
 	AgentLoopConfig,
-	AgentMessage,
 	AgentTool,
 	AgentToolContext,
 	SpeculativePhysicalOutcome,
 	ToolCallContext,
 } from "@oh-my-pi/pi-agent-core/types";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import { ASIDE_MESSAGE_COMMIT, ASIDE_MESSAGE_DISCARD, SPECULATIVE_STREAM_SESSION } from "@oh-my-pi/pi-agent-core/types";
-import type { AssistantMessage, AssistantMessageEvent, Context, Message, ToolResultMessage } from "@oh-my-pi/pi-ai";
+import type { AssistantMessageEvent, Context } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, Message, ToolResultMessage } from "@oh-my-pi/pi-utils/model-data";
 import { createMockModel, type MockResponse } from "@oh-my-pi/pi-ai/providers/mock";
 import { transformMessages } from "@oh-my-pi/pi-ai/providers/transform-messages";
 import { kCursorExecResolved } from "@oh-my-pi/pi-ai/utils/block-symbols";
@@ -31,7 +32,7 @@ import * as harmonyLeak from "@oh-my-pi/pi-ai/utils/harmony-leak";
 import { INTENT_FIELD } from "@oh-my-pi/pi-wire";
 import { createAssistantMessage, createHarmonyMitigationModel, createUserMessage } from "./helpers";
 
-declare module "@oh-my-pi/pi-agent-core/types" {
+declare module "@oh-my-pi/pi-utils/agent-messages" {
 	interface CustomAgentMessages {
 		advisor: {
 			role: "custom";

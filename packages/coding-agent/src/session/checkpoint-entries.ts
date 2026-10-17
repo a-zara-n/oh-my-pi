@@ -1,5 +1,5 @@
-import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import type { ImageContent, TextContent } from "@oh-my-pi/pi-ai";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
+import type { ImageContent, TextContent } from "@oh-my-pi/pi-utils/model-data";
 import { stringProperty } from "@oh-my-pi/pi-utils";
 import { stripXdUrlPrefix } from "@oh-my-pi/pi-tui/tools/xd-url";
 import type { CompletedRewindState } from "../tools/checkpoint";

@@ -9,14 +9,13 @@
  */
 
 import {
-	type AssistantMessage,
 	type AssistantMessageEventStream,
 	type AuthStorage,
 	type Context,
 	type FetchImpl,
-	type Usage,
 	withOAuthAccess,
 } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, Usage } from "@oh-my-pi/pi-utils/model-data";
 import { streamOpenAICompletions } from "@oh-my-pi/pi-ai/providers/openai-completions";
 import { streamOpenAIResponses } from "@oh-my-pi/pi-ai/providers/openai-responses";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";

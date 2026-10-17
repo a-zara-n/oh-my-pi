@@ -5,7 +5,8 @@ import {
 	calculateOpenAIUsageAccounting,
 	populateResponsesUsageFromResponse,
 } from "@oh-my-pi/pi-ai/providers/openai-shared";
-import type { AssistantMessage, Model, Usage } from "@oh-my-pi/pi-ai/types";
+import type { Model } from "@oh-my-pi/pi-ai/types";
+import type { AssistantMessage, Usage } from "@oh-my-pi/pi-utils/model-data";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 
 const OPENAI_MODEL: Model<"openai-completions"> = buildModel({

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test, vi } from "bun:test";
 import * as natives from "@oh-my-pi/pi-natives";
 import { Tokenizer, tokenizerEncodingForModel } from "../src/tokenizer";
-import type { AgentMessage } from "../src/types";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 
 afterEach(() => {
 	vi.restoreAllMocks();

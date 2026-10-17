@@ -17,23 +17,25 @@ import { parseToolCallArguments } from "../utils/tool-call-arguments";
 import { getKimiCommonHeaders } from "../registry/oauth/kimi";
 import { getEnvApiKey } from "../env-api-key";
 import type {
-	AssistantMessage,
 	Context,
-	Message,
-	MessageAttribution,
 	Model,
 	ProviderSessionState,
-	ServiceTier,
-	StopReason,
 	StreamFunction,
 	StreamOptions,
+	Tool,
+	ToolChoice,
+} from "../types";
+import type {
+	AssistantMessage,
+	Message,
+	MessageAttribution,
+	ServiceTier,
+	StopReason,
 	TextContent,
 	ThinkingContent,
-	Tool,
 	ToolCall,
-	ToolChoice,
 	ToolResultMessage,
-} from "../types";
+} from "@oh-my-pi/pi-utils/model-data";
 import { normalizeSystemPrompts, resolveCacheRetention } from "../utils";
 import { createAbortSourceTracker } from "../utils/abort";
 import { isDemotedThinking, kStreamingLastParseLen } from "../utils/block-symbols";

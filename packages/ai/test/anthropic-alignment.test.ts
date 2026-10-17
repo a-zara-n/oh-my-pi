@@ -25,7 +25,6 @@ import { getClaudeCodeVersion } from "@oh-my-pi/pi-ai/providers/claude-code-fing
 import { getEnvApiKey } from "@oh-my-pi/pi-ai/env-api-key";
 import { streamSimple } from "@oh-my-pi/pi-ai/stream";
 import type {
-	AssistantMessage,
 	CacheRetention,
 	Context,
 	Model,
@@ -34,6 +33,7 @@ import type {
 	TokenTaskBudget,
 	Tool,
 } from "@oh-my-pi/pi-ai/types";
+import type { AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { removeSyncWithRetries } from "@oh-my-pi/pi-utils";
 import { withEnv, withOfficialAnthropicEndpoint } from "./helpers";

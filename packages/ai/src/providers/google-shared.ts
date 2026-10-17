@@ -9,21 +9,23 @@ import { renderDemotedThinking } from "../dialect/demotion";
 import { ThinkingFenceStripper } from "../dialect/thinking-fence-strip";
 import * as AIError from "../error";
 import type {
-	Api,
-	AssistantMessage,
 	Context,
 	FetchImpl,
-	ImageContent,
 	Model,
+	StreamOptions,
+	Tool,
+} from "../types";
+import type {
+	Api,
+	AssistantMessage,
+	ImageContent,
 	ServiceTier,
 	StopReason,
-	StreamOptions,
 	TextContent,
 	ThinkingContent,
-	Tool,
 	ToolCall,
 	Usage,
-} from "../types";
+} from "@oh-my-pi/pi-utils/model-data";
 import { shouldSendServiceTier } from "../types";
 import { normalizeSystemPrompts } from "../utils";
 import { AssistantMessageEventStream } from "../utils/event-stream";

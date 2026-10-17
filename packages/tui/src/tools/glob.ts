@@ -5,7 +5,7 @@ import { col, compact, keyed, node, row, span, text } from "../native/describe";
 import type { NativeChild, NativeNode } from "../native/node";
 import { fileHref, fileRow, footnoteText, inlineErrorView, resultText } from "./native-view";
 import { type Theme } from "../theme/theme";
-import type { OutputMeta } from "./output-meta";
+import type { OutputMeta } from "@oh-my-pi/pi-utils/agent-messages";
 import type { TruncationResult } from "./streaming-output";
 import { toPathList } from "../render/render-utils";
 import * as path from "node:path";

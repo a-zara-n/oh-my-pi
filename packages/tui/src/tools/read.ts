@@ -34,7 +34,7 @@ import {
 import { formatFullOutputReference, formatStyledTruncationWarning, stripOutputNotice } from "./output-meta";
 import { formatBytes, sanitizeDisplayLines, shortenPath, wrapBrackets } from "../render/render-utils";
 
-import type { OutputMeta } from "./output-meta";
+import type { OutputMeta } from "@oh-my-pi/pi-utils/agent-messages";
 import type { TruncationResult } from "./streaming-output";
 import { describeProcRead, renderProcRead, type ProcReadDetails } from "./proc-render";
 import { describeCfgRead, renderCfgRead, type CfgReadDetails } from "./cfg-render";

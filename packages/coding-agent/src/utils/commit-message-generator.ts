@@ -3,7 +3,8 @@
  * Follows the same pattern as title-generator.ts.
  */
 import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import type { Api, Model } from "@oh-my-pi/pi-ai";
+import type { Model } from "@oh-my-pi/pi-ai";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 import { completeSimple, retryTransientCompletion } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import {

@@ -1,5 +1,5 @@
 import { INTENT_FIELD } from "@oh-my-pi/pi-wire";
-import type { AssistantMessage, ToolCall, ToolResultMessage } from "../types";
+import type { AssistantMessage, ToolCall, ToolResultMessage } from "@oh-my-pi/pi-utils/model-data";
 
 const LEGACY_INTENT_FIELD = "__intent";
 const RESULT_SUMMARY_LIMIT = 200;

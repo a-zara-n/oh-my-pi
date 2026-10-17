@@ -37,20 +37,22 @@ import { runAsIndependentModelRequest } from "../model-request-lineage";
 import { parseToolCallArguments } from "../utils/tool-call-arguments";
 
 import type {
-	Api,
-	AssistantMessage,
 	Context,
-	DeveloperMessage,
-	Message,
 	Model,
 	StreamFunction,
 	StreamOptions,
+	Tool,
+} from "../types";
+import type {
+	Api,
+	AssistantMessage,
+	DeveloperMessage,
+	Message,
 	TextContent,
 	ThinkingContent,
-	Tool,
 	ToolCall,
 	UserMessage,
-} from "../types";
+} from "@oh-my-pi/pi-utils/model-data";
 import { normalizeSystemPrompts } from "../utils";
 import { isDemotedThinking } from "../utils/block-symbols";
 import { deterministicUuid } from "../utils/deterministic-id";

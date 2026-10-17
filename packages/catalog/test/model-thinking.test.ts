@@ -10,7 +10,8 @@ import {
 	minimumSupportedEffort,
 	requireSupportedEffort,
 } from "@oh-my-pi/pi-catalog/model-thinking";
-import type { Api, Model, ModelSpec, Provider } from "@oh-my-pi/pi-catalog/types";
+import type { Model, ModelSpec } from "@oh-my-pi/pi-catalog/types";
+import type { Api, Provider } from "@oh-my-pi/pi-utils/model-data";
 
 function createModel<TApi extends Api>(overrides: {
 	id: string;

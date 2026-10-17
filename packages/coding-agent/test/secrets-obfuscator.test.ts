@@ -8,9 +8,10 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { type } from "@oh-my-pi/omptype";
-import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import { buildOpenAiNativeHistory } from "@oh-my-pi/pi-agent-core/compaction";
-import type { AssistantMessage, Context, Message, TextContent } from "@oh-my-pi/pi-ai";
+import type { Context } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, Message, TextContent } from "@oh-my-pi/pi-utils/model-data";
 import { buildParams } from "@oh-my-pi/pi-ai/providers/openai-responses";
 import type {
 	ResponseFileSearchToolCall,

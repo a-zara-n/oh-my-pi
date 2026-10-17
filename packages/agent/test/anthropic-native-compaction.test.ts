@@ -11,23 +11,20 @@ import {
 	prepareCompaction,
 	remotePreserveReusable,
 	requestAnthropicNativeCompaction,
-	type SessionEntry,
 	shouldUseAnthropicNativeCompaction,
 	shouldUseProviderNativeCompaction,
 	withAnthropicCompactionPreserveData,
 } from "@oh-my-pi/pi-agent-core/compaction";
-import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
+import type { SessionEntry } from "@oh-my-pi/pi-utils/compaction-entries";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import * as ai from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import type {
-	AnthropicRequestControls,
-	AssistantMessage,
 	Context,
-	Message,
 	Model,
 	SimpleStreamOptions,
-	Usage,
 } from "@oh-my-pi/pi-ai/types";
+import type { AnthropicRequestControls, AssistantMessage, Message, Usage } from "@oh-my-pi/pi-utils/model-data";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";

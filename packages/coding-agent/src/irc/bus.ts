@@ -13,7 +13,7 @@ import { type IrcDeliveryReceipt, type IrcMessage } from "@oh-my-pi/pi-tui/tools
 import { logger, Snowflake } from "@oh-my-pi/pi-utils";
 import { AgentLifecycleManager } from "../registry/agent-lifecycle";
 import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
-import type { CustomMessage } from "../session/messages";
+import type { CustomMessage } from "@oh-my-pi/pi-utils/agent-messages";
 
 interface IrcWaiter {
 	from?: string;

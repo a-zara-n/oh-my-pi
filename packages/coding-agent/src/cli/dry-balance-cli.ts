@@ -1,7 +1,5 @@
 import type {
-	Api,
 	ApiKeyResolver,
-	AssistantMessage,
 	AssistantMessageEvent,
 	AssistantMessageEventStream,
 	AuthCredentialSnapshotEntry,
@@ -11,6 +9,7 @@ import type {
 	OAuthAccessResolution,
 	SimpleStreamOptions,
 } from "@oh-my-pi/pi-ai";
+import type { Api, AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import { streamSimple } from "@oh-my-pi/pi-ai";
 import { replaceTabs, truncateToWidth } from "@oh-my-pi/pi-tui";
 import { SPINNER_FRAMES } from "@oh-my-pi/pi-tui/theme/symbols";

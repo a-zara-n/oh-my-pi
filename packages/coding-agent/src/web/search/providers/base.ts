@@ -1,4 +1,5 @@
-import type { Api, AuthStorage, FetchImpl, Model } from "@oh-my-pi/pi-ai";
+import type { AuthStorage, FetchImpl, Model } from "@oh-my-pi/pi-ai";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 import type { ConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
 import type { ModelRegistry } from "../../../config/model-registry";
 import type { StructuredQuery } from "../query";

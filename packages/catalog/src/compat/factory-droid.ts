@@ -6,7 +6,8 @@
  * to bind a model to the account serving it.
  */
 import { isRecord, once } from "@oh-my-pi/pi-utils";
-import type { Api, ModelSpec } from "../types";
+import type { ModelSpec } from "../types";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 import { FACTORY_DROID_WIRES, type FactoryDroidRegion, type FactoryDroidWire } from "../wire/factory-droid";
 import { apiRouteFor } from "./behavior";
 import { seedModels } from "./providers";

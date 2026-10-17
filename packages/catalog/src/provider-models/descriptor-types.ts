@@ -1,6 +1,7 @@
 import type { CompiledProviderDiscovery } from "../compat/types";
 import type { ModelManagerOptions } from "../model-manager";
-import type { Api, FetchImpl } from "../types";
+import type { FetchImpl } from "../types";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 import type { AccountScope } from "../wire/factory-droid";
 
 /** Config passed to a provider's runtime model-manager factory. */

@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { Message } from "@oh-my-pi/pi-ai";
+import type { Message } from "@oh-my-pi/pi-utils/model-data";
 import { textContent } from "@oh-my-pi/pi-tui/chat/transcript-entry";
 import { getSessionsDir } from "@oh-my-pi/pi-utils/dirs";
 import * as logger from "@oh-my-pi/pi-utils/logger";
@@ -9,7 +9,7 @@ import { LRUCache } from "@oh-my-pi/pi-utils/lru";
 import { parseJsonlLenient } from "@oh-my-pi/pi-utils/stream";
 import { toError } from "@oh-my-pi/pi-utils/type-guards";
 import { computeDefaultSessionDir } from "./session-paths";
-import { FileSessionStorage, type SessionStorage, type SessionStorageStat } from "./session-storage";
+import { FileSessionStorage, type SessionStorage, type SessionStorageStat } from "@oh-my-pi/pi-utils/model-request-journal-composition";
 import { lookupSessionTitle, recordSessionTitle } from "./session-index";
 
 /**

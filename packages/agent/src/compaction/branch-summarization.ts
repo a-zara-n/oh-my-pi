@@ -5,13 +5,14 @@
  * a summary of the branch being left so context isn't lost.
  */
 
-import type { Api, ApiKey, AssistantMessage, Context, Model, SimpleStreamOptions } from "@oh-my-pi/pi-ai";
+import type { ApiKey, Context, Model, SimpleStreamOptions } from "@oh-my-pi/pi-ai";
+import type { Api, AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import { preferredDialect } from "@oh-my-pi/pi-catalog/identity";
 import { prompt } from "@oh-my-pi/pi-utils";
 import { type AgentTelemetry, instrumentedCompleteSimple } from "../telemetry";
 import { Tokenizer } from "../tokenizer";
-import type { AgentMessage } from "../types";
-import type { ReadonlySessionManager, SessionEntry } from "./entries";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
+import type { ReadonlySessionManager, SessionEntry } from "@oh-my-pi/pi-utils/compaction-entries";
 import {
 	type ConvertToLlm,
 	createBranchSummaryMessage,

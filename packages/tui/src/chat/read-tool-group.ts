@@ -1,6 +1,6 @@
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
-import type { AssistantMessage, Usage } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, Usage } from "@oh-my-pi/pi-utils/model-data";
 import { type Component } from "../tui";
 import { Container } from "../tui";
 import { Text } from "../components/text";

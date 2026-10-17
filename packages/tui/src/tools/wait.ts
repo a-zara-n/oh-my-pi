@@ -5,7 +5,8 @@ import { formatAge } from "@oh-my-pi/pi-utils";
 import { shimmerEnabled, shimmerText } from "../theme/shimmer";
 import type { Theme } from "../theme/theme";
 import { Ellipsis, Hasher, type RenderCache, renderStatusLine, renderTreeList, truncateToWidth } from "../render/index";
-import { formatArtifactErrorNotice, stripOutputNotice, type OutputMeta } from "./output-meta";
+import { formatArtifactErrorNotice, stripOutputNotice } from "./output-meta";
+import type { OutputMeta } from "@oh-my-pi/pi-utils/agent-messages";
 import {
 	FEED_MODEL_BADGE_WIDTH,
 	formatBadge,

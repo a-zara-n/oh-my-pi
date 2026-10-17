@@ -1,6 +1,6 @@
 import type { Component, TUI } from "../tui";
 import type { Theme } from "../theme/theme";
-import type { CustomMessage, HookMessage } from "./messages";
+import type { CustomMessage, HookMessage } from "@oh-my-pi/pi-utils/agent-messages";
 
 export type ExtensionUiComponent = Component & { dispose?(): void };
 

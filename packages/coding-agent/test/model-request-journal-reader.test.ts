@@ -7,7 +7,7 @@ import {
 	isModelRequestLifecycleRecord,
 	isModelRequestSourceLinkInput,
 	validateModelRequestJournal,
-} from "@oh-my-pi/pi-coding-agent/session/model-request-journal";
+} from "@oh-my-pi/pi-utils/model-request-journal";
 import type { FileEntry,
 	ModelRequestLifecycleRecord,
 	ModelRequestMetadataEntry,

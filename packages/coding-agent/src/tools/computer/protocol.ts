@@ -1,4 +1,4 @@
-import type { ImageContent, TextContent } from "@oh-my-pi/pi-ai";
+import type { ImageContent, TextContent } from "@oh-my-pi/pi-utils/model-data";
 import type { CaptureRegion, DesktopCapabilities } from "@oh-my-pi/pi-natives";
 
 export { COMPUTER_WORKER_ARG } from "../../cli/worker-selectors";

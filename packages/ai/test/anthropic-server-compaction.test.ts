@@ -4,7 +4,8 @@ import {
 	streamAnthropic,
 	supportsAnthropicCompaction,
 } from "@oh-my-pi/pi-ai/providers/anthropic";
-import type { AssistantMessage, Context, Model, ModelSpec, UserMessage } from "@oh-my-pi/pi-ai/types";
+import type { Context, Model, ModelSpec } from "@oh-my-pi/pi-ai/types";
+import type { AssistantMessage, UserMessage } from "@oh-my-pi/pi-utils/model-data";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { withEnv, withOfficialAnthropicEndpoint } from "./helpers";
 

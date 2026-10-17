@@ -1,5 +1,6 @@
 import { mock } from "bun:test";
-import type { AssistantMessage, Model } from "@oh-my-pi/pi-ai/types";
+import type { Model } from "@oh-my-pi/pi-ai/types";
+import type { AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { type FactoryDroidRegistryModel, factoryDroidRegistry } from "@oh-my-pi/pi-catalog/compat/factory-droid";
 import { buildFactoryDroidModel } from "@oh-my-pi/pi-catalog/discovery";

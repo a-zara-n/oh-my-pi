@@ -1,4 +1,4 @@
-import type { Provider } from "../types";
+import type { Provider } from "@oh-my-pi/pi-utils/model-data";
 import { isWithinUsageReserve, resolveUsedFraction } from "../usage";
 import type {
 	CredentialRankingContext,

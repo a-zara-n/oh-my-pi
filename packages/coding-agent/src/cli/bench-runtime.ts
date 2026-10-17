@@ -9,13 +9,13 @@
  */
 import type { ResolvedThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type {
-	Api,
 	ApiKeyResolver,
 	AssistantMessageEventStream,
 	Context,
 	Model,
 	SimpleStreamOptions,
 } from "@oh-my-pi/pi-ai";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 import { buildModelProviderPriorityRank } from "@oh-my-pi/pi-catalog/identity";
 import { getProjectDir, logger } from "@oh-my-pi/pi-utils";
 import chalk from "@oh-my-pi/pi-utils/chalk";

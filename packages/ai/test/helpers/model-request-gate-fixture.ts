@@ -4,9 +4,9 @@ import {
 	type ModelRequestDecision,
 	type ModelRequestGate,
 	type ModelRequestLease,
-	type ModelRequestOutcome,
 	registerModelRequestGate,
 } from "../../src/model-request-gate";
+import type { ModelRequestOutcome } from "@oh-my-pi/pi-utils/model-request-data";
 
 /**
  * A registered gate cannot be removed (latch), so a test process registers ONE fixture gate and swaps what it

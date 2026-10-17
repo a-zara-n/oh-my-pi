@@ -16,14 +16,14 @@ import { Database } from "bun:sqlite";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
-	type AgentMessage,
 	type AgentToolResult,
 	type AgentToolUpdateCallback,
 	type MessageCountOptions,
 	Tokenizer,
 } from "@oh-my-pi/pi-agent-core";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import { findCutPoint as computeCutPoint, type CutPointResult } from "@oh-my-pi/pi-agent-core/compaction";
-import type { SessionEntry as CompactionSessionEntry } from "@oh-my-pi/pi-agent-core/compaction/entries";
+import type { SessionEntry as CompactionSessionEntry } from "@oh-my-pi/pi-utils/compaction-entries";
 import {
 	createBranchSummaryMessage,
 	createCompactionSummaryMessage,

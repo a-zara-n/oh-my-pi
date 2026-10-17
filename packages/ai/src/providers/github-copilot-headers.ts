@@ -7,7 +7,8 @@ import {
 } from "@oh-my-pi/pi-catalog/wire/github-copilot";
 import { LRUCache } from "@oh-my-pi/pi-utils/lru";
 import { $env, logger } from "@oh-my-pi/pi-utils";
-import type { FetchImpl, Message } from "../types";
+import type { FetchImpl } from "../types";
+import type { Message } from "@oh-my-pi/pi-utils/model-data";
 /**
  * Infer whether the current request to Copilot is user-initiated or agent-initiated.
  * Accepts `unknown[]` because providers may pass pre-converted message shapes.

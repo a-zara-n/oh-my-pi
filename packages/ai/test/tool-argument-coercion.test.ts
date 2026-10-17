@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { type } from "@oh-my-pi/omptype";
-import type { Tool, ToolCall } from "@oh-my-pi/pi-ai/types";
+import type { Tool } from "@oh-my-pi/pi-ai/types";
+import type { ToolCall } from "@oh-my-pi/pi-utils/model-data";
 import { validateToolArguments } from "@oh-my-pi/pi-ai/utils/validation";
 
 function createHistoryTool(keyword: "anyOf" | "oneOf"): Tool {

@@ -19,14 +19,13 @@ import * as os from "node:os";
 import { getAppName, getInstallId, readSseJson } from "@oh-my-pi/pi-utils";
 import * as AIError from "../error";
 import type {
-	Api,
-	AssistantMessage,
 	AssistantMessageEvent,
 	AssistantMessageEventStream as AssistantMessageEventStreamType,
 	Context,
 	Model,
 	SimpleStreamOptions,
 } from "../types";
+import type { Api, AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import { createAbortSourceTracker } from "../utils/abort";
 import { AssistantMessageEventStream } from "../utils/event-stream";
 import { getStreamFirstEventTimeoutMs, getStreamIdleTimeoutMs, iterateWithIdleTimeout } from "../utils/idle-iterator";

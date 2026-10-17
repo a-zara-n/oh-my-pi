@@ -1,5 +1,5 @@
 import { isUnexpectedSocketCloseMessage } from "@oh-my-pi/pi-utils/fetch-retry";
-import type { Api, AssistantMessage, Usage } from "../types";
+import type { Api, AssistantMessage, Usage } from "@oh-my-pi/pi-utils/model-data";
 import { AwsCredentialsError } from "./aws";
 import {
 	AnthropicConnectionError,

@@ -1,4 +1,4 @@
-import type { Message, ToolCall } from "../types";
+import type { Message, ToolCall } from "@oh-my-pi/pi-utils/model-data";
 import { mintToolCallId, partialSuffixOverlap, partialSuffixOverlapAny } from "./coercion";
 import dialectPrompt from "./gemma.md" with { type: "text" };
 import { assistantTranscriptParts, collectToolResultRun, messageContentText } from "./rendering";

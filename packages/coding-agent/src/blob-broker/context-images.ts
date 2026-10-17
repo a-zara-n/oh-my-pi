@@ -8,7 +8,8 @@
  * identity (e.g. Anthropic's resize memo) stay warm.
  */
 
-import type { Context, ImageContent, Message, Model, TextContent } from "@oh-my-pi/pi-ai";
+import type { Context, Model } from "@oh-my-pi/pi-ai";
+import type { ImageContent, Message, TextContent } from "@oh-my-pi/pi-utils/model-data";
 import { modelMatchesHost } from "@oh-my-pi/pi-catalog/hosts";
 
 /** Responses/Chat APIs whose `image_url` accepts arbitrary https URLs. */

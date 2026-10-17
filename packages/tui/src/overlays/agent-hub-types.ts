@@ -1,4 +1,5 @@
-import type { AgentMessage, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
+import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import type { Model } from "@oh-my-pi/pi-ai";
 
 /** Identity of the ambient main session in the agent roster. */

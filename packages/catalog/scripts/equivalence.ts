@@ -4,7 +4,8 @@ import {
 	getLongestModelLikeIdSegment,
 	getModelLikeIdSegments,
 } from "../src/identity/id";
-import type { Api, Model } from "../src/types";
+import type { Model } from "../src/types";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 
 export type CanonicalModelSource = "override" | "bundled" | "heuristic" | "fallback";
 

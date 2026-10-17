@@ -6,7 +6,8 @@ import { startAuthGateway } from "@oh-my-pi/pi-ai/auth-gateway";
 import type { AuthGatewayServerHandle } from "@oh-my-pi/pi-ai/auth-gateway/types";
 import { AuthStorage } from "@oh-my-pi/pi-ai/auth-storage";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
-import type { Api, FetchImpl, Model, ModelSpec } from "@oh-my-pi/pi-catalog/types";
+import type { FetchImpl, Model, ModelSpec } from "@oh-my-pi/pi-catalog/types";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 
 interface UpstreamRequest {
 	url: string;

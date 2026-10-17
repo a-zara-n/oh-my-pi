@@ -8,19 +8,21 @@ import { resolvePromptCacheKey } from "../auth-gateway/http";
 import type { AuthGatewayStreamControl, AuthGatewayParsedRequest as ParsedRequest } from "../auth-gateway/types";
 import * as AIError from "../error";
 import type {
-	AssistantMessage,
 	AssistantMessageEventStream,
 	Context,
+	Tool,
+	TSchema,
+} from "../types";
+import type {
+	AssistantMessage,
 	ImageContent,
 	Message,
 	ServiceTier,
 	StopReason,
 	TextContent,
-	Tool,
 	ToolCall,
 	ToolResultMessage,
-	TSchema,
-} from "../types";
+} from "@oh-my-pi/pi-utils/model-data";
 import {
 	type OpenAIChatContentPart,
 	type OpenAIChatMessage,

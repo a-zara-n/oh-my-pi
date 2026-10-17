@@ -5,7 +5,7 @@ import { Markdown } from "../components/markdown";
 import { formatNumber } from "@oh-my-pi/pi-utils";
 import { getMarkdownTheme, getThemeEpoch, theme } from "../theme";
 import { expandKeyHint } from "../render/render-utils";
-import type { BranchSummaryMessage, CompactionSummaryMessage, CustomMessage } from "./messages";
+import type { BranchSummaryMessage, CompactionSummaryMessage, CustomMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import type { TspSpan } from "@oh-my-pi/pi-wire";
 import { md, node, span, text } from "../native/describe";
 import { type NativeChild, type NativeNode, type NativeUiEvent, rootToggleExpanded } from "../native/node";

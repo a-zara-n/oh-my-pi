@@ -17,7 +17,6 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import {
-	type Api,
 	AuthStorage,
 	type CompletionProbe,
 	type CompletionProbeInput,
@@ -26,6 +25,7 @@ import {
 	type Model,
 	type OAuthRequestIdentity,
 } from "@oh-my-pi/pi-ai";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 import {
 	AuthBrokerClient,
 	loadAuthBrokerAccountPool,

@@ -1,7 +1,9 @@
 import { expect, vi } from "bun:test";
 import * as path from "node:path";
-import type { Api, Model } from "@oh-my-pi/pi-ai";
-import type { ModelRequestAttempt, ModelRequestPurpose } from "@oh-my-pi/pi-ai/model-request-gate";
+import type { Model } from "@oh-my-pi/pi-ai";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
+import type { ModelRequestAttempt } from "@oh-my-pi/pi-ai/model-request-gate";
+import type { ModelRequestPurpose } from "@oh-my-pi/pi-utils/model-request-data";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";

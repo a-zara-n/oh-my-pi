@@ -6,7 +6,7 @@ import { compact } from "../native/describe";
 import type { NativeChild } from "../native/node";
 import { footnoteText, inlineErrorView, resultText } from "./native-view";
 import { type Theme } from "../theme/theme";
-import type { OutputMeta } from "./output-meta";
+import type { OutputMeta } from "@oh-my-pi/pi-utils/agent-messages";
 import type { TruncationResult } from "./streaming-output";
 import { toPathList } from "../render/render-utils";
 import {

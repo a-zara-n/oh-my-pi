@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import type { AuthStorage } from "@oh-my-pi/pi-ai";
-import type { Api, FetchImpl, Model } from "@oh-my-pi/pi-ai/types";
+import type { FetchImpl, Model } from "@oh-my-pi/pi-ai/types";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { getGroundedSearchProvider } from "@oh-my-pi/pi-coding-agent/web/search/provider";

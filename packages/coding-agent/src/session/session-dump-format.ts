@@ -7,24 +7,28 @@
  * args), `### Tool Result: <name>`, and the execution/summary sections.
  * `/dump all` renders each persisted subagent as its own `# Subagent: <path>` document.
  */
-import type { AgentMessage, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import type { AssistantMessage, Model, ToolExample, TSchema } from "@oh-my-pi/pi-ai";
+import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
+import type { Model, ToolExample, TSchema } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import { renderDelimitedThinking, renderToolInventory } from "@oh-my-pi/pi-ai/dialect";
 import { formatDuration } from "@oh-my-pi/pi-utils";
 import { INTENT_FIELD } from "@oh-my-pi/pi-wire";
 import { YAML } from "bun";
 import { canonicalizeMessage } from "@oh-my-pi/pi-tui/chat/thinking-display";
 import {
-	type BashExecutionMessage,
-	type BranchSummaryMessage,
 	bashExecutionToText,
-	type CompactionSummaryMessage,
-	type CustomMessage,
-	type FileMentionMessage,
-	type HookMessage,
-	type PythonExecutionMessage,
 	pythonExecutionToText,
 } from "./messages";
+import type {
+	BashExecutionMessage,
+	BranchSummaryMessage,
+	CompactionSummaryMessage,
+	CustomMessage,
+	FileMentionMessage,
+	HookMessage,
+	PythonExecutionMessage,
+} from "@oh-my-pi/pi-utils/agent-messages";
 import { ANONYMIZED_REVIEW_NOTE } from "./session-anonymizer";
 
 /** Minimal tool shape for dump output (matches AgentTool fields used by formatSessionDumpText). */

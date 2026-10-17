@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
-import type { AssistantMessage } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import {
 	PRINT_MODE_ADVISOR_DRAIN_TIMEOUT_MS,

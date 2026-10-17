@@ -9,7 +9,7 @@ import {
 	writeTerminalBreadcrumb,
 } from "@oh-my-pi/pi-coding-agent/session/session-paths";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { FileSessionStorage, MemorySessionStorage } from "@oh-my-pi/pi-coding-agent/session/session-storage";
+import { FileSessionStorage, MemorySessionStorage } from "@oh-my-pi/pi-utils/model-request-journal-composition";
 import { getTerminalId } from "@oh-my-pi/pi-tui";
 import {
 	getAgentDir,

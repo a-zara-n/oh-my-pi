@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { MemorySessionStorage } from "@oh-my-pi/pi-coding-agent/session/session-storage";
+import { MemorySessionStorage } from "@oh-my-pi/pi-utils/model-request-journal-composition";
 import { serializeTitleSlot } from "@oh-my-pi/pi-utils/session-title-slot";
 
 describe("MemorySessionStorage indexed mirror", () => {

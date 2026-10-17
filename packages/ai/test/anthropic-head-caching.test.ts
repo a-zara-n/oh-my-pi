@@ -15,7 +15,8 @@
 import { describe, expect, it } from "bun:test";
 import type { MessageCreateParams, TextBlockParam } from "@oh-my-pi/pi-ai/providers/anthropic-wire";
 import { streamAnthropic } from "@oh-my-pi/pi-ai/providers/anthropic";
-import type { AssistantMessage, CacheRetention, Context, Message, Model, ModelSpec } from "@oh-my-pi/pi-ai/types";
+import type { CacheRetention, Context, Model, ModelSpec } from "@oh-my-pi/pi-ai/types";
+import type { AssistantMessage, Message } from "@oh-my-pi/pi-utils/model-data";
 import { markPerCallContextMessage } from "@oh-my-pi/pi-ai/utils/block-symbols";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 

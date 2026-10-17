@@ -1,16 +1,13 @@
 import type { ResolvedThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type {
-	Api,
 	ApiKeyResolver,
-	AssistantMessage,
 	AssistantMessageEvent,
 	Context,
 	Effort,
 	Model,
 	ProviderSessionState,
-	ServiceTier,
-	ServiceTierByFamily,
 } from "@oh-my-pi/pi-ai";
+import type { Api, AssistantMessage, ServiceTier, ServiceTierByFamily } from "@oh-my-pi/pi-utils/model-data";
 import { resolveModelServiceTier, streamSimple } from "@oh-my-pi/pi-ai";
 import {
 	renderTableRow,

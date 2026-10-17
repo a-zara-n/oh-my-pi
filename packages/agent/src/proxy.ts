@@ -3,17 +3,14 @@
  * The server manages auth and proxies requests to LLM providers.
  */
 import {
-	type AssistantMessage,
 	type AssistantMessageEvent,
 	type Context,
 	EventStream,
 	type FetchImpl,
-	type ImageContent,
 	type Model,
 	type SimpleStreamOptions,
-	type StopReason,
-	type ToolCall,
 } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, ImageContent, StopReason, ToolCall } from "@oh-my-pi/pi-utils/model-data";
 import {
 	clearStreamingPartialJson,
 	kStreamingPartialJson,

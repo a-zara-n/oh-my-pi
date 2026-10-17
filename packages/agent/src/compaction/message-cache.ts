@@ -24,8 +24,8 @@
  *    anywhere; the convert cache lives in another package and subscribes via
  *    {@link registerMessageCacheInvalidator}.
  */
-import type { AssistantMessage } from "@oh-my-pi/pi-ai";
-import type { AgentMessage } from "../types";
+import type { AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 
 /** External cache invalidators (e.g. the coding-agent `convertToLlm` memo). */
 const externalInvalidators = new Set<(message: AgentMessage) => void>();

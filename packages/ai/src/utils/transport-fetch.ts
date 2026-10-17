@@ -1,7 +1,8 @@
 import { resolveExtraCa, withExtraCaInit } from "@oh-my-pi/pi-utils";
 import { coworkFetch } from "../providers/cowork-fetch";
 import { withInferenceUserAgent } from "../providers/inference-headers";
-import type { Api, FetchImpl, Model } from "../types";
+import type { FetchImpl, Model } from "../types";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 import { getProxyForProvider, withProxyInit } from "./proxy";
 import { gatedSend, markFetchGated } from "./model-request-fetch";
 import { createFetchRequestDebugSession, isRequestDebugEnabled } from "./request-debug";

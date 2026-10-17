@@ -1,6 +1,6 @@
 import { deflateSync } from "node:zlib";
 import { describe, expect, it } from "bun:test";
-import type { ImageContent } from "@oh-my-pi/pi-ai";
+import type { ImageContent } from "@oh-my-pi/pi-utils/model-data";
 import { TerminalGraphicsDecoder, encodeTerminalImage } from "@oh-my-pi/pi-coding-agent/utils/terminal-graphics";
 
 const RED_1X1_PNG_BASE64 =

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { streamOpenAICompletions } from "@oh-my-pi/pi-ai/providers/openai-completions";
-import type { AssistantMessage, FetchImpl, Message, ModelSpec } from "@oh-my-pi/pi-ai/types";
+import type { FetchImpl, ModelSpec } from "@oh-my-pi/pi-ai/types";
+import type { AssistantMessage, Message } from "@oh-my-pi/pi-utils/model-data";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 
 // LiteLLM serving Anthropic with thinking streams `thinking_blocks` (plus a

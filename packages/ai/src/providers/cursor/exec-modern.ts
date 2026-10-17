@@ -65,7 +65,7 @@ import {
 	SubagentStopRequestResponseSchema,
 } from "@oh-my-pi/pi-catalog/discovery/cursor-proto";
 import { create } from "@oh-my-pi/pi-catalog/discovery/protobuf";
-import type { ToolResultMessage } from "../../types";
+import type { ToolResultMessage } from "@oh-my-pi/pi-utils/model-data";
 
 /**
  * The pure arg translation lives in `../cursor-pi-args` so the legacy pi shim

@@ -1,5 +1,5 @@
 import * as path from "node:path";
-import type { AssistantMessage } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import { validateAgentToolArguments } from "./tool-arguments";
 import type {
 	AgentContext,

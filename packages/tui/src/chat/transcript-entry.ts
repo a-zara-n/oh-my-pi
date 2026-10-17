@@ -1,13 +1,12 @@
-import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import { createCustomMessage } from "@oh-my-pi/pi-agent-core/compaction/messages";
-import type { ImageContent, MessageAttribution, TextContent } from "@oh-my-pi/pi-ai";
+import type { ImageContent, MessageAttribution, TextContent } from "@oh-my-pi/pi-utils/model-data";
 import {
-	type CustomMessage,
-	type CustomMessageContent,
 	isCustomMessageContent,
 	isUserTurnInitiator,
 	normalizeCustomMessagePayload,
 } from "./messages";
+import type { CustomMessage, CustomMessageContent } from "@oh-my-pi/pi-utils/agent-messages";
 import { titleTextFromSkillPrompt } from "./skill-title-input";
 
 /** Persisted message fields consumed by transcript rendering. */

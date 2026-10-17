@@ -4,7 +4,8 @@
  * so output is never duplicated.
  */
 import { describe, expect, it } from "bun:test";
-import type { AssistantMessage, AssistantMessageEvent, Context, Usage } from "@oh-my-pi/pi-ai/types";
+import type { AssistantMessageEvent, Context } from "@oh-my-pi/pi-ai/types";
+import type { AssistantMessage, Usage } from "@oh-my-pi/pi-utils/model-data";
 import { MAX_EMPTY_COMPLETION_RETRIES, withReplaySafeStreamRetry } from "@oh-my-pi/pi-ai/utils/empty-completion-retry";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 

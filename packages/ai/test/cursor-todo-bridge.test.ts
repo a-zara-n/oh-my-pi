@@ -5,7 +5,8 @@ import {
 	type ToolCallState,
 	type UsageState,
 } from "@oh-my-pi/pi-ai/providers/cursor";
-import type { AssistantMessage, CursorTodoSnapshot, ToolResultMessage } from "@oh-my-pi/pi-ai/types";
+import type { CursorTodoSnapshot } from "@oh-my-pi/pi-ai/types";
+import type { AssistantMessage, ToolResultMessage } from "@oh-my-pi/pi-utils/model-data";
 import { kCursorExecResolved } from "@oh-my-pi/pi-ai/utils/block-symbols";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import {

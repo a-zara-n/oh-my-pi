@@ -4,7 +4,7 @@ import workpoolBatchTemplate from "../prompts/tools/workpool-batch.md" with { ty
 import workpoolTurnResultTemplate from "../prompts/tools/workpool-turn-result.md" with { type: "text" };
 import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
 import { AgentLifecycleManager } from "../registry/agent-lifecycle";
-import type { CustomMessage } from "../session/messages";
+import type { CustomMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import type { ToolSession } from "../tools";
 import { isIrcEnabled } from "../irc/messaging";
 import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";

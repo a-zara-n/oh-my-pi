@@ -1,4 +1,5 @@
-import { type Api, type Model, modelKind } from "@oh-my-pi/pi-catalog/types";
+import { type Model, modelKind } from "@oh-my-pi/pi-catalog/types";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 import {
 	applyCodexResidencyHeader,
 	CODEX_BASE_URL,

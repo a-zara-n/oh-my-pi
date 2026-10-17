@@ -38,31 +38,33 @@ import { NO_AUTH_SENTINEL } from "../auth-retry";
 import * as AIError from "../error";
 import { parseToolCallArguments, replayableToolCallArguments } from "../utils/tool-call-arguments";
 import {
-	type Api,
-	type AssistantMessage,
 	type CacheRetention,
-	type ComputerAction,
-	type ComputerToolCallMetadata,
 	type Context,
-	type ImageContent,
-	type Message,
-	type MessageAttribution,
 	type Model,
 	OPENAI_MAX_OUTPUT_TOKENS,
 	getPremiumServiceTierRequests,
 	parseServiceTier,
-	type ServiceTier,
-	type StopReason,
 	type StreamOptions,
 	shouldSendServiceTier,
-	type TextContent,
-	type TextSignatureV1,
-	type ThinkingContent,
 	type Tool,
-	type ToolCall,
-	type ToolResultMessage,
-	type Usage,
 } from "../types";
+import type {
+	Api,
+	AssistantMessage,
+	ComputerAction,
+	ComputerToolCallMetadata,
+	ImageContent,
+	Message,
+	MessageAttribution,
+	ServiceTier,
+	StopReason,
+	TextContent,
+	TextSignatureV1,
+	ThinkingContent,
+	ToolCall,
+	ToolResultMessage,
+	Usage,
+} from "@oh-my-pi/pi-utils/model-data";
 import { resolveCopilotRequestIdentity } from "./github-copilot-headers";
 import { resolveXaiBaseUrl } from "./xai-base-url";
 

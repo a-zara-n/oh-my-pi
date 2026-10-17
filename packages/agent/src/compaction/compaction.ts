@@ -6,24 +6,26 @@
  */
 
 import {
-	type AnthropicCompactionFiles,
-	type Api,
 	type ApiKey,
-	type AssistantMessage,
 	type CodexCompactionContext,
 	type Context,
 	Effort,
 	type FetchImpl,
-	type Message,
-	type MessageAttribution,
 	type Model,
 	type OneshotRetryOptions,
 	type ProviderSessionState,
 	type SimpleStreamOptions,
 	type Tool,
-	type Usage,
 	withAuth,
 } from "@oh-my-pi/pi-ai";
+import type {
+	AnthropicCompactionFiles,
+	Api,
+	AssistantMessage,
+	Message,
+	MessageAttribution,
+	Usage,
+} from "@oh-my-pi/pi-utils/model-data";
 import type { Dialect } from "@oh-my-pi/pi-ai/dialect";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { createOpenAICodexCompactionRequestContext } from "@oh-my-pi/pi-ai/providers/openai-codex-compaction";
@@ -42,7 +44,7 @@ import * as snapcompact from "@oh-my-pi/snapcompact";
 import { type AgentTelemetry, instrumentedCompleteSimple } from "../telemetry";
 import { ThinkingLevel } from "../thinking";
 import { Tokenizer } from "../tokenizer";
-import type { AgentMessage } from "../types";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import {
 	buildAnthropicCompactionInstructions,
 	findAnthropicCompactionCut,
@@ -60,7 +62,7 @@ import {
 	storeCompactionV2PreserveData,
 	V2_RETAINED_MESSAGE_TOKEN_BUDGET,
 } from "./compaction-v2-streaming";
-import type { CompactionEntry, SessionEntry } from "./entries";
+import type { CompactionEntry, SessionEntry } from "@oh-my-pi/pi-utils/compaction-entries";
 import { NativeCompactionError } from "./errors";
 import {
 	type ConvertToLlm,

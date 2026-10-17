@@ -1,4 +1,5 @@
-import type { AssistantMessage, Model, Usage, UserMessage } from "@oh-my-pi/pi-ai";
+import type { Model } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, Usage, UserMessage } from "@oh-my-pi/pi-utils/model-data";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 
 /** Creates a Codex model whose provider policy enables Harmony leak mitigation. */

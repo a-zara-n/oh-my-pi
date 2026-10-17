@@ -5,7 +5,6 @@ import {
 	type AfterToolCallResult,
 	type Agent,
 	type AgentEvent,
-	type AgentMessage,
 	type AgentTool,
 	type AgentToolContext,
 	type AgentToolResult,
@@ -13,7 +12,9 @@ import {
 	type BeforeToolCallResult,
 	createToolScopedAbortReason,
 } from "@oh-my-pi/pi-agent-core";
-import type { AssistantMessage, Judge, ToolCall } from "@oh-my-pi/pi-ai";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
+import type { Judge } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, ToolCall } from "@oh-my-pi/pi-utils/model-data";
 import { logger, prompt, relativePathWithinRoot, withTimeout } from "@oh-my-pi/pi-utils";
 import type { Rule } from "../capability/rule";
 import type { Settings } from "../config/settings";

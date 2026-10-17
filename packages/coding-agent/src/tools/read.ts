@@ -15,7 +15,8 @@ import type {
 	ToolSpeculationExecutionContext,
 	ToolTier,
 } from "@oh-my-pi/pi-agent-core";
-import { completeSimple, type ImageContent, type TextContent } from "@oh-my-pi/pi-ai";
+import { completeSimple } from "@oh-my-pi/pi-ai";
+import type { ImageContent, TextContent } from "@oh-my-pi/pi-utils/model-data";
 import {
 	BINARY_SNIFF_BYTES,
 	type ImageMetadata,

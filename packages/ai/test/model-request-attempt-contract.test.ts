@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as AIError from "@oh-my-pi/pi-ai/error";
-import { ModelRequestDeniedError, type ModelRequestModelRef } from "@oh-my-pi/pi-ai/model-request-gate";
+import { ModelRequestDeniedError } from "@oh-my-pi/pi-ai/model-request-gate";
+import type { ModelRequestModelRef } from "@oh-my-pi/pi-utils/model-request-data";
 import { stream } from "@oh-my-pi/pi-ai/stream";
 import type { FetchImpl, Model } from "@oh-my-pi/pi-ai/types";
 import { gateFetch } from "@oh-my-pi/pi-ai/utils/model-request-fetch";

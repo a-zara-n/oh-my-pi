@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { Api, ApiKey, Model } from "@oh-my-pi/pi-ai";
+import type { ApiKey, Model } from "@oh-my-pi/pi-ai";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 
 export type MnemopiLlmCompletionTask = {
 	kind: "memory-extraction";

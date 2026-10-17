@@ -11,7 +11,8 @@ import type { NativeChild, NativeNode } from "../native/node";
 import { type ParsedDiagnostic, parseDiagnosticMessage, shortenPath } from "../render/render-utils";
 import { plainText } from "../native/spans";
 import type { FileDiagnosticsResult } from "./lsp";
-import { formatArtifactErrorNotice, formatTruncationMetaNotice, type OutputMeta } from "./output-meta";
+import { formatArtifactErrorNotice, formatTruncationMetaNotice } from "./output-meta";
+import type { OutputMeta } from "@oh-my-pi/pi-utils/agent-messages";
 import type { NativeToolHead, NativeToolView, ToolRenderResult } from "./renderer";
 
 /** A path for native heads: relative to the working directory when inside it, else `~`-shortened. */

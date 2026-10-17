@@ -27,7 +27,7 @@ import type {
 	StoredCredentialBlock,
 } from "./types";
 import type { OAuthCredentials } from "../registry/oauth/types";
-import type { Provider } from "../types";
+import type { Provider } from "@oh-my-pi/pi-utils/model-data";
 import type {
 	ClientProviderUsage,
 	ClientUsageReport,

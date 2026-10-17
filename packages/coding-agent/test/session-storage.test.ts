@@ -13,7 +13,7 @@ import {
 	SessionLockError,
 	SessionWriteConflictError,
 	type WriteTextAtomicOptions,
-} from "@oh-my-pi/pi-coding-agent/session/session-storage";
+} from "@oh-my-pi/pi-utils/model-request-journal-composition";
 import { type SessionTitleUpdate, serializeTitleSlot } from "@oh-my-pi/pi-utils/session-title-slot";
 
 class ControlledTitleUpdateBackend implements SessionStorageBackend {

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import type { Api, Model, ModelSpec } from "@oh-my-pi/pi-ai";
+import type { Model, ModelSpec } from "@oh-my-pi/pi-ai";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import {
 	initializeWithSettings,

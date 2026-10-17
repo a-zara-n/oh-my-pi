@@ -19,7 +19,6 @@ import {
 } from "@oh-my-pi/pi-agent-core";
 import {
 	type Answer,
-	type AssistantMessage,
 	chatTextBackend,
 	isJudgmentApi,
 	type Judge,
@@ -35,8 +34,8 @@ import {
 	TYPESAFE_PROVIDER,
 	TypeSafeJudge,
 	tokenUsage,
-	type Usage,
 } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, Usage } from "@oh-my-pi/pi-utils/model-data";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import {
 	createModelRequestRetryChain,
@@ -44,7 +43,7 @@ import {
 	runInModelRequestRetryChain,
 	runWithModelRequestPurpose,
 } from "@oh-my-pi/pi-ai/model-request-execution";
-import type { ModelRequestPurpose } from "@oh-my-pi/pi-ai/model-request-gate";
+import type { ModelRequestPurpose } from "@oh-my-pi/pi-utils/model-request-data";
 import { calculateCost } from "@oh-my-pi/pi-catalog/models";
 import { logger, prompt } from "@oh-my-pi/pi-utils";
 import type { ModelRegistry } from "../config/model-registry";

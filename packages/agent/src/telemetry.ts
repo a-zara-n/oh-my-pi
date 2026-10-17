@@ -24,21 +24,16 @@
  */
 
 import {
-	type Api,
-	type AssistantMessage,
 	type Context,
 	completeSimple,
-	type Message,
 	type Model,
 	type OneshotRetryOptions,
 	retryTransientCompletion,
-	type ServiceTier,
 	type SimpleStreamOptions,
-	type StopReason,
 	shouldSendServiceTier,
 	type ToolChoice,
-	type Usage,
 } from "@oh-my-pi/pi-ai";
+import type { Api, AssistantMessage, Message, ServiceTier, StopReason, Usage } from "@oh-my-pi/pi-utils/model-data";
 import {
 	type Attributes,
 	type AttributeValue,

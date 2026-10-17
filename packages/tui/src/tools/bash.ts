@@ -13,11 +13,11 @@ import {
 } from "../render/render-utils";
 import {
 	formatStyledTruncationWarning,
-	type OutputMeta,
 	stripOutputNotice,
 	stripRawOutputArtifactNotice,
 	stripTrailingNotice,
 } from "./output-meta";
+import type { OutputMeta } from "@oh-my-pi/pi-utils/agent-messages";
 import type {
 	NativeToolHead,
 	NativeToolView,

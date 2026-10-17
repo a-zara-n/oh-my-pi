@@ -23,7 +23,8 @@ import {
  * resolve renderer under `resolve` and `reject` so device writes and legacy
  * `resolve` tool transcripts draw the same block.
  */
-import type { AgentToolResult, CustomMessage } from "@oh-my-pi/pi-agent-core";
+import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
+import type { CustomMessage } from "@oh-my-pi/pi-utils/agent-messages";
 
 import { prompt } from "@oh-my-pi/pi-utils";
 

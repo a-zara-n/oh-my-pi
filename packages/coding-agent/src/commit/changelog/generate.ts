@@ -1,6 +1,7 @@
 import { type } from "@oh-my-pi/omptype";
 import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import type { Api, ApiKey, AssistantMessage, Model } from "@oh-my-pi/pi-ai";
+import type { ApiKey, Model } from "@oh-my-pi/pi-ai";
+import type { Api, AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import { completeSimple, retryTransientCompletion, validateToolCall } from "@oh-my-pi/pi-ai";
 import { runWithModelRequestPurpose } from "@oh-my-pi/pi-ai/model-request-execution";
 import { prompt } from "@oh-my-pi/pi-utils";

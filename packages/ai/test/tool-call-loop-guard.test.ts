@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { AssistantMessage, ToolCall, ToolResultMessage } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, ToolCall, ToolResultMessage } from "@oh-my-pi/pi-utils/model-data";
 import { ToolCallLoopGuard } from "@oh-my-pi/pi-ai/utils/tool-call-loop-guard";
 import { INTENT_FIELD } from "@oh-my-pi/pi-wire";
 

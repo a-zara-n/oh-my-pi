@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import * as fs from "node:fs/promises";
-import type { ServiceTier, Usage } from "@oh-my-pi/pi-ai";
+import type { ServiceTier, Usage } from "@oh-my-pi/pi-utils/model-data";
 import {
 	calculateUncachedInputCost,
 	calculateUsageCost,

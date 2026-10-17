@@ -3,7 +3,7 @@ import { $pickenv, logger } from "@oh-my-pi/pi-utils";
 import { getEnvApiKey } from "../env-api-key";
 import * as AIError from "../error";
 import type { OAuthCredentials } from "../registry/oauth/types";
-import type { Provider } from "../types";
+import type { Provider } from "@oh-my-pi/pi-utils/model-data";
 import { resolveUsedFraction } from "../usage";
 import type {
 	ClientUsageReport,

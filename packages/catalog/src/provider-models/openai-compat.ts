@@ -31,15 +31,14 @@ import { type GeneratedProvider, getBundledModels } from "../models";
 import {
 	KIND_API_KINDS,
 	MODEL_KINDS,
-	type Api,
 	type FetchImpl,
 	type Model,
 	type ModelKind,
 	type ModelSpec,
 	type OpenAICompat,
-	type Provider,
 	type ThinkingConfig,
 } from "../types";
+import type { Api, Provider } from "@oh-my-pi/pi-utils/model-data";
 import { discoveryFetch, isAnthropicOAuthToken, isRecord, toBoolean, toNumber, toPositiveNumber } from "../utils";
 import { ALIBABA_TOKEN_PLAN_BASE_URL, parseAlibabaTokenPlanCredential } from "../wire/alibaba-token-plan";
 import { normalizeCharmHyperBaseUrl } from "../wire/charm-hyper";

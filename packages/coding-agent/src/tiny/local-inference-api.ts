@@ -1,12 +1,9 @@
 import {
-	type Api,
-	type AssistantMessage,
 	type Context,
-	type Message,
 	type Model,
 	type SimpleStreamOptions,
-	type Usage,
 } from "@oh-my-pi/pi-ai";
+import type { Api, AssistantMessage, Message, Usage } from "@oh-my-pi/pi-utils/model-data";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { registerCustomApi } from "@oh-my-pi/pi-ai/api-registry";
 import { markModelRequestLocalStream } from "@oh-my-pi/pi-ai/model-request-execution";

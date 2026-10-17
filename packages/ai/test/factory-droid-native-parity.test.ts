@@ -2,7 +2,8 @@ import { describe, expect, it } from "bun:test";
 import { type } from "@oh-my-pi/omptype";
 import type { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { streamFactoryDroid } from "../src/providers/factory-droid";
-import type { Context, Message } from "../src/types";
+import type { Context } from "../src/types";
+import type { Message } from "@oh-my-pi/pi-utils/model-data";
 import corpus from "./fixtures/factory-droid-native-requests.json" with { type: "json" };
 import { factoryModel, workosJwt } from "./helpers/factory-droid";
 import {

@@ -2,14 +2,11 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "bun:te
 import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import type {
-	Api,
-	AssistantMessage,
 	Context,
-	Message,
 	Model,
 	SimpleStreamOptions,
-	ThinkingContent,
 } from "@oh-my-pi/pi-ai";
+import type { Api, AssistantMessage, Message, ThinkingContent } from "@oh-my-pi/pi-utils/model-data";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { GEMINI_HEADER_RUNAWAY_THRESHOLD } from "@oh-my-pi/pi-ai/utils/thinking-loop";

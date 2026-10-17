@@ -1,4 +1,4 @@
-import type { AssistantMessage, Usage } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, Usage } from "@oh-my-pi/pi-utils/model-data";
 import { Container } from "../tui";
 import { Spacer } from "../components/spacer";
 import { formatDuration, formatNumber } from "@oh-my-pi/pi-utils";

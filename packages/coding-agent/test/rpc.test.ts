@@ -2,8 +2,10 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { AgentEvent, AgentMessage } from "@oh-my-pi/pi-agent-core";
-import { type AssistantMessage, Effort, type TextContent } from "@oh-my-pi/pi-ai";
+import type { AgentEvent } from "@oh-my-pi/pi-agent-core";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
+import { Effort } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, TextContent } from "@oh-my-pi/pi-utils/model-data";
 import {
 	type CompactionEntry,
 	type FileEntry,
@@ -11,7 +13,7 @@ import {
 	type SessionMessageEntry,
 } from "@oh-my-pi/pi-coding-agent";
 import { RpcClient } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-client";
-import type { BashExecutionMessage } from "@oh-my-pi/pi-coding-agent/session/messages";
+import type { BashExecutionMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import { removeSyncWithRetries, Snowflake } from "@oh-my-pi/pi-utils";
 import { rejectionOf } from "./helpers/rejection";
 import { e2eApiKey } from "./utilities";

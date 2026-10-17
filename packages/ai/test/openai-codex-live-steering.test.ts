@@ -3,16 +3,14 @@ import * as AIError from "@oh-my-pi/pi-ai/error";
 import { planSteeredRequest } from "@oh-my-pi/pi-ai/providers/openai-codex/live-steering";
 import { streamOpenAICodexResponses } from "@oh-my-pi/pi-ai/providers/openai-codex-responses";
 import type {
-	AssistantMessage,
 	Context,
 	FetchImpl,
 	LiveSteerClaim,
 	LiveSteering,
 	Model,
 	ProviderSessionState,
-	ToolResultMessage,
-	UserMessage,
 } from "@oh-my-pi/pi-ai/types";
+import type { AssistantMessage, ToolResultMessage, UserMessage } from "@oh-my-pi/pi-utils/model-data";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import * as piUtils from "@oh-my-pi/pi-utils";
 

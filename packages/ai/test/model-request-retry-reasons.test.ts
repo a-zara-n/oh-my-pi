@@ -5,7 +5,8 @@ import * as AIError from "@oh-my-pi/pi-ai/error";
 import { TypeSafeJudge } from "@oh-my-pi/pi-ai/judgment";
 import { gateFetch } from "@oh-my-pi/pi-ai/model-request-execution";
 import { retryTransientCompletion } from "@oh-my-pi/pi-ai/oneshot-retry";
-import type { Api, Context, Model } from "@oh-my-pi/pi-ai/types";
+import type { Context, Model } from "@oh-my-pi/pi-ai/types";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { installFixtureGate } from "./helpers/model-request-gate-fixture";
 

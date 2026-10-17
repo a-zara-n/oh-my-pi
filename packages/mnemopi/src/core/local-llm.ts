@@ -1,13 +1,12 @@
 import {
-	type Api,
 	type ApiKey,
-	type AssistantMessage,
 	completeSimple,
 	type FetchImpl,
 	type Model,
 	retryTransientCompletion,
 	withAuth,
 } from "@oh-my-pi/pi-ai";
+import type { Api, AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import { ProviderHttpError } from "@oh-my-pi/pi-ai/error";
 import { runWithModelRequestPurpose } from "@oh-my-pi/pi-ai/model-request-execution";
 import { fetchWithRetry } from "@oh-my-pi/pi-utils";

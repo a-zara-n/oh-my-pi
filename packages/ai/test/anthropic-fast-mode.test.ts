@@ -5,7 +5,8 @@ import {
 	isAnthropicFastModeFallbackDisabled,
 	streamAnthropic,
 } from "@oh-my-pi/pi-ai/providers/anthropic";
-import type { Context, Model, ProviderSessionState, ServiceTier } from "@oh-my-pi/pi-ai/types";
+import type { Context, Model, ProviderSessionState } from "@oh-my-pi/pi-ai/types";
+import type { ServiceTier } from "@oh-my-pi/pi-utils/model-data";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { withOfficialAnthropicEndpoint } from "./helpers";
 

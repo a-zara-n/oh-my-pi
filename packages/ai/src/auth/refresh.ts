@@ -2,7 +2,7 @@ import { logger } from "@oh-my-pi/pi-utils";
 import * as AIError from "../error";
 import { getOAuthProvider, normalizeOAuthCredentialExpiry, refreshOAuthToken } from "../registry/oauth";
 import type { OAuthCredentials, OAuthProvider } from "../registry/oauth/types";
-import type { Provider } from "../types";
+import type { Provider } from "@oh-my-pi/pi-utils/model-data";
 import { raceSignal } from "./abort";
 import { authCredentialEquals, type CredentialPool, credentialDisabledEvent } from "./pool";
 import type { AccountPolicies } from "./policy";

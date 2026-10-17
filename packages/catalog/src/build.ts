@@ -11,7 +11,8 @@ import { resolveDiscoveryApi, resolveModelPolicy } from "./compat/resolve";
 import type { ModelIdentity } from "./compat/types";
 import { resolveModelTokenizer } from "./model-tokenizer";
 import { materializeTimeBasedCost } from "./pricing";
-import { type Api, MODEL_KINDS, type Model, type ModelSpec } from "./types";
+import { MODEL_KINDS, type Model, type ModelSpec } from "./types";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 import { cleanModelName } from "./utils";
 
 function numberField(source: object, key: string): number | undefined {

@@ -1,5 +1,5 @@
 import { type } from "@oh-my-pi/omptype";
-import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import { completeSimple, Effort, type Model, retryTransientCompletion } from "@oh-my-pi/pi-ai";
 import { runWithModelRequestPurpose } from "@oh-my-pi/pi-ai/model-request-execution";
 import { clampThinkingLevelForModel } from "@oh-my-pi/pi-catalog/model-thinking";

@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it } from "bun:test";
 import * as http2 from "node:http2";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { streamCursor } from "@oh-my-pi/pi-ai/providers/cursor";
-import type { Context, CursorToolResultHandler, Model, ToolResultMessage } from "@oh-my-pi/pi-ai/types";
+import type { Context, CursorToolResultHandler, Model } from "@oh-my-pi/pi-ai/types";
+import type { ToolResultMessage } from "@oh-my-pi/pi-utils/model-data";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import {
 	AgentServerMessageSchema,

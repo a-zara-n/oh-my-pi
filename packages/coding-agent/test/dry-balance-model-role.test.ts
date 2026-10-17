@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import type { Api, Model, OAuthAccess } from "@oh-my-pi/pi-ai";
+import type { Model, OAuthAccess } from "@oh-my-pi/pi-ai";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 import { AuthStorage, SqliteAuthCredentialStore } from "@oh-my-pi/pi-ai/auth-storage";
 import { type DryBalanceModelRegistry, runDryBalanceCommand } from "@oh-my-pi/pi-coding-agent/cli/dry-balance-cli";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";

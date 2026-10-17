@@ -13,7 +13,8 @@ import { fetchTypeSafeModels, TYPESAFE_DEFAULT_BASE_URL } from "../discovery/typ
 import { buildGitLabDuoWorkflowFallbackModel, fetchGitLabDuoWorkflowModels } from "../discovery/gitlab-duo-workflow";
 import type { ModelManagerOptions } from "../model-manager";
 import { getBundledModel } from "../models";
-import type { Api, FetchImpl, Model, ModelSpec } from "../types";
+import type { FetchImpl, Model, ModelSpec } from "../types";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 import { DEVIN_DEFAULT_BASE_URL } from "../wire/devin";
 import { unionAccountCatalogs } from "./account-access";
 import { toModelSpec } from "./bundled-references";

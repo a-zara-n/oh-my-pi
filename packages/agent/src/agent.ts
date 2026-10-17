@@ -4,24 +4,26 @@
 import { isPromise } from "node:util/types";
 import {
 	type ApiKey,
-	type AssistantMessage,
 	type AssistantMessageEvent,
 	type Context,
 	type CursorExecHandlers,
 	type CursorToolResultHandler,
 	type Effort,
-	type ImageContent,
-	type Message,
 	type Model,
 	type ProviderSessionState,
-	type ServiceTier,
 	type SimpleStreamOptions,
 	streamSimple,
-	type TextContent,
 	type ThinkingBudgets,
 	type ToolChoice,
-	type ToolResultMessage,
 } from "@oh-my-pi/pi-ai";
+import type {
+	AssistantMessage,
+	ImageContent,
+	Message,
+	ServiceTier,
+	TextContent,
+	ToolResultMessage,
+} from "@oh-my-pi/pi-utils/model-data";
 import type { Dialect } from "@oh-my-pi/pi-ai/dialect";
 import type { HarmonyAuditEvent } from "@oh-my-pi/pi-ai/utils/harmony-leak";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
@@ -53,7 +55,6 @@ import type {
 	AgentContext,
 	AgentEvent,
 	AgentLoopConfig,
-	AgentMessage,
 	AgentState,
 	AgentTool,
 	AgentToolContext,
@@ -65,6 +66,7 @@ import type {
 	ToolCallContext,
 	ToolChoiceDirective,
 } from "./types";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import { isSoftToolRequirement } from "./types";
 import { EventLoopKeepalive } from "./utils/yield";
 

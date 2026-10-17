@@ -7,7 +7,8 @@ import type { AuthGatewayServerHandle } from "@oh-my-pi/pi-ai/auth-gateway/types
 import { AuthStorage } from "@oh-my-pi/pi-ai/auth-storage";
 import { decodeGatewayJobId, encodeGatewayJobId } from "@oh-my-pi/pi-ai/providers/video-server";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
-import type { Api, FetchImpl, Model, ModelSpec } from "@oh-my-pi/pi-catalog/types";
+import type { FetchImpl, Model, ModelSpec } from "@oh-my-pi/pi-catalog/types";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 
 const VIDEO_BYTES = new Uint8Array([0, 0, 0, 24, 0x66, 0x74, 0x79, 0x70]);
 

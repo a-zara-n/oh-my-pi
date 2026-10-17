@@ -20,7 +20,8 @@ import {
 } from "@oh-my-pi/pi-agent-core";
 import { runWithModelRequestPurpose } from "@oh-my-pi/pi-ai/model-request-execution";
 import { sendsImageInputOnWire } from "@oh-my-pi/pi-ai/providers/vision-guard";
-import type { Api, completeSimple, ImageContent, Model, TextContent } from "@oh-my-pi/pi-ai";
+import type { completeSimple, Model } from "@oh-my-pi/pi-ai";
+import type { Api, ImageContent, TextContent } from "@oh-my-pi/pi-utils/model-data";
 import { logger, prompt, toError } from "@oh-my-pi/pi-utils";
 import { extractTextContent } from "../commit/utils";
 import type { ModelRegistry } from "../config/model-registry";

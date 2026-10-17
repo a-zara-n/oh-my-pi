@@ -7,16 +7,18 @@ import type {
 import { convertMessages } from "@oh-my-pi/pi-ai/providers/openai-completions";
 import { transformMessages } from "@oh-my-pi/pi-ai/providers/transform-messages";
 import type {
+	Context,
+	Model,
+} from "@oh-my-pi/pi-ai/types";
+import type {
 	Api,
 	AssistantMessage,
-	Context,
 	DeveloperMessage,
 	Message,
-	Model,
 	ToolCall,
 	ToolResultMessage,
 	UserMessage,
-} from "@oh-my-pi/pi-ai/types";
+} from "@oh-my-pi/pi-utils/model-data";
 import { normalizeToolCallId } from "@oh-my-pi/pi-ai/utils";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 

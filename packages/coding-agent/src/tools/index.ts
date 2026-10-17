@@ -1,6 +1,7 @@
 import type { AgentOptions, AgentTelemetryConfig, AgentTool, AgentToolContext } from "@oh-my-pi/pi-agent-core";
 import type { EditStore } from "@oh-my-pi/pi-natives";
-import type { FetchImpl, ImageContent, Model, ServiceTierByFamily, ToolChoice } from "@oh-my-pi/pi-ai";
+import type { FetchImpl, Model, ToolChoice } from "@oh-my-pi/pi-ai";
+import type { ImageContent, ServiceTierByFamily } from "@oh-my-pi/pi-utils/model-data";
 import { logger } from "@oh-my-pi/pi-utils";
 import type { AsyncJobManager } from "../async/job-manager";
 import type { Rule } from "../capability/rule";
@@ -31,7 +32,7 @@ import type { AgentLifecycleManager } from "../registry/agent-lifecycle";
 import type { AgentRegistry } from "../registry/agent-registry";
 import type { ArtifactManager } from "../session/artifacts";
 import type { ClientBridge } from "../session/client-bridge";
-import type { CustomMessage } from "../session/messages";
+import type { CustomMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import type { ModelRequestRootAssignment } from "../session/model-request-context";
 import type { UsageStatistics } from "@oh-my-pi/pi-utils/session-entries";
 import type { SessionManager } from "../session/session-manager";

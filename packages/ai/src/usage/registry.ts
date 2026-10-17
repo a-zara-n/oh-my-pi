@@ -1,4 +1,4 @@
-import type { Provider } from "../types";
+import type { Provider } from "@oh-my-pi/pi-utils/model-data";
 import type { CredentialRankingStrategy, UsageProvider } from "../usage";
 import { alibabaTokenPlanRankingStrategy, alibabaTokenPlanUsageProvider } from "./alibaba-token-plan";
 import { charmHyperUsageProvider } from "./charm-hyper";

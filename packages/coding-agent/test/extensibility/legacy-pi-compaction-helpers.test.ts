@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { Tokenizer } from "@oh-my-pi/pi-agent-core";
-import type { Usage } from "@oh-my-pi/pi-ai";
+import type { Usage } from "@oh-my-pi/pi-utils/model-data";
 import {
 	calculateContextTokens,
 	estimateTokens,

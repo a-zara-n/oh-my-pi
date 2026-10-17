@@ -14,7 +14,7 @@ import {
 } from "@oh-my-pi/pi-utils/dirs";
 import { isEnoent } from "@oh-my-pi/pi-utils/fs-error";
 import * as logger from "@oh-my-pi/pi-utils/logger";
-import type { SessionStorage } from "./session-storage";
+import type { SessionStorage } from "@oh-my-pi/pi-utils/model-request-journal-composition";
 
 const migratedSessionRoots = new Set<string>();
 

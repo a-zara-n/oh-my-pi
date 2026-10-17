@@ -4,7 +4,8 @@
 
 import type { CompatOf } from "@oh-my-pi/pi-catalog/types";
 import * as AIError from "../error";
-import type { Api, AssistantMessage, AssistantMessageEvent, Context, Model, OptionsForApi } from "../types";
+import type { AssistantMessageEvent, Context, Model, OptionsForApi } from "../types";
+import type { Api, AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import { type AbortSourceTracker, createAbortSourceTracker } from "../utils/abort";
 import { AssistantMessageEventStream as EventStreamImpl } from "../utils/event-stream";
 import {

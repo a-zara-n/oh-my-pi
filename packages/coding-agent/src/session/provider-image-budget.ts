@@ -1,15 +1,17 @@
 import type {
 	Context,
+	Model,
+} from "@oh-my-pi/pi-ai";
+import type {
 	DeveloperMessage,
 	ImageContent,
 	Message,
-	Model,
 	ProviderPayload,
 	TextContent,
 	ToolResultMessage,
 	ToolResultProviderMetadata,
 	UserMessage,
-} from "@oh-my-pi/pi-ai";
+} from "@oh-my-pi/pi-utils/model-data";
 import { decodeDataUri } from "@oh-my-pi/pi-ai/providers/openai-data-uri";
 import { resolveInlineImageByteBudget } from "@oh-my-pi/pi-catalog/compat/request-size";
 import { isRecord } from "@oh-my-pi/pi-utils";

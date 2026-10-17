@@ -2,7 +2,7 @@ import type { Database } from "bun:sqlite";
 import type * as fsNode from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import { type ApiKey, completeSimple, Effort, type Model, retryTransientCompletion } from "@oh-my-pi/pi-ai";
 import { runWithModelRequestPurpose } from "@oh-my-pi/pi-ai/model-request-execution";
 import { clampThinkingLevelForModel } from "@oh-my-pi/pi-catalog/model-thinking";

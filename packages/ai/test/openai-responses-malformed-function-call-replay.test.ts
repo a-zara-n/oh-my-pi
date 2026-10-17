@@ -1,6 +1,7 @@
 import { expect, it } from "bun:test";
 import { buildParams } from "@oh-my-pi/pi-ai/providers/openai-responses";
-import type { AssistantMessage, Model, ModelSpec } from "@oh-my-pi/pi-ai/types";
+import type { Model, ModelSpec } from "@oh-my-pi/pi-ai/types";
+import type { AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 
 const model: Model<"openai-responses"> = buildModel({

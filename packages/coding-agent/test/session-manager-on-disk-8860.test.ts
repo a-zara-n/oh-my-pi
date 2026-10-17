@@ -9,7 +9,7 @@
 import { describe, expect, it } from "bun:test";
 import { join } from "node:path";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { MemorySessionStorage } from "@oh-my-pi/pi-coding-agent/session/session-storage";
+import { MemorySessionStorage } from "@oh-my-pi/pi-utils/model-request-journal-composition";
 
 function freshSession(): SessionManager {
 	const cwd = join("/tmp", `omp-on-disk-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);

@@ -1,5 +1,5 @@
 import { escapeXmlText } from "@oh-my-pi/pi-utils";
-import type { Message, ToolCall } from "../types";
+import type { Message, ToolCall } from "@oh-my-pi/pi-utils/model-data";
 import {
 	ANTHROPIC_THINKING_TAG_PREFIXES,
 	AnthropicInbandScanner,

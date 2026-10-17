@@ -1,4 +1,4 @@
-import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import { FENCE_RE } from "../render/render-utils";
 
 // Small per-mode MRU memo for formatThinkingForDisplay. During a streaming

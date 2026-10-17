@@ -11,10 +11,10 @@
  * Layering mirrors `pruning.ts`: no I/O here.
  */
 
-import type { TextContent, ToolResultMessage } from "@oh-my-pi/pi-ai";
+import type { TextContent, ToolResultMessage } from "@oh-my-pi/pi-utils/model-data";
 import type { Tokenizer } from "../tokenizer";
-import type { AgentMessage } from "../types";
-import type { CustomMessageEntry, SessionEntry, SessionMessageEntry } from "./entries";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
+import type { CustomMessageEntry, SessionEntry, SessionMessageEntry } from "@oh-my-pi/pi-utils/compaction-entries";
 import { invalidateMessageCache } from "./message-cache";
 import {
 	collectToolCallsById,

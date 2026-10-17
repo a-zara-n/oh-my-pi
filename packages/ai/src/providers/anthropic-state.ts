@@ -1,6 +1,7 @@
 import { isOfficialAnthropicApiUrl } from "@oh-my-pi/pi-catalog/compat/anthropic";
 import { $env } from "@oh-my-pi/pi-utils";
-import type { Api, Model, ProviderSessionState } from "../types";
+import type { Model, ProviderSessionState } from "../types";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 import { isFoundryEnabled } from "../utils/foundry";
 
 /** Root key for Anthropic's per-session provider state. */

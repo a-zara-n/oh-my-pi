@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from "bun:test";
-import type { Usage } from "@oh-my-pi/pi-ai/types";
+import type { Usage } from "@oh-my-pi/pi-utils/model-data";
 import {
 	CacheInvalidationMarkerComponent,
 	detectCacheInvalidation,

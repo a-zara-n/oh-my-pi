@@ -1,6 +1,6 @@
 import { FramedMessageComponent } from "../chrome/message-frame";
 import type { HookMessageRenderer } from "./extension-types";
-import type { HookMessage } from "./messages";
+import type { HookMessage } from "@oh-my-pi/pi-utils/agent-messages";
 
 /** Lines of default markdown body shown before the "…" fold when collapsed. */
 const HOOK_COLLAPSED_LINES = 5;

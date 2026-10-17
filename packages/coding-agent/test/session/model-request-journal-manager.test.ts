@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { readFile, readdir, writeFile } from "node:fs/promises";
 import * as path from "node:path";
-import type { AssistantMessage } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import type { ModelRequestJournalDescriptor,
 	ModelRequestLifecycleRecord,
@@ -14,7 +14,7 @@ import type { ModelRequestJournalDescriptor,
 import { loadModelRequestJournalFromFile } from "../../src/session/session-loader";
 import type { ModelRequestSourceInput } from "@oh-my-pi/pi-utils/session-entries";
 import { SessionManager } from "../../src/session/session-manager";
-import { FileSessionStorage } from "../../src/session/session-storage";
+import { FileSessionStorage } from "@oh-my-pi/pi-utils/model-request-journal-composition";
 
 const timestamp = "2026-10-16T00:00:00.000Z";
 const journalId = "11111111-1111-4111-8111-111111111111";

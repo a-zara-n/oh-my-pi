@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import type { AssistantMessage, Model, ToolCall, Usage } from "@oh-my-pi/pi-ai";
+import type { Model } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, ToolCall, Usage } from "@oh-my-pi/pi-utils/model-data";
 import {
 	createHarmonyAuditEvent,
 	detectHarmonyLeak,

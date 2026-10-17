@@ -1,7 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import { invalidateMessageCache } from "@oh-my-pi/pi-agent-core/compaction/message-cache";
-import { type AgentMessage, filterProviderReplayMessages } from "@oh-my-pi/pi-agent-core";
-import type { ImageContent, Message, TextContent } from "@oh-my-pi/pi-ai";
+import { filterProviderReplayMessages } from "@oh-my-pi/pi-agent-core";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
+import type { ImageContent, Message, TextContent } from "@oh-my-pi/pi-utils/model-data";
 import { inferCopilotInitiator } from "@oh-my-pi/pi-ai/providers/github-copilot-headers";
 import {
 	convertToLlm,

@@ -1,4 +1,4 @@
-import type { ImageContent } from "@oh-my-pi/pi-ai";
+import type { ImageContent } from "@oh-my-pi/pi-utils/model-data";
 import { shortenPath } from "@oh-my-pi/pi-tui/render/render-utils";
 
 export interface ImageResizeOptions {

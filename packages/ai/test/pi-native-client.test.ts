@@ -3,7 +3,6 @@ import * as AIError from "@oh-my-pi/pi-ai/error";
 import { streamPiNative } from "@oh-my-pi/pi-ai/providers/pi-native-client";
 import { streamSimple } from "@oh-my-pi/pi-ai/stream";
 import type {
-	AssistantMessage,
 	AssistantMessageEvent,
 	Context,
 	FetchImpl,
@@ -11,6 +10,7 @@ import type {
 	ModelSpec,
 	ProviderResponseMetadata,
 } from "@oh-my-pi/pi-ai/types";
+import type { AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 
 function sseBytes(events: AssistantMessageEvent[]): Uint8Array {

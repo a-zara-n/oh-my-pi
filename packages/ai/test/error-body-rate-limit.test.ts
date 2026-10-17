@@ -21,7 +21,8 @@
 import { describe, expect, it } from "bun:test";
 import { processResponsesStream } from "@oh-my-pi/pi-ai/providers/openai-shared";
 import { streamOpenAICompletions } from "@oh-my-pi/pi-ai/providers/openai-completions";
-import type { AssistantMessage, Context, FetchImpl, Model } from "@oh-my-pi/pi-ai/types";
+import type { Context, FetchImpl, Model } from "@oh-my-pi/pi-ai/types";
+import type { AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { isAuthRetryableError } from "@oh-my-pi/pi-ai/error/auth-classify";
 import { classify, Flag, is, retriable } from "@oh-my-pi/pi-ai/error/flags";

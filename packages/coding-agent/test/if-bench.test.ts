@@ -1,13 +1,12 @@
 import { describe, expect, it } from "bun:test";
 import type {
-	Api,
 	ApiKeyResolver,
-	AssistantMessage,
 	AssistantMessageEvent,
 	AssistantMessageEventStream,
 	Context,
 	Model,
 } from "@oh-my-pi/pi-ai";
+import type { Api, AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import type { BenchModelRegistry } from "@oh-my-pi/pi-coding-agent/cli/bench-runtime";
 import { runIfBenchCommand } from "@oh-my-pi/pi-coding-agent/if-bench";
 import { applyActions, initialArray, makeActions } from "@oh-my-pi/pi-coding-agent/if-bench/actions";

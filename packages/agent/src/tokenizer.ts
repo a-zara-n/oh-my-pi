@@ -6,7 +6,7 @@ import { LRUCache } from "@oh-my-pi/pi-utils/lru";
 import * as snapcompact from "@oh-my-pi/snapcompact";
 import { isEstimateCacheable, messageEstimateVersion } from "./compaction/message-cache";
 import { base64ImageSize, estimateImageContentTokens } from "./image-tokens";
-import type { AgentMessage } from "./types";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 
 const testEnv = Bun.env.NODE_ENV === "test";
 const accurate = process.env.PI_TOKENIZER_ACCURATE === "1" && !testEnv;

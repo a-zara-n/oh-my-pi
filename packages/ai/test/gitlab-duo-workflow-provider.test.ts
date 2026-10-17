@@ -29,15 +29,13 @@ import {
 } from "@oh-my-pi/pi-ai/providers/gitlab-duo-workflow";
 import { configureCredentialRedaction } from "@oh-my-pi/pi-ai/providers/transform-messages";
 import type {
-	AssistantMessage,
 	Context,
 	FetchImpl,
-	Message,
 	Model,
 	ProviderSessionState,
 	Tool,
-	ToolResultMessage,
 } from "@oh-my-pi/pi-ai/types";
+import type { AssistantMessage, Message, ToolResultMessage } from "@oh-my-pi/pi-utils/model-data";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { validateToolArguments } from "@oh-my-pi/pi-ai/utils/validation";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";

@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { type AgentMessage, Tokenizer } from "@oh-my-pi/pi-agent-core";
-import type { SessionEntry, SessionMessageEntry, ShakeConfig } from "@oh-my-pi/pi-agent-core/compaction";
+import { Tokenizer } from "@oh-my-pi/pi-agent-core";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
+import type { ShakeConfig } from "@oh-my-pi/pi-agent-core/compaction";
+import type { SessionEntry, SessionMessageEntry } from "@oh-my-pi/pi-utils/compaction-entries";
 import {
 	AGGRESSIVE_SHAKE_CONFIG,
 	applyShakeRegion,
@@ -8,7 +10,13 @@ import {
 	collectShakeRegions,
 	RESCUE_SHAKE_CONFIG,
 } from "@oh-my-pi/pi-agent-core/compaction";
-import type { AssistantMessage, ImageContent, TextContent, ToolCall, ToolResultMessage } from "@oh-my-pi/pi-ai";
+import type {
+	AssistantMessage,
+	ImageContent,
+	TextContent,
+	ToolCall,
+	ToolResultMessage,
+} from "@oh-my-pi/pi-utils/model-data";
 import { convertMessageToLlm } from "../src/compaction/messages";
 
 const tokenizer = new Tokenizer();

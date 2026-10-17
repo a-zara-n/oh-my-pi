@@ -3,13 +3,15 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type {
+	ProviderSessionState,
+} from "@oh-my-pi/pi-ai/types";
+import type {
 	AssistantMessage,
 	Message,
 	ProviderPayload,
-	ProviderSessionState,
 	ToolResultMessage,
 	Usage,
-} from "@oh-my-pi/pi-ai/types";
+} from "@oh-my-pi/pi-utils/model-data";
 import { createOpenAIResponsesHistoryPayload } from "@oh-my-pi/pi-ai/utils";
 import type { Model } from "@oh-my-pi/pi-catalog/types";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";

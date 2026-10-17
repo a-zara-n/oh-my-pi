@@ -18,7 +18,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as url from "node:url";
 import { Agent } from "@oh-my-pi/pi-agent-core";
-import type { ImageContent } from "@oh-my-pi/pi-ai";
+import type { ImageContent } from "@oh-my-pi/pi-utils/model-data";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { imageContent } from "@oh-my-pi/pi-tui/chat/transcript-entry";
 import { TranscriptContainer } from "@oh-my-pi/pi-tui/chrome/transcript-container";

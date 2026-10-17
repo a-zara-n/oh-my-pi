@@ -2,16 +2,18 @@ import type * as nodeFs from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import {
-	type AssistantMessage,
 	coerceServiceTierByFamily,
 	getPremiumServiceTierRequests,
 	parseServiceTier,
 	resolveModelServiceTier,
-	type ServiceTierByFamily,
-	type ToolCall,
-	type ToolResultMessage,
-	type Usage,
 } from "@oh-my-pi/pi-ai";
+import type {
+	AssistantMessage,
+	ServiceTierByFamily,
+	ToolCall,
+	ToolResultMessage,
+	Usage,
+} from "@oh-my-pi/pi-utils/model-data";
 import { classifyModel } from "@oh-my-pi/pi-catalog/compat/taxonomy";
 import { getSessionsDir, isEnoent, readLines } from "@oh-my-pi/pi-utils";
 import type {

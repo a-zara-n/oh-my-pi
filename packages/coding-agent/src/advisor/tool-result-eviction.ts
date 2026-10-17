@@ -1,6 +1,7 @@
-import type { AgentMessage, Tokenizer } from "@oh-my-pi/pi-agent-core";
+import type { Tokenizer } from "@oh-my-pi/pi-agent-core";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import { invalidateMessageCache, MIN_PRUNE_TOKENS } from "@oh-my-pi/pi-agent-core/compaction";
-import type { ToolResultMessage } from "@oh-my-pi/pi-ai";
+import type { ToolResultMessage } from "@oh-my-pi/pi-utils/model-data";
 
 /**
  * Tools whose output the advisor can get back by calling them again. Anything

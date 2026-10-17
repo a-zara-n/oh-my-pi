@@ -1,4 +1,5 @@
-import type { BackgroundTanDispatchDetails, CustomMessage } from "./messages";
+import type { BackgroundTanDispatchDetails } from "./messages";
+import type { CustomMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import { replaceTabs } from "../render/render-utils";
 import { theme } from "../theme";
 import type { TranscriptBlock } from "../chrome/transcript-container";

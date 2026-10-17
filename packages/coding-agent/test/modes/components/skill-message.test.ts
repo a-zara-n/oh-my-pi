@@ -6,7 +6,8 @@ import { resetSettingsForTest, Settings } from "../../../src/config/settings";
 import { SkillMessageComponent } from "@oh-my-pi/pi-tui/chat/skill-message";
 import { skillChipLabel } from "@oh-my-pi/pi-tui/prompt/composer-attachments";
 import { getThemeByName, setThemeInstance, type Theme } from "@oh-my-pi/pi-tui/theme";
-import type { CustomMessage, SkillPromptDetails } from "../../../src/session/messages";
+import type { SkillPromptDetails } from "../../../src/session/messages";
+import type { CustomMessage } from "@oh-my-pi/pi-utils/agent-messages";
 
 import { cfgTuiHyperlinks } from "@oh-my-pi/pi-coding-agent/modes/settings";
 

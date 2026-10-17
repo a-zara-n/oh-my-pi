@@ -1,5 +1,6 @@
 import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import type { Api, ApiKey, AuthStorage, Model } from "@oh-my-pi/pi-ai";
+import type { ApiKey, AuthStorage, Model } from "@oh-my-pi/pi-ai";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 import { completeSimple } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { runWithModelRequestPurpose } from "@oh-my-pi/pi-ai/model-request-execution";

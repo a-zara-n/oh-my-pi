@@ -1,4 +1,5 @@
-import { type Api, type AuthStorage, type Model, withAuth } from "@oh-my-pi/pi-ai";
+import { type AuthStorage, type Model, withAuth } from "@oh-my-pi/pi-ai";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 import type { SearchCitation, SearchResponse, SearchSource, SearchUsage } from "../types";
 import { asRecord } from "@oh-my-pi/pi-utils";
 import { SearchProviderError } from "../../../web/search/types";

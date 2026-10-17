@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import type { AssistantMessage, Context, Tool, ToolResultMessage, Usage } from "@oh-my-pi/pi-ai";
+import type { Context, Tool } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, ToolResultMessage, Usage } from "@oh-my-pi/pi-utils/model-data";
 import { streamOllama } from "@oh-my-pi/pi-ai/providers/ollama";
 import { NON_VISION_IMAGE_PLACEHOLDER } from "@oh-my-pi/pi-ai/providers/vision-guard";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";

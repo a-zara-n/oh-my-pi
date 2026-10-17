@@ -7,7 +7,8 @@
 // openrouter/openai/gpt-6.1-sol: cost=0, is_byok=true, upstream=6.6e-05).
 import { describe, expect, it } from "bun:test";
 import { applyProviderReportedCost } from "@oh-my-pi/pi-ai/providers/openai-shared";
-import type { Model, Usage } from "@oh-my-pi/pi-ai/types";
+import type { Model } from "@oh-my-pi/pi-ai/types";
+import type { Usage } from "@oh-my-pi/pi-utils/model-data";
 
 const openRouterModel: Pick<Model, "provider"> = { provider: "openrouter" };
 const openAiModel: Pick<Model, "provider"> = { provider: "openai" };

@@ -1,8 +1,9 @@
 import { describe, expect, it } from "bun:test";
-import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import type { AssistantMessage } from "@oh-my-pi/pi-ai";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
+import type { AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import * as snapcompact from "@oh-my-pi/snapcompact";
-import { type CompactionSummaryMessage, INTERRUPTED_THINKING_MESSAGE_TYPE } from "../../src/session/messages";
+import { INTERRUPTED_THINKING_MESSAGE_TYPE } from "../../src/session/messages";
+import type { CompactionSummaryMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import { buildSessionContext, type StrippedToolCallsMarker } from "../../src/session/session-context";
 import type { SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
 

@@ -20,14 +20,13 @@
  * only the runtime `Type` builder and `StringEnum()` helper were removed.
  */
 import {
-	type Api,
-	type AssistantMessage,
 	type AssistantMessageEventStream,
 	type Context,
 	type Model,
 	type SimpleStreamOptions,
 	streamSimple,
 } from "@oh-my-pi/pi-ai";
+import type { Api, AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import { streamAnthropic } from "@oh-my-pi/pi-ai/providers/anthropic";
 import type { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { clampThinkingLevelForModel, getSupportedEfforts } from "@oh-my-pi/pi-catalog/model-thinking";

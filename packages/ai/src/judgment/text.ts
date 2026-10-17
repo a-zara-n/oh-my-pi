@@ -15,7 +15,7 @@
 import { escapeXmlAttribute, escapeXmlText, prompt } from "@oh-my-pi/pi-utils";
 import { YAML } from "bun";
 import { markNextModelRequestAttempt, runWithModelRequestLineage } from "../model-request-lineage";
-import type { Usage } from "../types";
+import type { Usage } from "@oh-my-pi/pi-utils/model-data";
 import textJudgeRetryTemplate from "./text-judge-retry.md" with { type: "text" };
 import textJudgeStateTemplate from "./text-judge-state.md" with { type: "text" };
 import textJudgeTemplate from "./text-judge.md" with { type: "text" };

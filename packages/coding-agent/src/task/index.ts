@@ -23,7 +23,7 @@ import type {
 	AgentToolUpdateCallback,
 	ToolSpeculationPolicy,
 } from "@oh-my-pi/pi-agent-core";
-import type { Usage } from "@oh-my-pi/pi-ai";
+import type { Usage } from "@oh-my-pi/pi-utils/model-data";
 import { $env, logger, prompt } from "@oh-my-pi/pi-utils";
 import type { ToolSession } from "..";
 import type { EffectiveExtensionRoots } from "../capability/types";

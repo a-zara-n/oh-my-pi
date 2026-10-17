@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import type { ImageContent, Model } from "@oh-my-pi/pi-ai";
+import type { Model } from "@oh-my-pi/pi-ai";
+import type { ImageContent } from "@oh-my-pi/pi-utils/model-data";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import * as snapcompact from "@oh-my-pi/snapcompact";
 import { Agent } from "../src/agent";

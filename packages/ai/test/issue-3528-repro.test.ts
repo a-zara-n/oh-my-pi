@@ -46,7 +46,8 @@ import {
 	applyChatCompletionsReasoningParams,
 	type OpenAICompletionsParams,
 } from "@oh-my-pi/pi-ai/providers/openai-shared";
-import type { AssistantMessage, Message, Model, ModelSpec, ThinkingContent, UserMessage } from "@oh-my-pi/pi-ai/types";
+import type { Model, ModelSpec } from "@oh-my-pi/pi-ai/types";
+import type { AssistantMessage, Message, ThinkingContent, UserMessage } from "@oh-my-pi/pi-utils/model-data";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

@@ -5,12 +5,14 @@ import { type } from "@oh-my-pi/omptype";
 import { Agent, type AgentTool } from "@oh-my-pi/pi-agent-core";
 import type {
 	ApiKey,
+} from "@oh-my-pi/pi-ai";
+import type {
 	AssistantMessage,
 	TextContent,
 	ThinkingContent,
 	ToolCall,
 	ToolResultMessage,
-} from "@oh-my-pi/pi-ai";
+} from "@oh-my-pi/pi-utils/model-data";
 import { unregisterCustomApis } from "@oh-my-pi/pi-ai/api-registry";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { createMockModel, type MockResponse, registerMockApi } from "@oh-my-pi/pi-ai/providers/mock";

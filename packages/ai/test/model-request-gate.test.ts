@@ -7,8 +7,8 @@ import {
 	type ModelRequestDecision,
 	type ModelRequestGate,
 	type ModelRequestLease,
-	type ModelRequestOutcome,
 } from "@oh-my-pi/pi-ai/model-request-gate";
+import type { ModelRequestOutcome } from "@oh-my-pi/pi-utils/model-request-data";
 import {
 	type ModelRequestAuthorizationInput,
 	type ModelRequestExecution,

@@ -9,7 +9,8 @@ import {
 	isNonBlankContext,
 	type ToolLoadMode,
 } from "@oh-my-pi/pi-agent-core";
-import type { ComputerSafetyCheck, ImageContent, Static, TextContent, TSchema } from "@oh-my-pi/pi-ai";
+import type { Static, TSchema } from "@oh-my-pi/pi-ai";
+import type { ComputerSafetyCheck, ImageContent, TextContent } from "@oh-my-pi/pi-utils/model-data";
 import { sanitizeText, untilAborted } from "@oh-my-pi/pi-utils";
 import type { Theme } from "@oh-my-pi/pi-tui/theme";
 import {

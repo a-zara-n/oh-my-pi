@@ -7,7 +7,7 @@ import { compact, span, text } from "../native/describe";
 import { plainText } from "../native/spans";
 import { errorText, noteText, resultText, statsText } from "./native-view";
 import { type Theme, theme } from "../theme/theme";
-import type { OutputMeta } from "./output-meta";
+import type { OutputMeta } from "@oh-my-pi/pi-utils/agent-messages";
 import { truncate } from "@oh-my-pi/pi-utils";
 import { renderStatusLine, urlHyperlink } from "../render";
 import { framedToolCard } from "../render/tool-card";

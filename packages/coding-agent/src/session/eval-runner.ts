@@ -12,7 +12,7 @@ import { defaultEvalSessionId } from "../eval/session-id";
 import type { ExtensionRunner } from "../extensibility/extensions";
 import type { ToolSession } from "../tools";
 import { outputMeta } from "../tools/output-meta";
-import type { PythonExecutionMessage } from "./messages";
+import type { PythonExecutionMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import type { SessionManager } from "./session-manager";
 
 import { cfgPythonInterpreter, cfgPythonKernelMode } from "../eval/settings";

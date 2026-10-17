@@ -1,4 +1,4 @@
-import type { Message, ToolCall } from "../types";
+import type { Message, ToolCall } from "@oh-my-pi/pi-utils/model-data";
 import { AnthropicInbandScanner } from "./anthropic";
 import { buildArgShapes } from "./coercion";
 import { DeepSeekInbandScanner } from "./deepseek";

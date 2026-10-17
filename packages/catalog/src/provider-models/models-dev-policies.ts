@@ -1,5 +1,6 @@
 import { isExcludedModel } from "../compat/behavior";
-import type { Api, ModelSpec } from "../types";
+import type { ModelSpec } from "../types";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 
 /**
  * Remove models.dev rows that OMP cannot route successfully; the roster

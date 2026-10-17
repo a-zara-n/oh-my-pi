@@ -15,7 +15,8 @@
  * @internal Not part of the public pi-ai surface (absent from `index.ts`).
  */
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { ModelRequestModelRef, ModelRequestReason } from "./model-request-gate";
+import type { ModelRequestReason } from "./model-request-gate";
+import type { ModelRequestModelRef } from "@oh-my-pi/pi-utils/model-request-data";
 
 declare const RETRY_CHAIN_BRAND: unique symbol;
 

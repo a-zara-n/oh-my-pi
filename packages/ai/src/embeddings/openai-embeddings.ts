@@ -1,5 +1,6 @@
 import { calculateCost } from "@oh-my-pi/pi-catalog/models";
-import type { Api, FetchImpl, Model, Usage } from "@oh-my-pi/pi-catalog/types";
+import type { FetchImpl, Model } from "@oh-my-pi/pi-catalog/types";
+import type { Api, Usage } from "@oh-my-pi/pi-utils/model-data";
 import { type } from "@oh-my-pi/omptype";
 import { type ApiKey, withAuth } from "../auth-retry";
 import * as AIError from "../error";

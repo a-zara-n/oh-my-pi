@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import type { ImageContent } from "@oh-my-pi/pi-ai";
+import type { ImageContent } from "@oh-my-pi/pi-utils/model-data";
 import type { Args } from "@oh-my-pi/pi-coding-agent/cli/args";
 import { buildInitialMessage } from "@oh-my-pi/pi-coding-agent/cli/initial-message";
 

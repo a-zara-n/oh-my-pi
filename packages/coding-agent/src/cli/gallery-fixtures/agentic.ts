@@ -1,5 +1,5 @@
 // Gallery fixtures for agentic orchestration (task, wait, goal, yield).
-import type { Usage } from "@oh-my-pi/pi-ai";
+import type { Usage } from "@oh-my-pi/pi-utils/model-data";
 import type { TaskToolDetails, YieldItem } from "@oh-my-pi/pi-tui/tools/task";
 import type { CoordinationDetails } from "@oh-my-pi/pi-tui/tools/wait";
 import type { GalleryFixture } from "./types";

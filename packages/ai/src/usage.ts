@@ -5,7 +5,8 @@
  * and shared quotas across providers.
  */
 import { type } from "@oh-my-pi/omptype";
-import type { FetchImpl, Provider } from "./types";
+import type { FetchImpl } from "./types";
+import type { Provider } from "@oh-my-pi/pi-utils/model-data";
 export type UsageUnit = "percent" | "tokens" | "requests" | "credits" | "usd" | "minutes" | "bytes" | "unknown";
 
 export type UsageStatus = "ok" | "warning" | "exhausted" | "unknown";

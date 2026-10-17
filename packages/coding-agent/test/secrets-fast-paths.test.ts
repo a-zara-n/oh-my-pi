@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import type { Message } from "@oh-my-pi/pi-ai";
+import type { Message } from "@oh-my-pi/pi-utils/model-data";
 import { obfuscateMessages } from "@oh-my-pi/pi-coding-agent/secrets/message-transform";
 import { type SecretEntry, SecretObfuscator } from "@oh-my-pi/pi-coding-agent/secrets/obfuscator";
 import {

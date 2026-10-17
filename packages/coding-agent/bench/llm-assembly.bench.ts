@@ -24,8 +24,9 @@
  * Env: `LLM_ASSEMBLY_N` overrides the history length (default 5000);
  *      `PI_TOKENIZER_ACCURATE=1` uses the native cl100k tokenizer.
  */
-import { type AgentMessage, Tokenizer } from "@oh-my-pi/pi-agent-core";
-import type { AssistantMessage, ToolResultMessage, Usage } from "@oh-my-pi/pi-ai";
+import { Tokenizer } from "@oh-my-pi/pi-agent-core";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
+import type { AssistantMessage, ToolResultMessage, Usage } from "@oh-my-pi/pi-utils/model-data";
 import { convertToLlm } from "../src/session/messages";
 
 const tokenizer = new Tokenizer();

@@ -1,9 +1,9 @@
-import type { TextContent } from "@oh-my-pi/pi-ai";
+import type { TextContent } from "@oh-my-pi/pi-utils/model-data";
 import { Container } from "../tui";
 import { Markdown } from "../components/markdown";
 import { Text } from "../components/text";
 import type { CollabPromptDetails } from "./messages";
-import type { CustomMessage } from "./messages";
+import type { CustomMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import { getMarkdownTheme, theme } from "../theme";
 import { card, md, span } from "../native/describe";
 import type { NativeNode } from "../native/node";

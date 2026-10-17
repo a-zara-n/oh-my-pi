@@ -1,4 +1,5 @@
-import type { FetchImpl, Model, Usage } from "@oh-my-pi/pi-catalog/types";
+import type { FetchImpl, Model } from "@oh-my-pi/pi-catalog/types";
+import type { Usage } from "@oh-my-pi/pi-utils/model-data";
 import { parseImageMetadata, USER_AGENT } from "@oh-my-pi/pi-utils";
 import type { ApiKey } from "../auth-retry";
 import { withAuth } from "../auth-retry";

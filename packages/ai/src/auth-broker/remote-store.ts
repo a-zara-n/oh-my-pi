@@ -23,7 +23,7 @@ import {
 } from "../auth/types";
 import * as AIError from "../error";
 import type { OAuthCredentials } from "../registry/oauth/types";
-import type { Provider } from "../types";
+import type { Provider } from "@oh-my-pi/pi-utils/model-data";
 import type { ClientUsageIdentity, ObservedUsageEntry, UsageReport } from "../usage";
 import { raceSignal } from "../auth/abort";
 import { type AuthBrokerClient, AuthBrokerError, AuthBrokerStreamUnsupportedError } from "./client";

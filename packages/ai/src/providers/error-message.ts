@@ -1,4 +1,5 @@
-import type { Api, Model } from "../types";
+import type { Model } from "../types";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 
 export function createProviderErrorMessage(model: Model<Api>, err: unknown) {
 	const errorMessage = err instanceof Error ? err.message : String(err);

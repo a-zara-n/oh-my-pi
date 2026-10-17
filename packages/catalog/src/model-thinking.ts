@@ -7,7 +7,8 @@
  * id parsing, no host matching, no compat detection per request.
  */
 import { Effort, THINKING_EFFORTS } from "./effort";
-import type { Api, Model, ModelSpec } from "./types";
+import type { Model, ModelSpec } from "./types";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 
 /**
  * Runtime helpers read baked metadata only, so they accept both pre-build

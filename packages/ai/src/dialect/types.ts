@@ -1,5 +1,6 @@
 import type { Dialect as CatalogDialect } from "@oh-my-pi/pi-catalog/identity";
-import type { Context, Message, ToolCall } from "../types";
+import type { Context } from "../types";
+import type { Message, ToolCall } from "@oh-my-pi/pi-utils/model-data";
 
 export type { Dialect } from "@oh-my-pi/pi-catalog/identity";
 

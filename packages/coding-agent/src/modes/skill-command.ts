@@ -1,6 +1,7 @@
-import type { ImageContent, TextContent } from "@oh-my-pi/pi-ai";
+import type { ImageContent, TextContent } from "@oh-my-pi/pi-utils/model-data";
 import { buildSkillPromptMessage, getSkillSlashCommandName, parseSkillInvocation } from "../extensibility/skills";
-import { type CustomMessage, SKILL_PROMPT_MESSAGE_TYPE, type SkillPromptDetails } from "../session/messages";
+import { SKILL_PROMPT_MESSAGE_TYPE, type SkillPromptDetails } from "../session/messages";
+import type { CustomMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import type { InteractiveModeContext } from "./types";
 
 type SkillCommandHost = Pick<

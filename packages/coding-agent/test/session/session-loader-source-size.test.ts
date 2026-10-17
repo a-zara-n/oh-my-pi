@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { loadSessionFile } from "@oh-my-pi/pi-coding-agent/session/session-loader";
-import { FileSessionStorage, MemorySessionStorage } from "@oh-my-pi/pi-coding-agent/session/session-storage";
+import { FileSessionStorage, MemorySessionStorage } from "@oh-my-pi/pi-utils/model-request-journal-composition";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
 /** Storage whose stat lags its content, simulating an interleaving appender. */

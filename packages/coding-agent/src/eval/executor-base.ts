@@ -1,6 +1,7 @@
 import { logger } from "@oh-my-pi/pi-utils";
 import { Settings } from "../config/settings";
-import { type OutputArtifactError, OutputSink } from "@oh-my-pi/pi-tui/tools/streaming-output";
+import { OutputSink } from "@oh-my-pi/pi-tui/tools/streaming-output";
+import type { OutputArtifactError } from "@oh-my-pi/pi-utils/agent-messages";
 import { statusEventKey } from "@oh-my-pi/pi-tui/tools/eval";
 import type { ToolSession } from "../tools";
 import {

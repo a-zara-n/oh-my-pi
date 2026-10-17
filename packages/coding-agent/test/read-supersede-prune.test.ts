@@ -6,8 +6,8 @@ import { type AgentToolResult, Tokenizer } from "@oh-my-pi/pi-agent-core";
 import {
 	pruneSupersededToolResults,
 	readToolSupersedeKey,
-	type SessionEntry,
 } from "@oh-my-pi/pi-agent-core/compaction";
+import type { SessionEntry } from "@oh-my-pi/pi-utils/compaction-entries";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { ReadTool } from "@oh-my-pi/pi-coding-agent/tools/read";

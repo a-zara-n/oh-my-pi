@@ -41,7 +41,7 @@ import type {
 	TextContent,
 	ThinkingContent,
 	ToolCall,
-} from "../types";
+} from "@oh-my-pi/pi-utils/model-data";
 import { copyCursorExecResolved } from "./block-symbols";
 import { clearStreamingPartialJson, getStreamingPartialJson, setStreamingPartialJson, type StreamingPartialJsonCarrier } from "@oh-my-pi/pi-utils/model-data";
 import { AssistantMessageEventStream } from "./event-stream";

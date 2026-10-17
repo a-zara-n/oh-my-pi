@@ -24,9 +24,21 @@ import { parseToolCallArguments } from "../utils/tool-call-arguments";
 import { getEnvApiKey } from "../env-api-key";
 import { OUTPUT_FALLBACK_BUFFER } from "../stream";
 import type {
+	AnthropicCompactionRequest,
+	CacheRetention,
+	Context,
+	FetchImpl,
+	Model,
+	ProviderSessionState,
+	RawSseEvent,
+	SimpleStreamOptions,
+	StreamFunction,
+	StreamOptions,
+	Tool,
+} from "../types";
+import type {
 	AnthropicCompactionFiles,
 	AnthropicCompactionPayload,
-	AnthropicCompactionRequest,
 	AnthropicFallbackContent,
 	AnthropicMessagePayload,
 	AnthropicOutputEffort,
@@ -35,30 +47,20 @@ import type {
 	AnthropicToolChange,
 	Api,
 	AssistantMessage,
-	CacheRetention,
-	Context,
 	DeveloperMessage,
-	FetchImpl,
 	ImageContent,
 	Message,
-	Model,
 	ProviderInputTransformation,
 	ProviderPayload,
-	ProviderSessionState,
-	RawSseEvent,
 	RedactedThinkingContent,
 	ServiceTier,
-	SimpleStreamOptions,
 	StopReason,
-	StreamFunction,
-	StreamOptions,
 	TextContent,
 	ThinkingContent,
-	Tool,
 	ToolCall,
 	ToolResultMessage,
 	Usage,
-} from "../types";
+} from "@oh-my-pi/pi-utils/model-data";
 import {
 	getHeaderCaseInsensitive,
 	isRecord,
@@ -104,7 +106,6 @@ import {
 import {
 	type ToolInputSchema as AnthropicToolInputSchema,
 	type Tool as AnthropicWireTool,
-	type Usage as AnthropicWireUsage,
 	COMPACTION_BETA,
 	LEGACY_COMPACTION_BETA,
 	type CompactionBlockParam,
@@ -120,6 +121,7 @@ import {
 	THINKING_BINDING_CONTROLS_BETA,
 	type TextBlockParam,
 } from "./anthropic-wire";
+import type { Usage as AnthropicWireUsage } from "@oh-my-pi/pi-utils/model-data";
 import {
 	claudeCodeSdkVersion,
 	claudeCodeSystemInstruction,

@@ -9,7 +9,7 @@ import { CURRENT_SESSION_VERSION,
 import { resetSessionIndexForTests } from "@oh-my-pi/pi-coding-agent/session/session-index";
 import { loadEntriesFromFile } from "@oh-my-pi/pi-coding-agent/session/session-loader";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { FileSessionStorage, type WriteTextAtomicOptions } from "@oh-my-pi/pi-coding-agent/session/session-storage";
+import { FileSessionStorage, type WriteTextAtomicOptions } from "@oh-my-pi/pi-utils/model-request-journal-composition";
 import type { SessionTitleUpdate } from "@oh-my-pi/pi-utils/session-title-slot";
 import { getConfigRootDir, removeSyncWithRetries, setAgentDir } from "@oh-my-pi/pi-utils";
 

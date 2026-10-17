@@ -1,4 +1,4 @@
-import type { LimitsMeta } from "./output-meta";
+import type { LimitsMeta } from "@oh-my-pi/pi-utils/agent-messages";
 
 /** Items retained after applying output limits and their metadata. */
 export interface ListLimitResult<T> {

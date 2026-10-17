@@ -7,7 +7,8 @@ import {
 	RpcExtensionUserMessageTracker,
 	RpcPromptResults,
 } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-prompt-results";
-import { type CustomMessage, SKILL_PROMPT_MESSAGE_TYPE } from "@oh-my-pi/pi-coding-agent/session/messages";
+import { SKILL_PROMPT_MESSAGE_TYPE } from "@oh-my-pi/pi-coding-agent/session/messages";
+import type { CustomMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import { removeWithRetries, Snowflake } from "@oh-my-pi/pi-utils";
 
 describe("tryRunRpcSkillCommand", () => {

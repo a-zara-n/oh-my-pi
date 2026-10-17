@@ -1,16 +1,15 @@
 import { scheduler } from "node:timers/promises";
 import {
 	Agent,
-	type AgentMessage,
 	type AgentTool,
 	type AgentToolContext,
 	AppendOnlyContextManager,
-	type CompactionSummaryMessage,
 	resolveTelemetry,
 	type StreamFn,
 	TERMINAL_TOOL_RESULT_ABORT_REASON,
 	ThinkingLevel,
 } from "@oh-my-pi/pi-agent-core";
+import type { AgentMessage, CompactionSummaryMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import {
 	canReplayRemoteCompaction,
 	type CompactionResult,
@@ -22,20 +21,18 @@ import {
 	isOpenAiRemoteCompactionApi,
 	NativeCompactionError,
 	prepareCompaction,
-	type SessionMessageEntry,
 	shouldCompact,
 	shouldUseProviderNativeCompaction,
 } from "@oh-my-pi/pi-agent-core/compaction";
+import type { SessionMessageEntry } from "@oh-my-pi/pi-utils/compaction-entries";
 import type {
-	AssistantMessage,
 	CodexCompactionContext,
 	Context,
-	Message,
 	Model,
 	ProviderSessionState,
-	ServiceTier,
 	SimpleStreamOptions,
 } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, Message, ServiceTier } from "@oh-my-pi/pi-utils/model-data";
 import { isUsageLimitOutcome, resolveModelServiceTier, streamSimple } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import {
@@ -105,7 +102,8 @@ import {
 import type { AgentSessionEvent } from "./agent-session-events";
 import type { ClientBridge } from "./client-bridge";
 import { resolveCompactionMethodOrder, resolveMethodSettings } from "./compaction-methods";
-import { type CustomMessage, type CustomMessagePayload, isUserAuthoredMessage, isUserTurnInitiator } from "./messages";
+import { isUserAuthoredMessage, isUserTurnInitiator } from "./messages";
+import type { CustomMessage, CustomMessagePayload } from "@oh-my-pi/pi-utils/agent-messages";
 import { withModelRequestExecution } from "./model-request-context";
 import { ModelRequestReattempts } from "./model-request-reattempt";
 import { isAdvisorCard, isTerminalTextAssistantAnswer } from "./queued-messages";

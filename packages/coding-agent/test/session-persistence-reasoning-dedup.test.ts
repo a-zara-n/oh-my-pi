@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import type { AssistantMessage, ProviderPayload, Usage } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, ProviderPayload, Usage } from "@oh-my-pi/pi-utils/model-data";
 import { BlobStore } from "@oh-my-pi/pi-coding-agent/session/blob-store";
 import type { SessionMessageEntry } from "@oh-my-pi/pi-utils/session-entries";
 import { prepareEntryForPersistence } from "@oh-my-pi/pi-coding-agent/session/session-persistence";

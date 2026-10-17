@@ -4,7 +4,7 @@ import {
 	type SessionStorageBackend,
 	type SessionStorageIndexEntry,
 } from "./indexed-session-storage";
-import { SessionWriteConflictError } from "./session-storage";
+import { SessionWriteConflictError } from "@oh-my-pi/pi-utils/model-request-journal-composition";
 import type { SessionTitleUpdate } from "./session-title-slot";
 
 /**

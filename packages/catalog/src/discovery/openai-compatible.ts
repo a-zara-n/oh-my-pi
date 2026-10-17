@@ -1,5 +1,6 @@
 import { type } from "@oh-my-pi/omptype";
-import type { Api, FetchImpl, ModelSpec, Provider } from "../types";
+import type { FetchImpl, ModelSpec } from "../types";
+import type { Api, Provider } from "@oh-my-pi/pi-utils/model-data";
 import { discoveryFetch } from "../utils";
 
 const MODELS_PATH = "/models";

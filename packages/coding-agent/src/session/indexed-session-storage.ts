@@ -8,7 +8,7 @@ import {
 	type SessionStorageWriter,
 	type SessionStorageWriteOptions,
 	type WriteTextAtomicOptions,
-} from "./session-storage";
+} from "@oh-my-pi/pi-utils/model-request-journal-composition";
 import { isAssistantMessageLine } from "./session-entries";
 import { enoent } from "./session-storage-errors";
 import {

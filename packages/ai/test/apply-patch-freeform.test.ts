@@ -17,7 +17,8 @@ import {
 	convertResponsesAssistantMessage,
 	processResponsesStream,
 } from "@oh-my-pi/pi-ai/providers/openai-shared";
-import type { AssistantMessage, Model, ModelSpec, Tool, ToolResultMessage } from "@oh-my-pi/pi-ai/types";
+import type { Model, ModelSpec, Tool } from "@oh-my-pi/pi-ai/types";
+import type { AssistantMessage, ToolResultMessage } from "@oh-my-pi/pi-utils/model-data";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 
 const GRAMMAR = [

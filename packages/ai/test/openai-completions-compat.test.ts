@@ -7,15 +7,14 @@ import {
 	streamOpenAICompletions,
 } from "@oh-my-pi/pi-ai/providers/openai-completions";
 import type {
-	AssistantMessage,
 	Context,
 	FetchImpl,
 	Model,
 	ModelSpec,
 	OpenAICompat,
 	Tool,
-	ToolResultMessage,
 } from "@oh-my-pi/pi-ai/types";
+import type { AssistantMessage, ToolResultMessage } from "@oh-my-pi/pi-utils/model-data";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { clampThinkingLevelForModel, getSupportedEfforts } from "@oh-my-pi/pi-catalog/model-thinking";

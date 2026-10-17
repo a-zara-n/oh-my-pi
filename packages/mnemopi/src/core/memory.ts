@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
-import type { Api, ApiKey, Model } from "@oh-my-pi/pi-ai";
+import type { ApiKey, Model } from "@oh-my-pi/pi-ai";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 
 import { dbPath as configuredDbPath } from "../config";
 import { closeQuietly } from "../db";

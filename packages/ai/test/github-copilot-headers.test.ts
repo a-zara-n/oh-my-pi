@@ -14,7 +14,7 @@ import {
 	wrapFetchForCopilotFallback,
 } from "@oh-my-pi/pi-ai/providers/github-copilot-headers";
 import { COPILOT_CHAT_INTEGRATION_ID } from "@oh-my-pi/pi-catalog/wire/github-copilot";
-import type { Message } from "@oh-my-pi/pi-ai/types";
+import type { Message } from "@oh-my-pi/pi-utils/model-data";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 
 describe("inferCopilotInitiator", () => {

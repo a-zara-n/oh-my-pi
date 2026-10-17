@@ -6,7 +6,8 @@ import { type } from "@oh-my-pi/omptype";
 import * as AIError from "../error";
 import { retryTransientCompletion } from "../oneshot-retry";
 import { completeSimple } from "../stream";
-import type { Api, AssistantMessage, Model, SimpleStreamOptions, Tool } from "../types";
+import type { Model, SimpleStreamOptions, Tool } from "../types";
+import type { Api, AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import type { TextBackend, TextCompletion, TextPrompt } from "./text";
 import type { JudgeOptions } from "./types";
 

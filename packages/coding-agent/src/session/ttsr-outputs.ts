@@ -6,7 +6,7 @@
  */
 import * as path from "node:path";
 import type { AgentTool } from "@oh-my-pi/pi-agent-core";
-import type { AssistantMessage, ToolCall } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, ToolCall } from "@oh-my-pi/pi-utils/model-data";
 import { isRecord } from "@oh-my-pi/pi-utils";
 import type { TtsrMatchContext, TtsrOutput } from "../export/ttsr";
 

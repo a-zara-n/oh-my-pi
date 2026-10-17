@@ -352,7 +352,7 @@ export function describeMCPResult(
 	});
 }
 
-import type { OutputMeta } from "./output-meta";
+import type { OutputMeta } from "@oh-my-pi/pi-utils/agent-messages";
 
 let renderMarkdownResults = false;
 

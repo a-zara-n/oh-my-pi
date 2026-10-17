@@ -1,4 +1,5 @@
-import { type ToolCall, validateToolArguments } from "@oh-my-pi/pi-ai";
+import { validateToolArguments } from "@oh-my-pi/pi-ai";
+import type { ToolCall } from "@oh-my-pi/pi-utils/model-data";
 import type { AgentTool } from "./types";
 
 /**

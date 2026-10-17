@@ -4,11 +4,12 @@ import { agentLoop } from "@oh-my-pi/pi-agent-core/agent-loop";
 import type {
 	AgentContext,
 	AgentLoopConfig,
-	AgentMessage,
 	AgentTool,
 	SoftToolRequirement,
 } from "@oh-my-pi/pi-agent-core/types";
-import type { Message, ToolChoice } from "@oh-my-pi/pi-ai";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
+import type { ToolChoice } from "@oh-my-pi/pi-ai";
+import type { Message } from "@oh-my-pi/pi-utils/model-data";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { createHarmonyMitigationModel, createUserMessage } from "./helpers";
 

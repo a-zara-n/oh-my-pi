@@ -20,21 +20,23 @@ import * as AIError from "../error";
 import { parseToolCallArguments } from "../utils/tool-call-arguments";
 import { resolveAwsBearerToken } from "../registry/aws";
 import type {
-	Api,
-	AssistantMessage,
 	CacheRetention,
 	Context,
 	Model,
-	StopReason,
 	StreamFunction,
 	StreamOptions,
-	TextContent,
 	ThinkingBudgets,
-	ThinkingContent,
 	Tool,
+} from "../types";
+import type {
+	Api,
+	AssistantMessage,
+	StopReason,
+	TextContent,
+	ThinkingContent,
 	ToolCall,
 	ToolResultMessage,
-} from "../types";
+} from "@oh-my-pi/pi-utils/model-data";
 import { isRecord, normalizeSystemPrompts, normalizeToolCallId, resolveCacheRetention } from "../utils";
 import { resolveAwsAmbientRegion } from "../utils/aws-profile";
 import {

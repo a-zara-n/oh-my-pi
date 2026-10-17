@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { OmpErrors, type } from "@oh-my-pi/omptype";
-import type { ProviderFileReference } from "@oh-my-pi/pi-ai";
+import type { ProviderFileReference } from "@oh-my-pi/pi-utils/model-data";
 import { isEnoent } from "@oh-my-pi/pi-utils";
 import type { RemoteDeleteAction } from "./publication";
 

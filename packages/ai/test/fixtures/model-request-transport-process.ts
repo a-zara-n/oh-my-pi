@@ -11,7 +11,8 @@ import {
 	registerModelRequestGate,
 } from "@oh-my-pi/pi-ai/model-request-gate";
 import * as AIError from "@oh-my-pi/pi-ai/error";
-import type { Api, AssistantMessage, AssistantMessageEvent, Context, Model } from "@oh-my-pi/pi-ai/types";
+import type { AssistantMessageEvent, Context, Model } from "@oh-my-pi/pi-ai/types";
+import type { Api, AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import {
 	helloContext,
 	type LoopbackApi,

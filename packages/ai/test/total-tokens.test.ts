@@ -14,7 +14,8 @@
 
 import { describe, expect, it } from "bun:test";
 import { complete } from "@oh-my-pi/pi-ai/stream";
-import type { Api, Context, Model, OptionsForApi, Usage } from "@oh-my-pi/pi-ai/types";
+import type { Context, Model, OptionsForApi } from "@oh-my-pi/pi-ai/types";
+import type { Api, Usage } from "@oh-my-pi/pi-utils/model-data";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { e2eApiKey, resolveApiKey } from "./oauth";
 

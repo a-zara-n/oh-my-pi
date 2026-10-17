@@ -1,6 +1,6 @@
 import * as AIError from "./error";
 import { createModelRequestRetryChain, runInModelRequestRetryChain } from "./model-request-lineage";
-import type { AssistantMessage } from "./types";
+import type { AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import {
 	extractProviderRetryHint,
 	getHeadersFromError,

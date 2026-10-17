@@ -1,5 +1,5 @@
 import { parseJsonWithRepair } from "@oh-my-pi/pi-utils";
-import type { ToolCall } from "../types";
+import type { ToolCall } from "@oh-my-pi/pi-utils/model-data";
 
 /** Final arguments must not reuse the streaming parser's auto-closed preview. */
 export function parseToolCallArguments(json: string | undefined): ToolCall["arguments"] {

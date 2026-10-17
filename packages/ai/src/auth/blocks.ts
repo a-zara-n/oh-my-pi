@@ -1,5 +1,5 @@
 import { getAgentDbPath, logger } from "@oh-my-pi/pi-utils";
-import type { Provider } from "../types";
+import type { Provider } from "@oh-my-pi/pi-utils/model-data";
 import type { CredentialRankingContext, CredentialRankingStrategy, UsageReport } from "../usage";
 import type { RankingStrategyResolver } from "../usage/registry";
 import type { CredentialPool } from "./pool";

@@ -10,7 +10,7 @@
  * event time.
  */
 
-import type { AssistantMessage } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import type { SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
 import { type HindsightMessage, hasSubstantiveContent } from "./content";
 

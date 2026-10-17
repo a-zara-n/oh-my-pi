@@ -7,7 +7,7 @@ import {
 	isBlobRef,
 	isImageDataUrl,
 } from "./blob-store";
-import { isModelRequestJournalDescriptor, isModelRequestMetadataEntry } from "./model-request-journal";
+import { isModelRequestJournalDescriptor, isModelRequestMetadataEntry } from "@oh-my-pi/pi-utils/model-request-journal";
 import type { FileEntry } from "@oh-my-pi/pi-utils/session-entries";
 
 const MAX_PERSIST_CHARS = 500_000;

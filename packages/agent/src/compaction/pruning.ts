@@ -2,10 +2,11 @@
  * Tool output pruning utilities for compaction.
  */
 
-import type { ToolResultMessage } from "@oh-my-pi/pi-ai";
+import type { ToolResultMessage } from "@oh-my-pi/pi-utils/model-data";
 import type { Tokenizer } from "../tokenizer";
-import type { AgentMessage, AgentToolCall } from "../types";
-import type { SessionEntry, SessionMessageEntry } from "./entries";
+import type { AgentToolCall } from "../types";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
+import type { SessionEntry, SessionMessageEntry } from "@oh-my-pi/pi-utils/compaction-entries";
 import { invalidateMessageCache } from "./message-cache";
 import { type ConvertToLlm, defaultConvertToLlm, getMessageFromEntry } from "./messages";
 import {

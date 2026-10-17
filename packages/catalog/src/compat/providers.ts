@@ -6,7 +6,8 @@
  * each entry's `bundle` policy.
  */
 import rules from "./rules.json";
-import type { Api, ModelSpec } from "../types";
+import type { ModelSpec } from "../types";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 import type { CompiledProvider } from "./types";
 
 const EMPTY: readonly ModelSpec<Api>[] = [];

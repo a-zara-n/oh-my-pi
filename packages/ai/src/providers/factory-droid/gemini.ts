@@ -3,7 +3,8 @@ import type { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { calculateCost } from "@oh-my-pi/pi-catalog/models";
 import { readSseJson } from "@oh-my-pi/pi-utils";
 import * as AIError from "../../error";
-import type { AssistantMessage, Context, Message, Model, StreamOptions, Tool, ToolCall } from "../../types";
+import type { Context, Model, StreamOptions, Tool } from "../../types";
+import type { AssistantMessage, Message, ToolCall } from "@oh-my-pi/pi-utils/model-data";
 import { createAbortSourceTracker } from "../../utils/abort";
 import { AssistantMessageEventStream } from "../../utils/event-stream";
 import {

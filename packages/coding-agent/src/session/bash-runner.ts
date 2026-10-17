@@ -6,7 +6,7 @@ import { type BashPtyOptions, type BashResult, executeBash as executeBashCommand
 import type { ExtensionRunner } from "../extensibility/extensions";
 import { outputMeta } from "../tools/output-meta";
 import { clampTimeout } from "../tools/tool-timeouts";
-import type { BashExecutionMessage } from "./messages";
+import type { BashExecutionMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import type { SessionManager } from "./session-manager";
 
 import { cfgToolsMaxTimeout } from "../tools/settings";

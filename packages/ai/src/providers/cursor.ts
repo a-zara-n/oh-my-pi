@@ -188,8 +188,6 @@ import { LRUCache } from "@oh-my-pi/pi-utils/lru";
 import * as AIError from "../error";
 import { parseToolCallArguments } from "../utils/tool-call-arguments";
 import type {
-	Api,
-	AssistantMessage,
 	Context,
 	CursorExecHandlerResult,
 	CursorExecHandlers,
@@ -200,18 +198,22 @@ import type {
 	CursorTodoSnapshotItem,
 	CursorTodoSyncHandler,
 	CursorToolResultHandler,
-	ImageContent,
-	Message,
 	Model,
 	StreamFunction,
 	StreamOptions,
+	Tool,
+} from "../types";
+import type {
+	Api,
+	AssistantMessage,
+	ImageContent,
+	Message,
 	TextContent,
 	ThinkingContent,
-	Tool,
 	ToolCall,
 	ToolResultMessage,
 	Usage,
-} from "../types";
+} from "@oh-my-pi/pi-utils/model-data";
 import { normalizeSystemPrompts, normalizeToolCallId } from "../utils";
 import {
 	type CursorExecResolvedCarrier,

@@ -18,7 +18,6 @@
 import { Effort, THINKING_EFFORTS } from "../effort";
 import { hostMatchesUrl, modelMatchesHost } from "../hosts";
 import type {
-	Api,
 	CompatOf,
 	ModelSpec,
 	OpenAICompat,
@@ -31,6 +30,7 @@ import type {
 	ResolvedOpenAISharedCompat,
 	ThinkingConfig,
 } from "../types";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 import {
 	isAnthropicSigningProxyUrl,
 	isAzureAnthropicRoute,

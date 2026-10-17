@@ -4,7 +4,8 @@ import {
 	buildResponsesInput,
 	hoistInterleavedResponsesToolBatchMessages,
 } from "@oh-my-pi/pi-ai/providers/openai-shared";
-import type { AssistantMessage, Context, ToolResultMessage } from "@oh-my-pi/pi-ai/types";
+import type { Context } from "@oh-my-pi/pi-ai/types";
+import type { AssistantMessage, ToolResultMessage } from "@oh-my-pi/pi-utils/model-data";
 import { createOpenAIResponsesHistoryPayload } from "@oh-my-pi/pi-ai/utils";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 

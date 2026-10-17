@@ -12,9 +12,10 @@
  */
 
 import { agentLoop } from "@oh-my-pi/pi-agent-core/agent-loop";
-import type { AgentContext, AgentMessage, AgentTool } from "@oh-my-pi/pi-agent-core/types";
+import type { AgentContext, AgentTool } from "@oh-my-pi/pi-agent-core/types";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import { type } from "@oh-my-pi/omptype";
-import type { Message } from "@oh-my-pi/pi-ai";
+import type { Message } from "@oh-my-pi/pi-utils/model-data";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import {
 	createTelemetryExportConfig,

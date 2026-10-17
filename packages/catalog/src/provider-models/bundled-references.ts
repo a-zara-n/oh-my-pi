@@ -1,7 +1,8 @@
 import { isBareIdReferenceProvider } from "../compat/behavior";
 import { isZeroCostXaiOAuthReference } from "../identity/reference";
 import { getBundledModels, getBundledProviders } from "../models";
-import type { Api, Model, ModelSpec } from "../types";
+import type { Model, ModelSpec } from "../types";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 
 /**
  * Project a built `Model` back to spec stage: `compat` becomes the verbatim

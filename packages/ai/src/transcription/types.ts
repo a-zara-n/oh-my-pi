@@ -1,4 +1,4 @@
-import type { Usage } from "@oh-my-pi/pi-catalog/types";
+import type { Usage } from "@oh-my-pi/pi-utils/model-data";
 
 export type TranscriptionResponseFormat = "json" | "verbose_json";
 export type TranscriptionTimestampGranularity = "word" | "segment";

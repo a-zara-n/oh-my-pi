@@ -18,9 +18,9 @@
  * - `hasContextTokenUsage(usage)`: the report must carry usable context numbers.
  */
 
-import type { AssistantMessage, Message } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, Message } from "@oh-my-pi/pi-utils/model-data";
 import type { MessageCountOptions, Tokenizer } from "../tokenizer";
-import type { AgentMessage } from "../types";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import { calculateContextTokens, hasContextTokenUsage } from "./compaction";
 
 /** A provider usage report that accounts for a prefix of the transcript. */

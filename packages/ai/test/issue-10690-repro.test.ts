@@ -5,7 +5,8 @@ import {
 	SYNTHETIC_REASONING_REPLAY_PLACEHOLDER,
 } from "@oh-my-pi/pi-ai/providers/openai-shared";
 import { createOpenAIResponsesHistoryPayload } from "@oh-my-pi/pi-ai/utils";
-import type { AssistantMessage, Context, Model } from "@oh-my-pi/pi-ai/types";
+import type { Context, Model } from "@oh-my-pi/pi-ai/types";
+import type { AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";

@@ -20,7 +20,8 @@ import {
 	type ModelRequestGate,
 	registerModelRequestGate,
 } from "@oh-my-pi/pi-ai/model-request-gate";
-import type { Api, AssistantMessage, Context, Model } from "@oh-my-pi/pi-ai/types";
+import type { Context, Model } from "@oh-my-pi/pi-ai/types";
+import type { Api, AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { stream } from "@oh-my-pi/pi-ai/stream";
 import { authorizeUninstrumentedAttempt, gatedSend, gateFetch } from "@oh-my-pi/pi-ai/utils/model-request-fetch";

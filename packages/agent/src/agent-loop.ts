@@ -3,11 +3,8 @@
  * Transforms to Message[] only at the LLM call boundary.
  */
 import {
-	type AssistantMessage,
 	type AssistantMessageEvent,
 	type ApiKeyResolution,
-	type ComputerAction,
-	type ComputerSafetyCheck,
 	type Context,
 	EventStream,
 	isApiKeyResolver,
@@ -16,14 +13,19 @@ import {
 	seedApiKeyResolver,
 	streamSimple,
 	stripSchemaDescriptions,
-	type ToolCallProviderMetadata,
 	type ToolChoice,
-	type ToolResultMessage,
-	type ToolResultProviderMetadata,
 	type TSchema,
 	toolWireSchema,
-	type UserMessage,
 } from "@oh-my-pi/pi-ai";
+import type {
+	AssistantMessage,
+	ComputerAction,
+	ComputerSafetyCheck,
+	ToolCallProviderMetadata,
+	ToolResultMessage,
+	ToolResultProviderMetadata,
+	UserMessage,
+} from "@oh-my-pi/pi-utils/model-data";
 import {
 	type Dialect,
 	encodeInbandToolHistory,
@@ -82,7 +84,6 @@ import type {
 	AgentContext,
 	AgentEvent,
 	AgentLoopConfig,
-	AgentMessage,
 	AgentPreModelCallResult,
 	AgentTool,
 	AgentToolArgStream,
@@ -97,6 +98,7 @@ import type {
 	SteeringQueueState,
 	StreamFn,
 } from "./types";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import {
 	ASIDE_MESSAGE_COMMIT,
 	ASIDE_MESSAGE_DISCARD,

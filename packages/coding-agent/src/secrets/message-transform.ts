@@ -1,13 +1,15 @@
-import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
+import type {
+	Context,
+} from "@oh-my-pi/pi-ai";
 import type {
 	AnthropicCompactionPayload,
 	AssistantMessage,
-	Context,
 	ImageContent,
 	Message,
 	ProviderPayload,
 	TextContent,
-} from "@oh-my-pi/pi-ai";
+} from "@oh-my-pi/pi-utils/model-data";
 import { isRecord } from "@oh-my-pi/pi-utils";
 import type { SessionContext } from "../session/session-context";
 import type { JsonValue, SecretObfuscator } from "./obfuscator";

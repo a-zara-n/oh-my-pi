@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { AssistantMessage } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import { recoverInlineSloppyEdit } from "../../src/session/inline-edit-recovery";
 
 const usage: AssistantMessage["usage"] = {

@@ -24,7 +24,7 @@ import type { FileDiagnosticsResult } from "./lsp";
 import { nativeDiff, renderDiff as renderDiffColored } from "../chrome/diff";
 import { getLanguageFromPath } from "../lang-from-path";
 import type { Theme } from "../theme/theme";
-import type { OutputMeta } from "./output-meta";
+import type { OutputMeta } from "@oh-my-pi/pi-utils/agent-messages";
 import {
 	cachedRenderedString,
 	cappedHeadLines,

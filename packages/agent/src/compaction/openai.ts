@@ -29,13 +29,12 @@ import {
 } from "@oh-my-pi/pi-ai/providers/openai-shared";
 import { transformMessages } from "@oh-my-pi/pi-ai/providers/transform-messages";
 import type {
-	AssistantMessage,
 	CodexCompactionContext,
 	FetchImpl,
-	Message,
 	Model,
 	ProviderSessionState,
 } from "@oh-my-pi/pi-ai/types";
+import type { AssistantMessage, Message } from "@oh-my-pi/pi-utils/model-data";
 import {
 	dropMalformedOpenAIResponsesToolCalls,
 	getOpenAIResponsesHistoryItems,

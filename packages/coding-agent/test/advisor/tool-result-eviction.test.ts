@@ -4,7 +4,8 @@
 // results from reviews before the latest one are blanked, and the cut is the
 // one that actually pays for the prompt-cache rewrite it forces.
 import { describe, expect, it } from "bun:test";
-import { type AgentMessage, Tokenizer } from "@oh-my-pi/pi-agent-core";
+import { Tokenizer } from "@oh-my-pi/pi-agent-core";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 
 import { evictStaleToolResults } from "../../src/advisor/tool-result-eviction";
 

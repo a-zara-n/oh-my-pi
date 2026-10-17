@@ -1,13 +1,12 @@
 import type { Effort } from "@oh-my-pi/pi-catalog/effort";
 import type {
-	AssistantMessage,
 	AssistantMessageEventStream,
 	CacheRetention,
 	Context,
 	OpenAIResponseInclude,
-	ServiceTier,
 	TokenTaskBudget,
 } from "../types";
+import type { AssistantMessage, ServiceTier } from "@oh-my-pi/pi-utils/model-data";
 
 /**
  * Wire types for the omp auth-gateway.

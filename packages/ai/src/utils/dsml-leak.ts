@@ -10,7 +10,8 @@
  * strip it before the message is committed and tell the model its call failed.
  */
 
-import type { AssistantMessage, Model } from "../types";
+import type { Model } from "../types";
+import type { AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 
 // Structural DSML tags in either pipe spelling (fullwidth `｜` U+FF5C or ASCII),
 // tolerating stray whitespace inside the delimiter run.

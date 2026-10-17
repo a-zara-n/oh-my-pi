@@ -8,8 +8,8 @@
 import * as fs from "node:fs/promises";
 import path from "node:path";
 import type { EditStore } from "@oh-my-pi/pi-natives";
-import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import type { ImageContent } from "@oh-my-pi/pi-ai";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
+import type { ImageContent } from "@oh-my-pi/pi-utils/model-data";
 import { formatAge, formatBytes, isProbablyBinary, readImageMetadata } from "@oh-my-pi/pi-utils";
 import {
 	formatHashlineHeader,
@@ -17,7 +17,7 @@ import {
 	splitAddressableFileLines,
 } from "@oh-my-pi/pi-tui/tools/hashline-format";
 import { normalizeToLF } from "../edit/normalize";
-import type { FileMentionMessage } from "../session/messages";
+import type { FileMentionMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import {
 	DEFAULT_MAX_BYTES,
 	formatHeadTruncationNotice,

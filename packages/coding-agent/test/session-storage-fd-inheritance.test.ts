@@ -24,7 +24,7 @@ import * as path from "node:path";
 import { Shell } from "@oh-my-pi/pi-natives";
 import { RotatingFileSink } from "@oh-my-pi/pi-utils/logger/rotating-file";
 import { removeWithRetries } from "@oh-my-pi/pi-utils";
-import { FileSessionStorage } from "../src/session/session-storage";
+import { FileSessionStorage } from "@oh-my-pi/pi-utils/model-request-journal-composition";
 
 const ROOTS: string[] = [];
 

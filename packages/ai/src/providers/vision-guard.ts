@@ -1,5 +1,6 @@
 import { $env } from "@oh-my-pi/pi-utils";
-import type { Api, ImageContent, Model, TextContent } from "../types";
+import type { Model } from "../types";
+import type { Api, ImageContent, TextContent } from "@oh-my-pi/pi-utils/model-data";
 
 export const NON_VISION_IMAGE_PLACEHOLDER = "[image omitted: model does not support vision]";
 export function partitionVisionContent(

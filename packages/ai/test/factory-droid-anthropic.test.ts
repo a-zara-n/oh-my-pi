@@ -4,7 +4,7 @@ import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { streamAnthropic } from "../src/providers/anthropic";
 import { streamFactoryDroid } from "../src/providers/factory-droid";
-import type { AssistantMessage, Message } from "../src/types";
+import type { AssistantMessage, Message } from "@oh-my-pi/pi-utils/model-data";
 import {
 	anthropicChunks,
 	type CapturedRequest,

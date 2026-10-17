@@ -50,7 +50,8 @@ import {
 	stripFireworksDeepSeekThinkingToggle,
 } from "../src/provider-models/openai-compat";
 import { type OpenAICodexAccount, openaiCodexModelManagerOptions } from "../src/provider-models/special";
-import type { Api, Model, ModelSpec } from "../src/types";
+import type { Model, ModelSpec } from "../src/types";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 import { cleanModelName } from "../src/utils";
 import { mergeCopilotApiHeaders } from "../src/wire/github-copilot";
 import {

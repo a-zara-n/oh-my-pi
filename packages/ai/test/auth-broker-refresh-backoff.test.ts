@@ -14,7 +14,8 @@ import { buildGatewayApiKeyResolver } from "@oh-my-pi/pi-ai/auth-gateway/dispatc
 import { OAuthError } from "@oh-my-pi/pi-ai/error";
 import { registerOAuthProvider, unregisterOAuthProviders } from "@oh-my-pi/pi-ai/registry/oauth";
 import type { OAuthCredentials } from "@oh-my-pi/pi-ai/registry/oauth/types";
-import type { Api, Model } from "@oh-my-pi/pi-ai/types";
+import type { Model } from "@oh-my-pi/pi-ai/types";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 import { removeWithRetries } from "../../utils/src/temp";
 
 const PROVIDER = "unit-broker-refresh-backoff";

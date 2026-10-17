@@ -26,7 +26,8 @@
 
 import { logger } from "@oh-my-pi/pi-utils";
 import { resetAccountScopedProviderSessionState } from "../provider-session-state";
-import type { Api, Context, Message, Model, ProviderSessionState } from "../types";
+import type { Context, Model, ProviderSessionState } from "../types";
+import type { Api, Message } from "@oh-my-pi/pi-utils/model-data";
 
 /**
  * Retained logical sessions. Each entry is a handful of small provider records

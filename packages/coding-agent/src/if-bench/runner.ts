@@ -9,14 +9,12 @@
  * reply and cannot be recovered once it drifts.
  */
 import type {
-	Api,
 	ApiKeyResolver,
-	AssistantMessage,
 	Context,
-	Message,
 	Model,
 	ProviderSessionState,
 } from "@oh-my-pi/pi-ai";
+import type { Api, AssistantMessage, Message } from "@oh-my-pi/pi-utils/model-data";
 import { logger } from "@oh-my-pi/pi-utils";
 import type { BenchRuntime, BenchTarget, StreamSimpleFn } from "../cli/bench-runtime";
 import { formatModelSelectorValue } from "@oh-my-pi/pi-tui/overlays/model-selector";

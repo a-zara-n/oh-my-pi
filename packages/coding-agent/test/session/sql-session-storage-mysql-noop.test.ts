@@ -22,7 +22,7 @@ import {
 	type SqlSessionStorageClient,
 	type SqlSessionStorageResult,
 } from "@oh-my-pi/pi-coding-agent/session/sql-session-storage";
-import { SessionWriteConflictError } from "@oh-my-pi/pi-coding-agent/session/session-storage";
+import { SessionWriteConflictError } from "@oh-my-pi/pi-utils/model-request-journal-composition";
 
 interface FakeRow {
 	content: string;

@@ -24,7 +24,8 @@ import { __resetVertexTokenCache, getVertexAccessToken } from "@oh-my-pi/pi-ai/p
 import { streamGoogleGeminiCli } from "@oh-my-pi/pi-ai/providers/google-gemini-cli";
 import { streamGoogleVertex } from "@oh-my-pi/pi-ai/providers/google-vertex";
 import { stream } from "@oh-my-pi/pi-ai/stream";
-import type { Api, AssistantMessage, Context, FetchImpl, Model } from "@oh-my-pi/pi-ai/types";
+import type { Context, FetchImpl, Model } from "@oh-my-pi/pi-ai/types";
+import type { Api, AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import { transportFetch } from "@oh-my-pi/pi-ai/utils/transport-fetch";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import {

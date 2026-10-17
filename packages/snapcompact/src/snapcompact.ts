@@ -51,7 +51,7 @@
  * re-attached to the compaction summary message on every context rebuild.
  */
 
-import type { Api, ImageContent, Message, TextContent } from "@oh-my-pi/pi-ai";
+import type { Api, ImageContent, Message, TextContent } from "@oh-my-pi/pi-utils/model-data";
 import {
 	type ImageSize,
 	type ImageTokenization,

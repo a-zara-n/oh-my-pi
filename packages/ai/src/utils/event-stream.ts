@@ -1,5 +1,6 @@
 import * as AIError from "../error";
-import type { AssistantMessage, AssistantMessageEvent } from "../types";
+import type { AssistantMessageEvent } from "../types";
+import type { AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 
 /** Anything a stream watchdog can consult for in-flight consumer-side local work. */
 export interface LocalWorkSource {

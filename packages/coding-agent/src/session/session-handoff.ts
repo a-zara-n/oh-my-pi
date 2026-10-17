@@ -3,13 +3,14 @@
 import * as path from "node:path";
 import {
 	type Agent,
-	type AgentMessage,
 	resolveTelemetry,
 	type StreamFn,
 	type ThinkingLevel,
 } from "@oh-my-pi/pi-agent-core";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import { generateHandoffFromContext, renderHandoffPrompt } from "@oh-my-pi/pi-agent-core/compaction";
-import type { Message, Model, ServiceTier, SimpleStreamOptions } from "@oh-my-pi/pi-ai";
+import type { Model, SimpleStreamOptions } from "@oh-my-pi/pi-ai";
+import type { Message, ServiceTier } from "@oh-my-pi/pi-utils/model-data";
 import { logger, Snowflake } from "@oh-my-pi/pi-utils";
 import type { ModelRegistry } from "../config/model-registry";
 import type { Settings } from "../config/settings";

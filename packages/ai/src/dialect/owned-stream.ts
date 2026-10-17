@@ -1,12 +1,8 @@
 import type {
-	AssistantMessage,
 	AssistantMessageEventStream as AssistantMessageEventStreamType,
-	TextContent,
-	ThinkingContent,
-	ToolCall,
 } from "../types";
 import { copyCursorExecResolved } from "../utils/block-symbols";
-import { clearStreamingPartialJson, getStreamingPartialJson, setStreamingPartialJson, type StreamingPartialJsonCarrier } from "@oh-my-pi/pi-utils/model-data";
+import { clearStreamingPartialJson, getStreamingPartialJson, setStreamingPartialJson, type StreamingPartialJsonCarrier, type AssistantMessage, type TextContent, type ThinkingContent, type ToolCall } from "@oh-my-pi/pi-utils/model-data";
 import { AssistantMessageEventStream } from "../utils/event-stream";
 import { INVALID_ARGUMENTS_RAW_LIMIT, invalidToolCallArguments } from "../utils/tool-call-arguments";
 import { buildStringArgsResolver } from "./coercion";

@@ -15,11 +15,13 @@
  */
 
 import type { AgentTool } from "./types";
-import type { Context, Message, Tool } from "@oh-my-pi/pi-ai";
+import type { Context, Tool } from "@oh-my-pi/pi-ai";
+import type { Message } from "@oh-my-pi/pi-utils/model-data";
 import { toolWireSchema } from "@oh-my-pi/pi-ai";
 import { normalizeTools } from "./agent-loop";
 import { messageEstimateVersion } from "./compaction/message-cache";
-import type { AgentContext, AgentMessage } from "./types";
+import type { AgentContext } from "./types";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 
 // ---------------------------------------------------------------------------
 // StablePrefix (formerly ImmutablePrefix)

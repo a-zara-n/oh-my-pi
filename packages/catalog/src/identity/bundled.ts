@@ -8,7 +8,8 @@
  */
 import { isBareIdReferenceProvider } from "../compat/behavior";
 import { getBundledModels, getBundledProviders } from "../models";
-import type { Api, Model } from "../types";
+import type { Model } from "../types";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 import { buildModelReferenceIndex, type ModelReferenceIndex } from "./reference";
 
 let bundledModels: readonly Model<Api>[] | undefined;

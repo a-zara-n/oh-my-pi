@@ -1,5 +1,5 @@
 import { pathToFileURL } from "node:url";
-import type { TextContent } from "@oh-my-pi/pi-ai";
+import type { TextContent } from "@oh-my-pi/pi-utils/model-data";
 import { type Component } from "../tui";
 import { Box } from "../components/box";
 import { Disclosure } from "../components/disclosure";
@@ -8,7 +8,8 @@ import { Markdown } from "../components/markdown";
 import { Spacer } from "../components/spacer";
 import { Text } from "../components/text";
 import { getMarkdownTheme, theme } from "../theme";
-import type { CustomMessage, SkillPromptDetails } from "./messages";
+import type { SkillPromptDetails } from "./messages";
+import type { CustomMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import { fileHyperlink } from "../render";
 import { collapseSkillTokens, skillChipLabel, skillChipStyle, skillToken } from "../prompt/composer-attachments";
 import { type UserBubbleOptions, UserMessageComponent, userBubbleColor } from "./user-message";

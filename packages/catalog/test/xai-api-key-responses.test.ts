@@ -8,7 +8,8 @@ import { calculateCost, getBundledModels } from "@oh-my-pi/pi-catalog/models";
 import { providerEntry } from "@oh-my-pi/pi-catalog/compat/providers";
 import { DEFAULT_MODEL_PER_PROVIDER } from "@oh-my-pi/pi-catalog/provider-models/descriptors";
 import { xaiModelManagerOptions } from "@oh-my-pi/pi-catalog/provider-models/openai-compat";
-import { type ModelSpec, type Usage } from "@oh-my-pi/pi-catalog/types";
+import { type ModelSpec } from "@oh-my-pi/pi-catalog/types";
+import type { Usage } from "@oh-my-pi/pi-utils/model-data";
 import { applyPricingPeerFallback } from "../scripts/generated-policies";
 
 const XAI_RESPONSES_SPEC: ModelSpec<"openai-responses"> = {

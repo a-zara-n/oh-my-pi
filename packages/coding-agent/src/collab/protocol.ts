@@ -7,7 +7,7 @@
  * control messages that carry no session data.
  */
 
-import type { ImageContent } from "@oh-my-pi/pi-ai";
+import type { ImageContent } from "@oh-my-pi/pi-utils/model-data";
 import type {
 	BusChannel,
 	CollabUiRequest,

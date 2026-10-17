@@ -8,8 +8,8 @@ import { Text } from "../components/text";
 import { Container, type TUI } from "../tui";
 import { sanitizeText } from "@oh-my-pi/pi-utils";
 import { highlightCode, theme } from "../theme/theme";
-import type { OutputArtifactError } from "../tools/streaming-output";
-import type { TruncationMeta } from "../tools/output-meta";
+import type { OutputArtifactError } from "@oh-my-pi/pi-utils/agent-messages";
+import type { TruncationMeta } from "@oh-my-pi/pi-utils/agent-messages";
 import { OutputPane } from "../render/output-pane";
 import {
 	buildExecutionFrame,

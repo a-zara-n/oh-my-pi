@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import type { Api, ModelSpec, Provider } from "@oh-my-pi/pi-catalog/types";
+import type { ModelSpec } from "@oh-my-pi/pi-catalog/types";
+import type { Api, Provider } from "@oh-my-pi/pi-utils/model-data";
 import { applyCanonicalLimitFallback } from "../scripts/generated-policies";
 
 function spec(overrides: {

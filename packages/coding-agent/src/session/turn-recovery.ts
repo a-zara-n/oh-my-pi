@@ -1,23 +1,25 @@
 import {
 	type Agent,
 	AgentBusyError,
-	type AgentMessage,
 	isSyntheticToolResultMessage,
 	type ThinkingLevel,
 } from "@oh-my-pi/pi-agent-core";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import type {
-	AssistantMessage,
-	AssistantRetryRecovery,
-	AssistantRetryRecoveryKind,
 	CodexCompactionContext,
 	Effort,
 	Model,
 	ModelUsageHealth,
+	ToolChoice,
+} from "@oh-my-pi/pi-ai";
+import type {
+	AssistantMessage,
+	AssistantRetryRecovery,
+	AssistantRetryRecoveryKind,
 	TextContent,
 	ThinkingContent,
-	ToolChoice,
 	AnthropicFallbackCreditHandle,
-} from "@oh-my-pi/pi-ai";
+} from "@oh-my-pi/pi-utils/model-data";
 import { calculateRateLimitBackoffMs, parseRateLimitReason } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import type { ModelRequestReason } from "@oh-my-pi/pi-ai/model-request-gate";

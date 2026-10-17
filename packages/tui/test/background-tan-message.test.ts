@@ -1,7 +1,8 @@
 import { beforeAll, describe, expect, it } from "bun:test";
 import { createBackgroundTanDispatchBlock } from "@oh-my-pi/pi-tui/chat/background-tan-message";
 import { initTheme } from "@oh-my-pi/pi-tui/theme";
-import { BACKGROUND_TAN_DISPATCH_MESSAGE_TYPE, type CustomMessage } from "@oh-my-pi/pi-tui/chat/messages";
+import { BACKGROUND_TAN_DISPATCH_MESSAGE_TYPE } from "@oh-my-pi/pi-tui/chat/messages";
+import type { CustomMessage } from "@oh-my-pi/pi-utils/agent-messages";
 
 function dispatchMessage(details: { jobId: string; work: string; sessionFile: string }): CustomMessage<unknown> {
 	return {

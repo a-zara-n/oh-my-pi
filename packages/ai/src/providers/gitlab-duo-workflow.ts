@@ -7,20 +7,16 @@ import {
 import * as AIError from "../error";
 import { parseToolCallArguments } from "../utils/tool-call-arguments";
 import type {
-	Api,
-	AssistantMessage,
 	Context,
 	FetchImpl,
-	Message,
 	Model,
 	ProviderSessionState,
 	StreamFunction,
 	StreamOptions,
 	Tool,
-	ToolCall,
 	ToolChoice,
-	ToolResultMessage,
 } from "../types";
+import type { Api, AssistantMessage, Message, ToolCall, ToolResultMessage } from "@oh-my-pi/pi-utils/model-data";
 import { normalizeSystemPrompts } from "../utils";
 import { AssistantMessageEventStream } from "../utils/event-stream";
 import { auxiliaryFetch } from "../utils/model-request-fetch";

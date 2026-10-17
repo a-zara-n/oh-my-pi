@@ -7,9 +7,10 @@
  * after that response, so the transcript matches what the model saw; anything
  * it declined is injected at the next boundary like ordinary steering.
  */
-import type { LiveSteerClaim, LiveSteering, UserMessage } from "@oh-my-pi/pi-ai";
+import type { LiveSteerClaim, LiveSteering } from "@oh-my-pi/pi-ai";
+import type { UserMessage } from "@oh-my-pi/pi-utils/model-data";
 import { logger } from "@oh-my-pi/pi-utils";
-import type { AgentMessage } from "./types";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 
 /** Steering-queue access for one provider call, supplied by the agent loop. */
 export interface LiveSteeringQueue {

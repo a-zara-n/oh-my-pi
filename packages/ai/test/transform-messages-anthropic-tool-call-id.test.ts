@@ -2,7 +2,8 @@
 // normalize them for the Anthropic target.
 import { describe, expect, it } from "bun:test";
 import { transformMessages } from "@oh-my-pi/pi-ai/providers/transform-messages";
-import type { AssistantMessage, Message, Model, ModelSpec, ToolResultMessage } from "@oh-my-pi/pi-ai/types";
+import type { Model, ModelSpec } from "@oh-my-pi/pi-ai/types";
+import type { AssistantMessage, Message, ToolResultMessage } from "@oh-my-pi/pi-utils/model-data";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 
 const ANTHROPIC_TOOL_CALL_ID = /^[a-zA-Z0-9_-]{1,64}$/;

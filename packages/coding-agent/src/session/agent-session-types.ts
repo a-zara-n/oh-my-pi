@@ -1,24 +1,26 @@
 import type {
 	Agent,
-	AgentMessage,
 	AgentTool,
 	AgentToolContext,
 	StreamFn,
 	ThinkingLevel,
 } from "@oh-my-pi/pi-agent-core";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import type {
-	AssistantMessage,
 	Context,
 	Effort,
-	ImageContent,
-	Message,
-	MessageAttribution,
 	Model,
 	OAuthAccountSummary,
-	ServiceTierByFamily,
 	SimpleStreamOptions,
 	ToolChoice,
 } from "@oh-my-pi/pi-ai";
+import type {
+	AssistantMessage,
+	ImageContent,
+	Message,
+	MessageAttribution,
+	ServiceTierByFamily,
+} from "@oh-my-pi/pi-utils/model-data";
 import type { ModelRequestExecution } from "@oh-my-pi/pi-ai/model-request-execution";
 import type { postmortem } from "@oh-my-pi/pi-utils";
 import type { AdvisorConfig } from "@oh-my-pi/pi-tui/overlays/advisor-config";

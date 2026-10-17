@@ -4,18 +4,14 @@ import * as AIError from "../error";
 import { parseToolCallArguments } from "../utils/tool-call-arguments";
 import { getEnvApiKey } from "../env-api-key";
 import type {
-	Api,
-	AssistantMessage,
 	Context,
-	ImageContent,
-	Message,
 	Model,
 	StreamFunction,
 	StreamOptions,
-	TextContent,
 	Tool,
 	ToolChoice,
 } from "../types";
+import type { Api, AssistantMessage, ImageContent, Message, TextContent } from "@oh-my-pi/pi-utils/model-data";
 import { normalizeSystemPrompts } from "../utils";
 import { clearStreamingPartialJson, kStreamingPartialJson } from "@oh-my-pi/pi-utils/model-data";
 import { withReplaySafeStreamRetry } from "../utils/empty-completion-retry";

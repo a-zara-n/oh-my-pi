@@ -17,8 +17,8 @@
  * - history://<agentId> - Concise markdown transcript of that agent
  * - history://current/full - Full, caller-bound current branch history (experimental)
  */
-import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import type { AssistantMessage } from "@oh-my-pi/pi-ai";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
+import type { AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import { LRUCache } from "@oh-my-pi/pi-utils/lru";
 import type { AgentRef } from "../registry/agent-registry";
 import { AgentRegistry } from "../registry/agent-registry";
@@ -27,14 +27,16 @@ import { formatSessionHistoryMarkdown } from "../session/session-history-format"
 import {
 	bashExecutionToText,
 	pythonExecutionToText,
-	type BashExecutionMessage,
-	type BranchSummaryMessage,
-	type CompactionSummaryMessage,
-	type CustomMessage,
-	type FileMentionMessage,
-	type HookMessage,
-	type PythonExecutionMessage,
 } from "../session/messages";
+import type {
+	BashExecutionMessage,
+	BranchSummaryMessage,
+	CompactionSummaryMessage,
+	CustomMessage,
+	FileMentionMessage,
+	HookMessage,
+	PythonExecutionMessage,
+} from "@oh-my-pi/pi-utils/agent-messages";
 import { loadSessionMessagesReadOnly } from "../session/session-loader";
 import type { SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
 import historyPromptDoc from "../prompts/internal-urls/history.md" with { type: "text" };

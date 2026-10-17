@@ -13,7 +13,8 @@ import {
 	getNextTimeBasedPricingTransition,
 	getTimeBasedPricingPeriod,
 } from "@oh-my-pi/pi-catalog/models";
-import type { ModelCost, ModelSpec, Usage } from "@oh-my-pi/pi-catalog/types";
+import type { ModelCost, ModelSpec } from "@oh-my-pi/pi-catalog/types";
+import type { Usage } from "@oh-my-pi/pi-utils/model-data";
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { isTimeBasedCost, materializeTimeBasedCost } from "../src/pricing";
 

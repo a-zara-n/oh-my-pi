@@ -25,7 +25,6 @@ import {
 	type Agent,
 	AgentBusyError,
 	type AgentEvent,
-	type AgentMessage,
 	type AgentState,
 	type AgentTool,
 	type AgentToolCall,
@@ -44,6 +43,7 @@ import {
 	type ThinkingLevel,
 	type ToolChoiceDirective,
 } from "@oh-my-pi/pi-agent-core";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import {
 	type CompactionPreparation,
 	type CompactionResult,
@@ -53,14 +53,9 @@ import {
 	type ShakeConfig,
 } from "@oh-my-pi/pi-agent-core/compaction";
 import type {
-	AnthropicFallbackCreditHandle,
-	AssistantMessage,
 	CodexCompactionContext,
 	Context,
-	ImageContent,
 	Judge,
-	Message,
-	MessageAttribution,
 	Model,
 	OAuthAccountIdentity,
 	ProviderResponseMetadata,
@@ -68,17 +63,24 @@ import type {
 	ResetCreditAccountStatus,
 	ResetCreditRedeemOutcome,
 	ResetCreditTarget,
+	SimpleStreamOptions,
+	ToolChoice,
+	UsageReport,
+} from "@oh-my-pi/pi-ai";
+import type {
+	AnthropicFallbackCreditHandle,
+	AssistantMessage,
+	ImageContent,
+	Message,
+	MessageAttribution,
 	ServiceTier,
 	ServiceTierByFamily,
 	ServiceTierFamily,
-	SimpleStreamOptions,
 	TextContent,
 	ToolCall,
-	ToolChoice,
 	ToolResultMessage,
-	UsageReport,
 	UserMessage,
-} from "@oh-my-pi/pi-ai";
+} from "@oh-my-pi/pi-utils/model-data";
 import { type Effort, serviceTierFamily, streamSimple } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { resetOpenAICodexHistoryAfterCompaction } from "@oh-my-pi/pi-ai/providers/openai-codex-responses";
@@ -88,7 +90,7 @@ import {
 	type ModelRequestExecution,
 	runWithModelRequestExecution,
 } from "@oh-my-pi/pi-ai/model-request-execution";
-import type { ModelRequestPurpose } from "@oh-my-pi/pi-ai/model-request-gate";
+import type { ModelRequestPurpose } from "@oh-my-pi/pi-utils/model-request-data";
 import { toolWireSchema } from "@oh-my-pi/pi-ai/utils/schema";
 import { supportsOutputTokenLimit } from "@oh-my-pi/pi-catalog/compat/output-limits";
 import { requiresNativeTools, requiresToolFreeHistoryForToolOptOut } from "@oh-my-pi/pi-catalog/compat/tools";
@@ -301,7 +303,8 @@ import type {
 } from "./agent-session-types";
 import { writeArtifact } from "./artifacts";
 import { renderAttachmentSourceNotice } from "./attachment-source-notice";
-import { formatArtifactErrorNotice, type OutputMeta, stripOutputNotice } from "@oh-my-pi/pi-tui/tools/output-meta";
+import { formatArtifactErrorNotice, stripOutputNotice } from "@oh-my-pi/pi-tui/tools/output-meta";
+import type { OutputMeta } from "@oh-my-pi/pi-utils/agent-messages";
 import { truncateMiddle } from "@oh-my-pi/pi-tui/tools/streaming-output";
 import {
 	ASYNC_INLINE_RESULT_MAX_CHARS,
@@ -358,17 +361,12 @@ import {
 } from "./launch-completion";
 import { childModelRequestRootOf, type ModelRequestRootAssignment, withModelRequestExecution } from "./model-request-context";
 import {
-	type BashExecutionMessage,
 	buildReplanTitleContext,
 	CHECKPOINT_ACTIVE_REMINDER_TYPE,
-	type CustomMessage,
-	type CustomMessagePayload,
 	convertToLlm,
 	dedupeEphemeralReply,
 	demoteInterruptedThinking,
 	didSessionMessagesChange,
-	type FileMentionMessage,
-	type HookMessage,
 	INTERRUPTED_THINKING_MESSAGE_TYPE,
 	type InterruptedThinkingDetails,
 	isEmptyErrorTurn,
@@ -378,13 +376,20 @@ import {
 	logProviderTurnError,
 	normalizeCustomMessagePayload,
 	operatorTitleText,
-	type PythonExecutionMessage,
 	SILENT_ABORT_MARKER,
 	SKILL_PROMPT_MESSAGE_TYPE,
 	sanitizeAssistantForReparentedHistory,
 	USER_INTERRUPT_LABEL,
 	VIBE_MODE_CONTEXT_MESSAGE_TYPE,
 } from "./messages";
+import type {
+	BashExecutionMessage,
+	CustomMessage,
+	CustomMessagePayload,
+	FileMentionMessage,
+	HookMessage,
+	PythonExecutionMessage,
+} from "@oh-my-pi/pi-utils/agent-messages";
 import { ModelControls, type ModelControlsHost } from "./model-controls";
 import {
 	isPrewalkPlanNudge,

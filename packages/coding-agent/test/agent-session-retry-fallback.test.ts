@@ -5,16 +5,18 @@ import { type } from "@oh-my-pi/omptype";
 import { Agent, type AgentTool } from "@oh-my-pi/pi-agent-core";
 import { createCompactionSummaryMessage } from "@oh-my-pi/pi-agent-core/compaction";
 import {
-	type AnthropicFallbackCreditHandle,
-	type Api,
-	type AssistantMessage,
 	Effort,
-	type Message,
 	type Model,
 	type ModelUsageHealth,
 	type ProviderSessionState,
-	type ToolCall,
 } from "@oh-my-pi/pi-ai";
+import type {
+	AnthropicFallbackCreditHandle,
+	Api,
+	AssistantMessage,
+	Message,
+	ToolCall,
+} from "@oh-my-pi/pi-utils/model-data";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { buildParams } from "@oh-my-pi/pi-ai/providers/openai-responses";

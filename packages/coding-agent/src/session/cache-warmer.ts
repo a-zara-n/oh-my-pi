@@ -17,15 +17,13 @@
  * providers whose replay behavior is unvalidated are never touched.
  */
 import {
-	type Api,
-	type AssistantMessage,
 	type AssistantMessageEvent,
 	type Context,
 	type Model,
 	resolveCacheRetention,
 	type SimpleStreamOptions,
-	type Usage,
 } from "@oh-my-pi/pi-ai";
+import type { Api, AssistantMessage, Usage } from "@oh-my-pi/pi-utils/model-data";
 import { createModelRequestRetryChain, runInModelRequestRetryChain } from "@oh-my-pi/pi-ai/model-request-execution";
 import { calculateCost } from "@oh-my-pi/pi-catalog/models";
 import { isAnthropicOAuthToken } from "@oh-my-pi/pi-catalog/utils";

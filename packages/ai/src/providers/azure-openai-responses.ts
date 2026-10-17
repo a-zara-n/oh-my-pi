@@ -2,14 +2,13 @@ import { $env, type ServerSentEvent } from "@oh-my-pi/pi-utils";
 import * as AIError from "../error";
 import { getEnvApiKey } from "../env-api-key";
 import type {
-	AssistantMessage,
 	Context,
 	Model,
-	ServiceTier,
 	StreamFunction,
 	StreamOptions,
 	ToolChoice,
 } from "../types";
+import type { AssistantMessage, ServiceTier } from "@oh-my-pi/pi-utils/model-data";
 import { resolveCacheRetention } from "../utils";
 import { createAbortSourceTracker } from "../utils/abort";
 import { withReplaySafeStreamRetry } from "../utils/empty-completion-retry";

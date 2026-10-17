@@ -31,7 +31,7 @@ import {
 	type SessionStorage,
 	type SessionStorageWriter,
 	type WriteTextAtomicOptions,
-} from "@oh-my-pi/pi-coding-agent/session/session-storage";
+} from "@oh-my-pi/pi-utils/model-request-journal-composition";
 import type { SessionTitleUpdate } from "@oh-my-pi/pi-utils/session-title-slot";
 
 class CloseHoldingStorage implements SessionStorage {

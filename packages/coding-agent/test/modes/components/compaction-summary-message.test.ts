@@ -5,7 +5,7 @@ import {
 	HandoffSummaryMessageComponent,
 } from "@oh-my-pi/pi-tui/chat/compaction-summary-message";
 import { initTheme } from "@oh-my-pi/pi-tui/theme";
-import type { CustomMessage } from "@oh-my-pi/pi-coding-agent/session/messages";
+import type { CustomMessage } from "@oh-my-pi/pi-utils/agent-messages";
 
 beforeAll(async () => {
 	resetSettingsForTest();

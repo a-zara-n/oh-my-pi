@@ -15,7 +15,8 @@ import { describe, expect, test } from "bun:test";
 import { isCollapsedVariantSpec } from "../src/compat/collapse";
 import { resolveModelPolicy } from "../src/compat/resolve";
 import models from "../src/models.json";
-import type { Api, Model, ModelSpec } from "../src/types";
+import type { Model, ModelSpec } from "../src/types";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 
 /** Fields introduced by the compat engine — absent from pre-engine baked rows. */
 const NEW_COMPAT_FIELDS = new Set([

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, setSystemTime } from "bun:test";
-import type { Api, AssistantMessage, Context, Message, Model, ModelSpec } from "@oh-my-pi/pi-ai";
+import type { Context, Model, ModelSpec } from "@oh-my-pi/pi-ai";
+import type { Api, AssistantMessage, Message } from "@oh-my-pi/pi-utils/model-data";
 import { clearCustomApis, registerCustomApi } from "@oh-my-pi/pi-ai";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";

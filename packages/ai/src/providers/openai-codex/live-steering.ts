@@ -17,7 +17,8 @@
  * ```
  */
 import { logger } from "@oh-my-pi/pi-utils";
-import type { LiveSteering, UserMessage } from "../../types";
+import type { LiveSteering } from "../../types";
+import type { UserMessage } from "@oh-my-pi/pi-utils/model-data";
 import type { InputItem } from "./request-transformer";
 
 /** Server acknowledgement of one `response.steer` submission. */

@@ -1,4 +1,4 @@
-import type { Message, ToolCall } from "../types";
+import type { Message, ToolCall } from "@oh-my-pi/pi-utils/model-data";
 import { mintToolCallId, partialSuffixOverlapAny } from "./coercion";
 import { FencedThinkingScanner } from "./fenced-thinking";
 import dialectPrompt from "./gemini.md" with { type: "text" };

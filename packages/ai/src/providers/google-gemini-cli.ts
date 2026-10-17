@@ -16,17 +16,13 @@ import {
 import { extractHttpStatusFromError, fetchWithRetry, readSseJson } from "@oh-my-pi/pi-utils";
 import * as AIError from "../error";
 import type {
-	Api,
-	AssistantMessage,
 	Context,
 	Model,
 	ProviderSessionState,
 	StreamFunction,
 	StreamOptions,
-	TextContent,
-	ThinkingContent,
-	ToolCall,
 } from "../types";
+import type { Api, AssistantMessage, TextContent, ThinkingContent, ToolCall } from "@oh-my-pi/pi-utils/model-data";
 import { normalizeSystemPrompts } from "../utils";
 import { AssistantMessageEventStream } from "../utils/event-stream";
 import { extractGoogleValidationUrl, formatGoogleValidationRequiredMessage } from "../utils/google-validation";

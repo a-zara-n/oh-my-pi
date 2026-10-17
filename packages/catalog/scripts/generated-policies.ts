@@ -15,7 +15,8 @@ import { bareModelId, getLongestModelLikeIdSegment } from "../src/identity/id";
 import { buildModelReferenceIndex, resolveModelReference } from "../src/identity/reference";
 import { isOllamaCloudOutputCapped, OLLAMA_CLOUD_MAX_OUTPUT_TOKENS } from "../src/provider-models/ollama";
 import { providerEntry } from "../src/compat/providers";
-import type { Api, Model, ModelSpec } from "../src/types";
+import type { Model, ModelSpec } from "../src/types";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 import { buildCanonicalModelIndex, buildCanonicalReferenceData } from "./equivalence";
 
 function revisionsEqual(left: string | undefined, right: string): boolean {

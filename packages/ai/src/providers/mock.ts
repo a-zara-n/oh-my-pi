@@ -46,20 +46,22 @@ import { classifyModel } from "@oh-my-pi/pi-catalog/compat/taxonomy";
 import { registerCustomApi } from "../api-registry";
 import * as AIError from "../error";
 import type {
+	Context,
+	Model,
+	SimpleStreamOptions,
+} from "../types";
+import type {
 	AnthropicFallbackCreditHandle,
 	Api,
 	AssistantMessage,
-	Context,
-	Model,
 	ServiceTier,
-	SimpleStreamOptions,
 	StopDetails,
 	StopReason,
 	TextContent,
 	ThinkingContent,
 	ToolCall,
 	Usage,
-} from "../types";
+} from "@oh-my-pi/pi-utils/model-data";
 import { AssistantMessageEventStream } from "../utils/event-stream";
 
 /** The API string this provider serves. */

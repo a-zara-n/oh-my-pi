@@ -1,15 +1,17 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { renderDemotedThinking } from "../dialect/demotion";
 import type {
+	Model,
+} from "../types";
+import type {
 	Api,
 	AssistantMessage,
 	DeveloperMessage,
 	Message,
-	Model,
 	ToolCall,
 	ToolResultMessage,
 	UserMessage,
-} from "../types";
+} from "@oh-my-pi/pi-utils/model-data";
 import { isDemotedThinking, kDemotedThinking, kSyntheticUser, type SyntheticUserCarrier } from "../utils/block-symbols";
 
 const enum ToolCallStatus {

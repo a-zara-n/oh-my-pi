@@ -1,6 +1,7 @@
-import type { ToolResultMessage } from "@oh-my-pi/pi-ai";
-import type { AgentMessage, AgentToolCall } from "../types";
-import type { SessionEntry } from "./entries";
+import type { ToolResultMessage } from "@oh-my-pi/pi-utils/model-data";
+import type { AgentToolCall } from "../types";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
+import type { SessionEntry } from "@oh-my-pi/pi-utils/compaction-entries";
 
 export interface ProtectedToolContext {
 	readonly toolResult: ToolResultMessage;

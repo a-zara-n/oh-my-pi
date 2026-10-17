@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { streamDevin } from "@oh-my-pi/pi-ai/providers/devin";
-import type { Context, Model, ToolCall } from "@oh-my-pi/pi-ai/types";
+import type { Context, Model } from "@oh-my-pi/pi-ai/types";
+import type { ToolCall } from "@oh-my-pi/pi-utils/model-data";
 import { validateToolArguments } from "@oh-my-pi/pi-ai/utils/validation";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import {

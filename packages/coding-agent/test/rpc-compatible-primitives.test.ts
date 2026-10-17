@@ -5,7 +5,7 @@ import { selectRpcEntries } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-compat
 import { RpcWordPredictor } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-mode";
 import type { TextPrediction } from "@oh-my-pi/pi-coding-agent/predict/client";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { FileSessionStorage } from "@oh-my-pi/pi-coding-agent/session/session-storage";
+import { FileSessionStorage } from "@oh-my-pi/pi-utils/model-request-journal-composition";
 import type { SessionEntry } from "@oh-my-pi/pi-utils/session-entries";
 import type { SessionTreeNode } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 

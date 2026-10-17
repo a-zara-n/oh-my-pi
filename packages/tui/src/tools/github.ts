@@ -595,7 +595,7 @@ export const githubToolRenderer = {
 	mergeCallAndResult: true,
 } satisfies ToolRenderer<GithubToolRenderArgs, GhToolDetails>;
 
-import type { OutputMeta } from "./output-meta";
+import type { OutputMeta } from "@oh-my-pi/pi-utils/agent-messages";
 import type { IsoBackendKind } from "@oh-my-pi/pi-natives";
 /** Display metadata for GitHub operations. */
 export interface GhToolDetails {

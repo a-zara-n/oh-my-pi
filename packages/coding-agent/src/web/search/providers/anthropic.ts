@@ -7,7 +7,6 @@
 import {
 	type AnthropicAuthConfig,
 	type AnthropicSystemBlock,
-	type Api,
 	type ApiKey,
 	type AuthStorage,
 	buildAnthropicAuthConfig,
@@ -19,6 +18,7 @@ import {
 	stripClaudeToolPrefix,
 	withAuth,
 } from "@oh-my-pi/pi-ai";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 import { buildAnthropicSystemBlocks, wrapFetchForCch } from "@oh-my-pi/pi-ai/providers/anthropic";
 import { compareRevision, parseRevision } from "@oh-my-pi/pi-catalog/identity";
 import { $env } from "@oh-my-pi/pi-utils";

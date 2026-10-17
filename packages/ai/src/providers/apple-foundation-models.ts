@@ -15,16 +15,13 @@ import { parseStreamingJsonThrottled } from "@oh-my-pi/pi-utils";
 import * as AIError from "../error";
 import { parseToolCallArguments } from "../utils/tool-call-arguments";
 import type {
-	AssistantMessage,
 	Context,
-	ImageContent,
-	Message,
 	Model,
 	StreamFunction,
 	StreamOptions,
-	TextContent,
 	ToolChoice,
 } from "../types";
+import type { AssistantMessage, ImageContent, Message, TextContent } from "@oh-my-pi/pi-utils/model-data";
 import { normalizeSystemPrompts } from "../utils";
 import { kStreamingLastParseLen } from "../utils/block-symbols";
 import { clearStreamingPartialJson, kStreamingPartialJson } from "@oh-my-pi/pi-utils/model-data";

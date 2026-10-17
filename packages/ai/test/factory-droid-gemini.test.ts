@@ -4,7 +4,8 @@ import { type FactoryDroidGeminiOptions, streamFactoryDroidGemini } from "../src
 import * as AIError from "../src/error";
 import { SKIP_THOUGHT_SIGNATURE } from "../src/providers/google-shared";
 import { withCredentialRedaction } from "../src/providers/transform-messages";
-import type { AssistantMessage, Context, Model, StopReason, ToolResultMessage } from "../src/types";
+import type { Context, Model } from "../src/types";
+import type { AssistantMessage, StopReason, ToolResultMessage } from "@oh-my-pi/pi-utils/model-data";
 import { type CapturedRequest, captureFetch, finishChunk, gemini } from "./helpers/factory-droid";
 
 type Contents = Array<{ role: string; parts: Array<Record<string, unknown>> }>;

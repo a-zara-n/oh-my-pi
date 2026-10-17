@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { buildModel } from "../src/build";
 import { seedModels } from "../src/compat/providers";
-import type { Api, ModelSpec } from "../src/types";
+import type { ModelSpec } from "../src/types";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 
 function chatSpec(provider: string, api: Api, id = "policy-probe"): ModelSpec<Api> {
 	return {

@@ -9,7 +9,8 @@
  * references, both of which would be wrong for canonical coalescing.
  */
 import { collapseVocabulary, discoveryVocabulary } from "../compat/taxonomy";
-import type { Api, Model, ThinkingConfig } from "../types";
+import type { Model, ThinkingConfig } from "../types";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 import { getBracketStrippedModelIdCandidates, getLongestModelLikeIdSegment, getModelLikeIdSegments } from "./id";
 export interface ModelReferenceIndex {
 	exact: Map<string, Model<Api>>;

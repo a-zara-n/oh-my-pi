@@ -1,5 +1,5 @@
 import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
-import type { TextContent } from "@oh-my-pi/pi-ai";
+import type { TextContent } from "@oh-my-pi/pi-utils/model-data";
 import {
 	type ArchiveFormat,
 	type ArchiveReader,

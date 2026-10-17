@@ -10,7 +10,7 @@
  */
 import type { KnownProvider } from "../compat/provider-ids";
 import { providerEntries, providerEntry } from "../compat/providers";
-import type { Api } from "../types";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 import type { ModelManagerOptions } from "../model-manager";
 import type { ModelManagerConfig, ProviderDescriptor } from "./descriptor-types";
 import { googleModelManagerOptions, googleVertexModelManagerOptions } from "./google";

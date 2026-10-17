@@ -1,4 +1,5 @@
-import type { Api, Model, ProviderResponseMetadata, StreamOptions } from "../types";
+import type { Model, ProviderResponseMetadata, StreamOptions } from "../types";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 
 export function normalizeProviderResponse(
 	response: Response,

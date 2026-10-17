@@ -1,5 +1,5 @@
-import type { ToolResultMessage } from "@oh-my-pi/pi-ai";
-import type { AgentMessage } from "./types";
+import type { ToolResultMessage } from "@oh-my-pi/pi-utils/model-data";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 
 /**
  * Symbol-keyed carrier for passive context reported by a tool executed outside

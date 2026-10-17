@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { buildResponsesInput } from "@oh-my-pi/pi-ai/providers/openai-shared";
-import type { Context, ImageContent, ModelSpec, TextContent } from "@oh-my-pi/pi-ai/types";
+import type { Context, ModelSpec } from "@oh-my-pi/pi-ai/types";
+import type { ImageContent, TextContent } from "@oh-my-pi/pi-utils/model-data";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 
 const model = buildModel({

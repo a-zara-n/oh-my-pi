@@ -1,10 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
-	type CompactionEntry,
 	DEFAULT_COMPACTION_SETTINGS,
 	prepareCompaction,
-	type SessionEntry,
 } from "@oh-my-pi/pi-agent-core/compaction";
+import type { CompactionEntry, SessionEntry } from "@oh-my-pi/pi-utils/compaction-entries";
 import { createAssistantMessage, createUserMessage } from "./helpers";
 
 let seq = 0;

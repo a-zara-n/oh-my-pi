@@ -1,4 +1,4 @@
-import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import { stableStringifyJson } from "@oh-my-pi/pi-utils";
 import { type Goal } from "@oh-my-pi/pi-tui/tools/goal";
 import type { UsageStatistics } from "@oh-my-pi/pi-utils/session-entries";

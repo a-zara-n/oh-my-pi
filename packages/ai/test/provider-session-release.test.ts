@@ -4,7 +4,8 @@ import {
 	getOpenAICodexTransportDetails,
 	streamOpenAICodexResponses,
 } from "@oh-my-pi/pi-ai/providers/openai-codex-responses";
-import type { Message, Model, ProviderSessionState } from "@oh-my-pi/pi-ai/types";
+import type { Model, ProviderSessionState } from "@oh-my-pi/pi-ai/types";
+import type { Message } from "@oh-my-pi/pi-utils/model-data";
 import { createCodexModel } from "./helpers";
 
 describe("provider routing session release", () => {

@@ -32,14 +32,13 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { parseArgs } from "node:util";
 import {
-	type Api,
 	AuthStorage,
 	completeSimple,
 	type Model,
 	SqliteAuthCredentialStore,
 	type Tool,
-	type ToolCall,
 } from "@oh-my-pi/pi-ai";
+import type { Api, ToolCall } from "@oh-my-pi/pi-utils/model-data";
 import { type GeneratedProvider, getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { getAgentDbPath, isEnoent } from "@oh-my-pi/pi-utils";
 import SYSTEM_PROMPT from "./audit-prompt.md" with { type: "text" };

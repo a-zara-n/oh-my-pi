@@ -1,5 +1,5 @@
 import { stringifyJson as stringifyJsonValue } from "@oh-my-pi/pi-utils";
-import type { AssistantMessage, Message, ToolCall, ToolResultMessage } from "../types";
+import type { AssistantMessage, Message, ToolCall, ToolResultMessage } from "@oh-my-pi/pi-utils/model-data";
 import { buildArgShapes, type ToolArgShape } from "./coercion";
 import type { DialectRenderOptions, DialectToolResult } from "./types";
 

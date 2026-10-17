@@ -3,7 +3,8 @@ export { type HookMessageRenderOptions, type HookMessageRenderer } from "@oh-my-
 import type { type as ArkType } from "@oh-my-pi/omptype";
 import type * as TypeBox from "@oh-my-pi/omptype/typebox";
 import type * as zod from "@oh-my-pi/omptype/zod";
-import type { ImageContent, Message, Model, TextContent } from "@oh-my-pi/pi-ai";
+import type { Model } from "@oh-my-pi/pi-ai";
+import type { ImageContent, Message, TextContent } from "@oh-my-pi/pi-utils/model-data";
 import type { Component, TUI } from "@oh-my-pi/pi-tui";
 import type { logger as PiLogger } from "@oh-my-pi/pi-utils";
 import type { KeybindingsManager } from "@oh-my-pi/pi-tui/app-keybindings";
@@ -12,7 +13,7 @@ import type { EditToolDetails } from "@oh-my-pi/pi-tui/tools/edit";
 import type { ExecOptions, ExecResult } from "../../exec/exec";
 import type * as PiCodingAgent from "../../index";
 import type { Theme } from "@oh-my-pi/pi-tui/theme";
-import type { CustomMessagePayload } from "../../session/messages";
+import type { CustomMessagePayload } from "@oh-my-pi/pi-utils/agent-messages";
 import type { ReadonlySessionManager, SessionManager } from "../../session/session-manager";
 import type { BashToolDetails } from "@oh-my-pi/pi-tui/tools/bash";
 import type { GlobToolDetails } from "@oh-my-pi/pi-tui/tools/glob";

@@ -32,7 +32,8 @@
 import * as path from "node:path";
 import { parseArgs } from "node:util";
 import { type } from "@oh-my-pi/omptype";
-import { type Api, completeSimple, Effort, type Model, type Tool, type ToolCall } from "@oh-my-pi/pi-ai";
+import { completeSimple, Effort, type Model, type Tool } from "@oh-my-pi/pi-ai";
+import type { Api, ToolCall } from "@oh-my-pi/pi-utils/model-data";
 import { discoverAuthStorage } from "@oh-my-pi/pi-ai/auth-broker";
 import { type GeneratedProvider, getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import {

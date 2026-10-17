@@ -7,20 +7,18 @@ import {
 	type ModelRequestAttempt,
 	type ModelRequestDecision,
 	ModelRequestDeniedError,
-	type ModelRequestModelRef,
 	type ModelRequestWire,
 } from "@oh-my-pi/pi-ai/model-request-gate";
+import type { ModelRequestModelRef } from "@oh-my-pi/pi-utils/model-request-data";
 import { complete, completeSimple, stream, streamSimple } from "@oh-my-pi/pi-ai/stream";
 import type {
-	Api,
-	AssistantMessage,
 	AssistantMessageEvent,
 	Context,
 	FetchImpl,
 	Model,
 	SimpleStreamOptions,
-	Usage,
 } from "@oh-my-pi/pi-ai/types";
+import type { Api, AssistantMessage, Usage } from "@oh-my-pi/pi-utils/model-data";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import * as bedrockProvider from "@oh-my-pi/pi-ai/providers/amazon-bedrock";
 import * as cursorProvider from "@oh-my-pi/pi-ai/providers/cursor";

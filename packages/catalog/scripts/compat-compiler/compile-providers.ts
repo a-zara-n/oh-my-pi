@@ -25,12 +25,11 @@ import type {
 import {
 	KIND_API_KINDS,
 	RUNNER_APIS,
-	type Api,
 	type KindApiKind,
-	type KnownApi,
 	runnerApiKind,
 	type TokenCost,
 } from "../../src/types";
+import type { Api, KnownApi } from "@oh-my-pi/pi-utils/model-data";
 import { axisFor, collectAxis, type RuleAxes } from "./compile-axes";
 import {
 	CompatCompileError,

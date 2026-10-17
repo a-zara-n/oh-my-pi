@@ -1,12 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import {
-	type BranchSummaryEntry,
-	type CustomMessageEntry,
 	DEFAULT_COMPACTION_SETTINGS,
 	findCutPoint,
 	prepareCompaction,
-	type SessionMessageEntry,
 } from "@oh-my-pi/pi-agent-core/compaction";
+import type {
+	BranchSummaryEntry,
+	CustomMessageEntry,
+	SessionMessageEntry,
+} from "@oh-my-pi/pi-utils/compaction-entries";
 import { Tokenizer } from "@oh-my-pi/pi-agent-core/tokenizer";
 import { createAssistantMessage } from "./helpers";
 

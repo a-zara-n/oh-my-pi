@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "bun:test";
 import type { Agent, AgentEvent } from "@oh-my-pi/pi-agent-core";
-import type { AssistantMessage, Judge, JudgmentRequest, NoulAnswer } from "@oh-my-pi/pi-ai";
+import type { Judge, JudgmentRequest, NoulAnswer } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import type { Rule } from "@oh-my-pi/pi-coding-agent/capability/rule";
 import type { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { JUDGED_CONTENT_MAX_TOKENS, TtsrManager } from "@oh-my-pi/pi-coding-agent/export/ttsr";

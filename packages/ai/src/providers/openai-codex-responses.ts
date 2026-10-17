@@ -27,8 +27,6 @@ import { parseToolCallArguments, replayableToolCallArguments } from "../utils/to
 import { getEnvApiKey } from "../env-api-key";
 import { isOfficialCodexApiUrl } from "../stream";
 import type {
-	Api,
-	AssistantMessage,
 	CodexCompactionContext,
 	CodexCompactionRequestContext,
 	Context,
@@ -36,17 +34,21 @@ import type {
 	Model,
 	ProviderSessionState,
 	RawSseEvent,
-	ServiceTier,
 	StreamFunction,
 	StreamOptions,
+	Tool,
+	ToolChoice,
+} from "../types";
+import type {
+	Api,
+	AssistantMessage,
+	ServiceTier,
 	TextContent,
 	ThinkingContent,
-	Tool,
 	ToolCall,
-	ToolChoice,
 	ToolResultMessage,
 	Usage,
-} from "../types";
+} from "@oh-my-pi/pi-utils/model-data";
 import { getPremiumServiceTierRequests, parseServiceTier } from "../types";
 import {
 	clampOpenAIResponsesImageDetailForReplay,

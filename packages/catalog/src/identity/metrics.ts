@@ -17,7 +17,8 @@
  * happens to be scored.
  */
 import type { ModelIdentity } from "../compat/types";
-import type { Api, Model } from "../types";
+import type { Model } from "../types";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 import { bareModelId } from "./id";
 import { getReferenceCandidateIds } from "./reference";
 

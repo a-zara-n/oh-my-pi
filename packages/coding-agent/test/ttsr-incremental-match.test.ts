@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "bun:test";
-import type { ToolCall } from "@oh-my-pi/pi-ai";
+import type { ToolCall } from "@oh-my-pi/pi-utils/model-data";
 import type { Rule } from "@oh-my-pi/pi-coding-agent/capability/rule";
 import { TtsrManager, type TtsrMatchContext } from "@oh-my-pi/pi-coding-agent/export/ttsr";
 import { type TtsrTool, TtsrToolInspector } from "@oh-my-pi/pi-coding-agent/session/ttsr-outputs";

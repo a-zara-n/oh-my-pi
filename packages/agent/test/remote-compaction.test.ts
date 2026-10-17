@@ -8,8 +8,8 @@ import {
 	DEFAULT_COMPACTION_SETTINGS,
 	NativeCompactionError,
 	prepareCompaction,
-	type SessionEntry,
 } from "@oh-my-pi/pi-agent-core/compaction";
+import type { SessionEntry } from "@oh-my-pi/pi-utils/compaction-entries";
 import {
 	buildCompactionV2Request,
 	buildOpenAiNativeHistory,
@@ -32,14 +32,12 @@ import {
 	getOpenAICodexTransportDetails,
 } from "@oh-my-pi/pi-ai/providers/openai-codex-responses";
 import type {
-	AssistantMessage,
 	CodexCompactionContext,
 	FetchImpl,
 	Model,
 	ProviderSessionState,
-	ToolResultMessage,
-	UserMessage,
 } from "@oh-my-pi/pi-ai/types";
+import type { AssistantMessage, ToolResultMessage, UserMessage } from "@oh-my-pi/pi-utils/model-data";
 import { __resetProxyCache } from "@oh-my-pi/pi-ai/utils/proxy";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import type { ModelSpec } from "@oh-my-pi/pi-catalog/types";

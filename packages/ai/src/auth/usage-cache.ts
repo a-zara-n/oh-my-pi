@@ -1,7 +1,7 @@
 import type { AuthCredentialStore } from "./store";
 import type { AuthCredential, OAuthCredential } from "./types";
 import type { CredentialPool } from "./pool";
-import type { Provider } from "../types";
+import type { Provider } from "@oh-my-pi/pi-utils/model-data";
 import type { UsageCredential, UsageProvider, UsageReport } from "../usage";
 
 const USAGE_CACHE_PREFIX = "usage_cache:";

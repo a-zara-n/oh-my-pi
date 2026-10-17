@@ -30,7 +30,7 @@ import {
 	type SessionStorageWriteOptions,
 	type SessionStorageWriter,
 	type WriteTextAtomicOptions,
-} from "@oh-my-pi/pi-coding-agent/session/session-storage";
+} from "@oh-my-pi/pi-utils/model-request-journal-composition";
 
 /**
  * Minimal in-memory `SessionStorage` whose `openWriter()` captures the

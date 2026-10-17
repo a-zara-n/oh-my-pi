@@ -12,7 +12,8 @@
  * The generated prompt appears as a draft in the editor for review/editing.
  */
 import { serializeConversation } from "@oh-my-pi/pi-agent-core/compaction";
-import { complete, type Message } from "@oh-my-pi/pi-ai";
+import { complete } from "@oh-my-pi/pi-ai";
+import type { Message } from "@oh-my-pi/pi-utils/model-data";
 import type { SessionEntry } from "@oh-my-pi/pi-coding-agent";
 import { BorderedLoader, convertToLlm } from "@oh-my-pi/pi-coding-agent";
 import type { HookAPI } from "@oh-my-pi/pi-coding-agent/extensibility/hooks";

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs/promises";
-import type { ImageContent } from "@oh-my-pi/pi-ai";
+import type { ImageContent } from "@oh-my-pi/pi-utils/model-data";
 import { BlobStore } from "@oh-my-pi/pi-coding-agent/session/blob-store";
 import type { SessionMessageEntry } from "@oh-my-pi/pi-utils/session-entries";
 import {

@@ -7,13 +7,11 @@ import * as path from "node:path";
 import * as url from "node:url";
 
 import {
-	type Api,
-	type AssistantMessage,
 	completeSimple,
-	type Message,
 	type Model,
 	retryTransientCompletion,
 } from "@oh-my-pi/pi-ai";
+import type { Api, AssistantMessage, Message } from "@oh-my-pi/pi-utils/model-data";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import {
 	createModelRequestRetryChain,

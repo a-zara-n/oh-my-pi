@@ -1,7 +1,6 @@
 import { classifyModel } from "./compat/taxonomy";
 import MODELS from "./models.json" with { type: "json" };
 import type {
-	Api,
 	EffectiveTokenCost,
 	KnownProvider,
 	Model,
@@ -9,8 +8,8 @@ import type {
 	ModelPricingStatus,
 	TimeBasedCost,
 	TokenCost,
-	Usage,
 } from "./types";
+import type { Api, Usage } from "@oh-my-pi/pi-utils/model-data";
 
 /**
  * Static bundled model registry loaded from `models.json`.

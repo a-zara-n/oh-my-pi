@@ -1,5 +1,6 @@
 import { calculateCost } from "@oh-my-pi/pi-catalog/models";
-import type { Api, Model, Usage } from "@oh-my-pi/pi-catalog/types";
+import type { Model } from "@oh-my-pi/pi-catalog/types";
+import type { Api, Usage } from "@oh-my-pi/pi-utils/model-data";
 import { USER_AGENT } from "@oh-my-pi/pi-utils";
 import { withAuth } from "../auth-retry";
 import * as AIError from "../error";

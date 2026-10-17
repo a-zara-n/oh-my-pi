@@ -13,8 +13,8 @@ import type { AsyncJob, AsyncJobType } from "../async";
 import asyncResultTemplate from "../prompts/tools/async-result.md" with { type: "text" };
 import type { StructuredSubagentOutput } from "@oh-my-pi/pi-tui/tools/task";
 import { escapeHarnessTags } from "./harness-tags";
-import type { CustomMessage } from "./messages";
-import type { OutputMeta } from "@oh-my-pi/pi-tui/tools/output-meta";
+import type { CustomMessage } from "@oh-my-pi/pi-utils/agent-messages";
+import type { OutputMeta } from "@oh-my-pi/pi-utils/agent-messages";
 import { truncateMiddle } from "@oh-my-pi/pi-tui/tools/streaming-output";
 
 /**

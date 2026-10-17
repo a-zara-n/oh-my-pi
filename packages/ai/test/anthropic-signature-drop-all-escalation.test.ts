@@ -2,13 +2,12 @@ import { afterEach, describe, expect, it, vi } from "bun:test";
 import { streamAnthropic } from "@oh-my-pi/pi-ai/providers/anthropic";
 import { AnthropicMessages } from "@oh-my-pi/pi-ai/providers/anthropic-client";
 import type {
-	AssistantMessage,
 	AssistantMessageEvent,
 	Context,
-	Message,
 	Model,
 	ProviderSessionState,
 } from "@oh-my-pi/pi-ai/types";
+import type { AssistantMessage, Message } from "@oh-my-pi/pi-utils/model-data";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 
 /**

@@ -9,7 +9,7 @@ import { persistForeignSession } from "../src/session/foreign-session-import";
 import type { ForeignSessionInfo } from "../src/session/foreign-session-store";
 import { buildSessionContext } from "../src/session/session-context";
 import { SessionManager } from "../src/session/session-manager";
-import { FileSessionStorage } from "../src/session/session-storage";
+import { FileSessionStorage } from "@oh-my-pi/pi-utils/model-request-journal-composition";
 
 let tempRoot: string;
 let originalClaudeConfigDir: string | undefined;

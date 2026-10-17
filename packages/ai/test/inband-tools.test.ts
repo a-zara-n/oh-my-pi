@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import type { AssistantMessage, Context, ToolCall, ToolResultMessage, Usage } from "@oh-my-pi/pi-ai";
+import type { Context } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, ToolCall, ToolResultMessage, Usage } from "@oh-my-pi/pi-utils/model-data";
 import { validateToolArguments } from "@oh-my-pi/pi-ai/utils/validation";
 import {
 	createInbandScanner,

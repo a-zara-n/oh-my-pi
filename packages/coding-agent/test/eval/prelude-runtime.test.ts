@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it } from "bun:test";
-import type { ImageContent, Message } from "@oh-my-pi/pi-ai";
+import type { ImageContent, Message } from "@oh-my-pi/pi-utils/model-data";
 import { getBundledModels } from "@oh-my-pi/pi-catalog/models";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { EvalPreludeDefinition } from "@oh-my-pi/pi-coding-agent/eval/preludes";

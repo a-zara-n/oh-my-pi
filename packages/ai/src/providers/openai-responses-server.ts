@@ -15,19 +15,21 @@ import { resolvePromptCacheKey } from "../auth-gateway/http";
 import type { AuthGatewayStreamControl, AuthGatewayParsedRequest as ParsedRequest } from "../auth-gateway/types";
 import * as AIError from "../error";
 import type {
-	AssistantMessage,
 	AssistantMessageEventStream,
+	Context,
+	Tool,
+} from "../types";
+import type {
+	AssistantMessage,
 	ComputerAction,
 	ComputerSafetyCheck,
 	ComputerScreenshotRef,
-	Context,
 	ImageContent,
 	Message,
 	TextContent,
 	ThinkingContent,
-	Tool,
 	ToolCall,
-} from "../types";
+} from "@oh-my-pi/pi-utils/model-data";
 import { decodeDataUri } from "./openai-data-uri";
 import {
 	type OpenAIResponsesComputerCallItem,

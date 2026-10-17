@@ -5,8 +5,8 @@ import {
 	findTranscriptUsageAnchor,
 	isTranscriptUsageAnchor,
 } from "@oh-my-pi/pi-agent-core/compaction";
-import type { AgentMessage } from "@oh-my-pi/pi-agent-core/types";
-import type { AssistantMessage, Usage } from "@oh-my-pi/pi-ai";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
+import type { AssistantMessage, Usage } from "@oh-my-pi/pi-utils/model-data";
 
 const tokenizer = new Tokenizer();
 

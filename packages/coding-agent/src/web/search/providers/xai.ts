@@ -1,4 +1,5 @@
-import { type Api, type AuthStorage, type Model, withAuth } from "@oh-my-pi/pi-ai";
+import { type AuthStorage, type Model, withAuth } from "@oh-my-pi/pi-ai";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 import { resolveXaiBaseUrl, XAI_DEFAULT_BASE_URL } from "@oh-my-pi/pi-ai/providers/xai-base-url";
 import { buildModelProviderPriorityRank } from "@oh-my-pi/pi-catalog/identity";
 import type { ModelRegistry } from "../../../config/model-registry";

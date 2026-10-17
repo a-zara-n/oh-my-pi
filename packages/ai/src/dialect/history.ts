@@ -1,12 +1,14 @@
 import type {
-	AssistantMessage,
 	Context,
+} from "../types";
+import type {
+	AssistantMessage,
 	ImageContent,
 	Message,
 	TextContent,
 	ToolCall,
 	ToolResultMessage,
-} from "../types";
+} from "@oh-my-pi/pi-utils/model-data";
 import { getDialectDefinition } from "./factory";
 import type { Dialect, DialectDefinition, DialectToolResult, InbandTool } from "./types";
 

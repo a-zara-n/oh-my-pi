@@ -3,7 +3,7 @@ import { type Component, Container } from "../tui";
 import { Disclosure } from "../components/disclosure";
 import { Markdown } from "../components/markdown";
 import { formatBytes } from "@oh-my-pi/pi-utils";
-import type { ImageContent } from "@oh-my-pi/pi-ai";
+import type { ImageContent } from "@oh-my-pi/pi-utils/model-data";
 import type { TspSpan } from "@oh-my-pi/pi-wire";
 import { ensureThemeSync, getMarkdownTheme, theme } from "../theme";
 import {

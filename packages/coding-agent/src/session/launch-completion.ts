@@ -1,7 +1,7 @@
 import { prompt } from "@oh-my-pi/pi-utils";
 import type { DaemonCompletionNotification } from "../launch/protocol";
 import launchCompletionTemplate from "../prompts/session/launch-completion.md" with { type: "text" };
-import type { CustomMessage } from "./messages";
+import type { CustomMessage } from "@oh-my-pi/pi-utils/agent-messages";
 
 import { LAUNCH_COMPLETION_MESSAGE_TYPE } from "@oh-my-pi/pi-tui/chat/messages";
 export { LAUNCH_COMPLETION_MESSAGE_TYPE } from "@oh-my-pi/pi-tui/chat/messages";

@@ -9,14 +9,16 @@
 import { describe, expect, test } from "bun:test";
 import type {
 	Context,
+	Model,
+} from "@oh-my-pi/pi-ai";
+import type {
 	ImageContent,
 	Message,
-	Model,
 	ProviderPayload,
 	TextContent,
 	ToolResultMessage,
 	UserMessage,
-} from "@oh-my-pi/pi-ai";
+} from "@oh-my-pi/pi-utils/model-data";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { dropUnreadableContextImages } from "@oh-my-pi/pi-coding-agent/session/provider-image-budget";
 

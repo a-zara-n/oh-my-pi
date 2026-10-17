@@ -1,5 +1,6 @@
 import { getOpenAICodexTransportDetails, type OpenAICodexTransportDetails } from "./providers/openai-codex-responses";
-import type { Api, Model, Provider, ProviderSessionState } from "./types";
+import type { Model, ProviderSessionState } from "./types";
+import type { Api, Provider } from "@oh-my-pi/pi-utils/model-data";
 
 export interface ProviderDetailField {
 	label: string;

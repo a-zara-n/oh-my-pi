@@ -8,7 +8,8 @@ import {
 	imageDecodeFailureReason,
 } from "@oh-my-pi/pi-tui/chat/image-loading";
 import * as path from "node:path";
-import type { Context, ImageContent, Message, Model, ProviderPayload, TextContent } from "@oh-my-pi/pi-ai";
+import type { Context, Model } from "@oh-my-pi/pi-ai";
+import type { ImageContent, Message, ProviderPayload, TextContent } from "@oh-my-pi/pi-utils/model-data";
 import { rasterizeSvg } from "@oh-my-pi/pi-natives";
 import { isRecord, logger, readImageMetadata } from "@oh-my-pi/pi-utils";
 import { LRUCache } from "@oh-my-pi/pi-utils/lru";

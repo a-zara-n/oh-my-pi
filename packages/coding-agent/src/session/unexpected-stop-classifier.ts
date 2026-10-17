@@ -4,7 +4,8 @@
  * from the live `judge` role chain resolved by {@link resolveJudge}.
  */
 import type { AgentTelemetryConfig } from "@oh-my-pi/pi-agent-core";
-import type { AssistantMessage, Model, NoulQuestion } from "@oh-my-pi/pi-ai";
+import type { Model, NoulQuestion } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import { logger } from "@oh-my-pi/pi-utils";
 import type { ModelRegistry } from "../config/model-registry";
 import type { Settings } from "../config/settings";

@@ -6,14 +6,13 @@ import { readModelCache, writeModelCache } from "./model-cache";
 import { type GeneratedProvider, getBundledModels } from "./models";
 import { isTimeBasedCost } from "./pricing";
 import {
-	type Api,
 	type Model,
 	type ModelCost,
 	modelKind,
 	type ModelSpec,
-	type Provider,
 	type TokenCost,
 } from "./types";
+import type { Api, Provider } from "@oh-my-pi/pi-utils/model-data";
 import { isRecord } from "./utils";
 
 const DEFAULT_CACHE_TTL_MS = 2 * 60 * 60 * 1000;

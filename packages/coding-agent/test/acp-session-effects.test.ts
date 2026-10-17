@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, it } from "bun:test";
-import type { Api, Model, ModelSpec } from "@oh-my-pi/pi-ai";
+import type { Model, ModelSpec } from "@oh-my-pi/pi-ai";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 import { clearCustomApis, registerCustomApi } from "@oh-my-pi/pi-ai";
 import { redactSensitiveCredentials } from "@oh-my-pi/pi-ai/providers/transform-messages";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";

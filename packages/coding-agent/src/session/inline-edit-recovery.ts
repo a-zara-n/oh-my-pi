@@ -7,7 +7,7 @@
  * normal tool pipeline — validation, approval tiering, execution, rendering,
  * journaling, provider replay — runs it unchanged.
  */
-import type { AssistantMessage } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import { mintToolCallId } from "@oh-my-pi/pi-ai/dialect";
 import { extractInlineSloppyRegions } from "@oh-my-pi/pi-natives";
 

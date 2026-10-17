@@ -51,7 +51,8 @@
  */
 import { logger } from "@oh-my-pi/pi-utils";
 import * as AIError from "../error";
-import type { Api, AssistantMessage, Model, StreamOptions } from "../types";
+import type { Model, StreamOptions } from "../types";
+import type { Api, AssistantMessage } from "@oh-my-pi/pi-utils/model-data";
 import { AssistantMessageEventStream } from "./event-stream";
 
 /** Stable lead phrase of the guard's error message; exported for tests. The

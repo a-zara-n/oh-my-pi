@@ -29,7 +29,7 @@ import { BLOB_HASH_RE, BLOB_STAGING_RE, blobStagingPath } from "../session/blob-
 import { listSessionsReadOnly, type SessionInfo, type SessionStatus } from "../session/session-listing";
 import { parseTerminalBreadcrumb } from "../session/session-paths";
 import { readSessionHeaderId } from "../session/session-loader";
-import { FileSessionStorage, tryAcquireSessionLease } from "../session/session-storage";
+import { FileSessionStorage, tryAcquireSessionLease } from "@oh-my-pi/pi-utils/model-request-journal-composition";
 import {
 	cfgGcArchive,
 	cfgGcBlobs,

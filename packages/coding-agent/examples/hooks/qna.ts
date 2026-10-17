@@ -6,7 +6,8 @@
  * 2. Shows a spinner while extracting (hides editor)
  * 3. Loads the result into the editor for user to fill in answers
  */
-import { complete, type UserMessage } from "@oh-my-pi/pi-ai";
+import { complete } from "@oh-my-pi/pi-ai";
+import type { UserMessage } from "@oh-my-pi/pi-utils/model-data";
 import { BorderedLoader } from "@oh-my-pi/pi-coding-agent";
 import type { HookAPI } from "@oh-my-pi/pi-coding-agent/extensibility/hooks";
 

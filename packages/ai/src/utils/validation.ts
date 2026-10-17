@@ -14,7 +14,8 @@
 import { type Type, type } from "@oh-my-pi/omptype";
 import { structuredCloneJSON } from "@oh-my-pi/pi-utils";
 import * as AIError from "../error";
-import type { Tool, ToolCall } from "../types";
+import type { Tool } from "../types";
+import type { ToolCall } from "@oh-my-pi/pi-utils/model-data";
 import { upgradeJsonSchemaTo202012 } from "./schema/draft";
 import {
 	getTagSelectedUnionBranch,

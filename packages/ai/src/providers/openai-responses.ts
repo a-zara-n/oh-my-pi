@@ -10,18 +10,17 @@ import {
 import * as AIError from "../error";
 import { getEnvApiKey } from "../env-api-key";
 import type {
-	AssistantMessage,
 	CacheRetention,
 	Context,
 	Model,
 	OpenAICompat,
 	ProviderSessionState,
-	ServiceTier,
 	StreamFunction,
 	StreamOptions,
 	Tool,
 	ToolChoice,
 } from "../types";
+import type { AssistantMessage, ServiceTier } from "@oh-my-pi/pi-utils/model-data";
 import {
 	createOpenAIResponsesHistoryPayload,
 	normalizeSystemPrompts,

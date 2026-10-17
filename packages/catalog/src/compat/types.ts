@@ -5,7 +5,8 @@
  * `behavior.ts`, `resolve.ts`) exposes to consumers.
  */
 import type { Effort } from "../effort";
-import type { Api, KindApiKind, ThinkingControlMode, TokenCost } from "../types";
+import type { KindApiKind, ThinkingControlMode, TokenCost } from "../types";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 import type { RevisionOp } from "./revision";
 
 /** Class-membership matcher kinds, most to least specific. */

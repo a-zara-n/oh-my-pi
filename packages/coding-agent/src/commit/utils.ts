@@ -1,4 +1,4 @@
-import type { AssistantMessage, ToolCall } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, ToolCall } from "@oh-my-pi/pi-utils/model-data";
 import type { VcsNumstatEntry } from "@oh-my-pi/pi-natives";
 import type { ChangelogCategory, ConventionalAnalysis, ConventionalDetail } from "./types";
 

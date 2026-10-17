@@ -6,9 +6,9 @@ import {
 	type AuthCredentialStore,
 	parseServiceTier,
 	SqliteAuthCredentialStore,
-	type ServiceTier,
 	type StoredAuthCredential,
 } from "@oh-my-pi/pi-ai";
+import type { ServiceTier } from "@oh-my-pi/pi-utils/model-data";
 import {
 	AsyncDrain,
 	checkpointWal,

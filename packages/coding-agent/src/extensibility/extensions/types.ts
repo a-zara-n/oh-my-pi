@@ -28,34 +28,36 @@ import type { type as ArkType } from "@oh-my-pi/omptype";
 import type * as TypeBox from "@oh-my-pi/omptype/typebox";
 import type * as zod from "@oh-my-pi/omptype/zod";
 import type {
-	AgentMessage,
 	AgentToolResult,
 	AgentToolUpdateCallback,
 	ThinkingLevel,
 	ToolApproval,
 	ToolLoadMode,
 } from "@oh-my-pi/pi-agent-core";
+import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import type { CompactionResult } from "@oh-my-pi/pi-agent-core/compaction";
 import type { ContextUsage } from "@oh-my-pi/pi-tui/status-line/types";
 import type {
-	Api,
-	AssistantMessage,
 	AssistantMessageEvent,
 	AssistantMessageEventStream,
 	Context,
-	ImageContent,
 	Model,
 	ModelSpec,
 	ProviderResponseMetadata,
-	ServiceTier,
-	ServiceTierByFamily,
-	ServiceTierFamily,
 	SimpleStreamOptions,
 	Static,
-	TextContent,
 	TSchema,
 	UsageProvider,
 } from "@oh-my-pi/pi-ai";
+import type {
+	Api,
+	AssistantMessage,
+	ImageContent,
+	ServiceTier,
+	ServiceTierByFamily,
+	ServiceTierFamily,
+	TextContent,
+} from "@oh-my-pi/pi-utils/model-data";
 import type { OAuthCredentials, OAuthLoginCallbacks } from "@oh-my-pi/pi-ai/oauth/types";
 import type {
 	AutocompleteItem,
@@ -85,7 +87,7 @@ import type { NativeToolView } from "@oh-my-pi/pi-tui/tools/renderer";
 import type { AsyncJobSnapshot, SendUserMessageOptions } from "../../session/agent-session";
 import type { EphemeralTurnOptions, EphemeralTurnResult } from "../../session/agent-session-types";
 import type { CompactMode } from "../../session/compact-modes";
-import type { CustomMessagePayload } from "../../session/messages";
+import type { CustomMessagePayload } from "@oh-my-pi/pi-utils/agent-messages";
 import type { ReadonlySessionManager, SessionManager } from "../../session/session-manager";
 import type { BashToolInput, GlobToolInput, GrepToolInput, ReadToolInput, WriteToolInput } from "../../tools";
 import type { GlobToolDetails } from "@oh-my-pi/pi-tui/tools/glob";

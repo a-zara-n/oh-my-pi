@@ -10,7 +10,8 @@ import {
 import { $env } from "@oh-my-pi/pi-utils";
 import { NO_AUTH_SENTINEL } from "../auth-retry";
 import * as AIError from "../error";
-import type { Api, Model } from "../types";
+import type { Model } from "../types";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 import type { ProviderTransport } from "./build";
 
 /**

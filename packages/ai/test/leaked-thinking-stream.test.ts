@@ -1,16 +1,18 @@
 import { describe, expect, it } from "bun:test";
 import { stream } from "@oh-my-pi/pi-ai/stream";
 import type {
-	AnthropicServerToolContent,
-	AssistantMessage,
 	AssistantMessageEvent,
 	Context,
 	FetchImpl,
 	Model,
+} from "@oh-my-pi/pi-ai/types";
+import type {
+	AnthropicServerToolContent,
+	AssistantMessage,
 	TextContent,
 	ThinkingContent,
 	ToolCall,
-} from "@oh-my-pi/pi-ai/types";
+} from "@oh-my-pi/pi-utils/model-data";
 import { getStreamingPartialJson, setStreamingPartialJson } from "@oh-my-pi/pi-utils/model-data";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { wrapLeakedThinkingStream } from "@oh-my-pi/pi-ai/utils/leaked-thinking-stream";

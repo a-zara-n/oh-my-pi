@@ -12,7 +12,8 @@
  * table.
  */
 
-import type { Api, FetchImpl, Model, SimpleStreamOptions, StreamOptions } from "../types";
+import type { FetchImpl, Model, SimpleStreamOptions, StreamOptions } from "../types";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 import type { OAuthController, OAuthCredentials } from "./oauth/types";
 
 /**

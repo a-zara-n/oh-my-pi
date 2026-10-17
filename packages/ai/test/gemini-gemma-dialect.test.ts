@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import type { ToolCall } from "@oh-my-pi/pi-ai";
+import type { ToolCall } from "@oh-my-pi/pi-utils/model-data";
 import { createInbandScanner, type Dialect, getDialectDefinition, type InbandScanEvent } from "@oh-my-pi/pi-ai/dialect";
 
 function scan(dialect: Dialect, text: string, charByChar = false): InbandScanEvent[] {
