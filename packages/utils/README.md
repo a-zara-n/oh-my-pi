@@ -72,7 +72,13 @@ Post-fix verification of direct libc account lookup remains with the parent.
 The audit-only `model-request-journal-sqlite-control` subpath owns three operations:
 `openModelRequestJournalDatabase`, `createModelRequestJournalDatabase`, and
 `assertModelRequestJournalDatabase`, plus their closed options/identity/inspection/initialization types.
-Options are only `readonly`, `create`, `strict`, and `safeIntegers` (optional booleans).
+Options are exactly `readonly`, `create`, `strict`, and `safeIntegers` (optional booleans), plus
+`purpose?: "general" | "authority-control"`. Omission selects `general`; unknown fields/values
+are rejected and the purpose field is never passed to Bun's constructor. General RO retains
+native inspect/arm and actual-fd guards while permitting the consumer's existing checked
+`query_only OFF → VACUUM INTO → finally ON` backup sequence. Authority-control requires explicit
+`readonly:true/create:false` and successful fixed native authorizer setup; it rejects memory probes
+and unsupported control even without the required-runtime latch.
 Exclusive creation owns `STORE_ID` and `state.sqlite3`; on Darwin it walks directory handles with
 public libc `openat`, creates both with `O_EXCL|O_NOFOLLOW`, and generates the 32-hex store ID.
 An opaque initialization identity is not operator approval or an active authority claim.
@@ -91,10 +97,14 @@ Inspection includes safe `main`/`wal`/`shm` records (presence `0` pending, `1` p
 Only unregistered diagnostics carry `error.code = "ERR_JOURNAL_SQLITE_UNREGISTERED"`.
 Ordinary, non-managed callers may classify that code as unsupported only when the audit preload's
 non-writable required-library latch is absent; they must never swallow a native fault or managed claim.
+Registered connections always use immediate checked `close(true)`, even if a caller requests
+unchecked close. This finalizes outstanding prepared statements and surfaces actual native close
+failure before acknowledgment. Ordinary unregistered connections retain Bun's close behavior.
 
-The authority verifier now self-opens an owned RO connection, installs the fixed native authorizer,
-and reads its closed control codec in one actual SELECT-established read transaction. It compares the
-authority's device/inode, live writer generations and the same snapshot again before success.
+The authority verifier self-opens an owned RO connection with literal `purpose:"authority-control"`,
+installs the fixed native authorizer, and reads its closed control codec in one actual
+SELECT-established read transaction. It accepts no caller connection/options/purpose.
+It compares the authority's device/inode, live writer generations and the same snapshot again before success.
 Secrets/policy/verified handles remain in this single JS module, not native code. Native errors propagate;
 there is no `HAS_MOVED`, independent-fd, global-hook, pointer-offset or constant-reject fallback.
 These are implementation changes, **not a claim of passed acceptance**: parent integration must build
@@ -108,6 +118,33 @@ rejected without invoking `then`. Nested operations borrow only a genuine privat
 retain inherited owner/root leases, reject upgrades/different explicit identities, and expire only the
 child's local lifetime. A child cannot release its parent's leases. No wait/retry or second lock state
 was added.
+
+DES-004 revision 11 adds synchronous retained-root operations on the same kernels:
+
+- Authority: `retainVerifiedModelRequestJournalRoot(binding, registryId)` returns opaque
+  `ModelRequestJournalRetainedRootScope`, extending the existing verified root scope with
+  `release(): void`. The existing root scope also projects `ownerId`: the authenticated
+  requester's real raw writer-owner ID, **not** the principal's per-epoch journal-owner UUID.
+- Raw: `retainRawModelRequestJournalRoot(ownerScope, registryId)` returns opaque
+  `RawModelRequestJournalRetainedRootScope`, with actual `ownerId`, `registryId` and synchronous
+  `release(): void`. It makes no authority claim. Only the raw kernel's live owner scope in its
+  matching current ALS lineage or a genuine matching subset child can be retained.
+- The retained operation borrows the parent's control/maintenance/owner leases but obtains its
+  **own actual root handle** using existing `LOCK_NB`. Root-held ALS, even for the same root,
+  copies, ended scopes, other bindings/owners/stores and conflicting root/order are rejected.
+  It does not retain another callback's root or introduce a blocking wait.
+- `assertHeld` checks actual handle and private scope/binding lifetime; authority `assertActive`
+  additionally repeats fixed database authorization. `release` first irreversibly invalidates
+  the retained object, then synchronously unlocks/closes only its root. It is idempotent, but
+  released objects never pass assertions or revive. Binding cleanup releases remaining roots
+  before its parent writer/control/maintenance leases; release faults are propagated and poison
+  that binding/lineage instead of enabling new dispatch.
+
+Existing verified callback APIs and raw synchronous/native-Promise overloads keep their callback
+settlement lifetimes for compose/append/ack. The retained API is for the send admission's synchronous
+end, not a substitute for joining principal work/drain before ending the binding's writer lifetime.
+No public proof/setter/registration or secret getter is added. Private identity registries are
+not a sandbox against arbitrary code or FFI already running inside the host process.
 
 The isolated preload is `scripts/audit-library-bootstrap.ts`. It verifies the fixed artifact manifest,
 signed dylib hash, Bun revision, actual SQLite source ID and exact live compile options before importing
@@ -141,8 +178,9 @@ These are the integrating parent's observations, not worker-executed checks:
 | SQLite initialized before bootstrap import | Late bootstrap rejected, ordinary table content preserved, required-library latch not minted |
 
 The earlier wrong-order launch's six failures remain recorded above. The full three-suite command is
-an acceptance invocation, not a claim that all three suites passed: the readonly-backup purpose
-contract remains unresolved. Store A0, File-principal C, trusted dispatch and readonly backup remain
+an acceptance invocation, not a claim that all three suites passed. At the time of those observed
+runs, readonly-backup purpose separation was unresolved; the r11 purpose/retained-root changes still
+require parent execution. Store A0, File-principal C, trusted dispatch and readonly backup remain
 unproved. These limited native/utility results do not authorize model sending, billing or deployment.
 
 ## Install

@@ -9,6 +9,12 @@
   options and the fixed native authorizer. The verifier selects that purpose internally;
   callers cannot supply their connection/purpose as authentication proof. The native
   three-command ABI is unchanged. Purpose/backup regressions await parent verification.
+- Added genuine raw/verified retained-root scopes with their own nonblocking OS root handle and
+  synchronous idempotent release. Assertions reject released/ended/foreign scope identities;
+  binding cleanup invalidates/releases leftovers before its parent owner lease. Existing
+  callback overloads retain their settlement lifetime. Verified scope `ownerId` now projects
+  the credential's actual raw writer-owner identity, not a journal-owner UUID. New regressions
+  and the real-scope/OS-lock smoke artifact are for parent execution, not worker verification.
 - Added the isolated audit SQLite preload, a fixed source-owned VFS control codec, exclusive
   STORE_ID/database creation and per-connection identity/generation registry. The authority reader
   now verifies actual owned main/WAL/shm and live writer generations in one real RO snapshot rather
