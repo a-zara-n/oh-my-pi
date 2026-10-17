@@ -82,7 +82,7 @@ import {
 import { isModelRequestLocalStream } from "./model-request-execution";
 import { getModelRequestRuntime } from "./model-request-runtime";
 import { authorizeUninstrumentedAttempt } from "./utils/model-request-fetch";
-import { awaitManagedOuterWork, beginManagedOuterWorkFromCurrent } from "./model-request/journal-outer-work";
+import { joinJournalOuterWork, openJournalOuterWorkFromCurrent } from "../internal/journal-outer-work";
 import { withTransportFetch } from "./utils/transport-fetch";
 
 function isGoogleVertexAuthenticatedModel(model: Model<Api>): boolean {
@@ -732,12 +732,12 @@ function withProviderInFlightLimit<TOptions extends Pick<StreamOptions, "signal"
 
 	const outer = new AssistantMessageEventStream();
 	void (async () => {
-		const slotWork = beginManagedOuterWorkFromCurrent();
+		const slotWork = openJournalOuterWorkFromCurrent();
 		let release: (() => Promise<void>) | undefined;
 		let releasePromise: Promise<void> | undefined;
 		const releaseOnce = () => {
 			if (!release) return Promise.resolve();
-			releasePromise ??= slotWork.track(release());
+			releasePromise ??= joinJournalOuterWork(slotWork, release());
 			return releasePromise;
 		};
 		const releaseBestEffort = async () => {
@@ -757,7 +757,10 @@ function withProviderInFlightLimit<TOptions extends Pick<StreamOptions, "signal"
 		};
 		try {
 			const startedWaitingAt = Date.now();
-			release = await slotWork.track(acquireProviderInFlightSlot(model.provider, limit, options?.signal));
+			release = await joinJournalOuterWork(
+				slotWork,
+				acquireProviderInFlightSlot(model.provider, limit, options?.signal),
+			);
 			if (Date.now() - startedWaitingAt >= PROVIDER_INFLIGHT_SIGNAL_FALLBACK_MS) {
 				logger.debug("Provider in-flight limit wait completed", { provider: model.provider, limit });
 			}
@@ -778,7 +781,7 @@ function withProviderInFlightLimit<TOptions extends Pick<StreamOptions, "signal"
 					return;
 				}
 			}
-			const result = await slotWork.track(inner.result());
+			const result = await joinJournalOuterWork(slotWork, inner.result());
 			// Releasing the permit is part of request completion. Publishing the
 			// result first lets an immediate follow-up turn contend with its own
 			// still-live lease, which is particularly costly on Windows.
@@ -788,11 +791,11 @@ function withProviderInFlightLimit<TOptions extends Pick<StreamOptions, "signal"
 				else outer.end(result);
 			}
 		} catch (error) {
-			slotWork.noteFailure(error);
+			slotWork?.noteFailure(error);
 			await releaseBestEffort();
 			if (!outer.done) outer.fail(error);
 		} finally {
-			await slotWork.end();
+			await slotWork?.end();
 		}
 	})();
 	return outer;
@@ -890,23 +893,23 @@ function withResolvedModelHeaders<TApi extends Api>(
 
 	const outer = new AssistantMessageEventStream();
 	void (async () => {
-		const headerWork = beginManagedOuterWorkFromCurrent();
+		const headerWork = openJournalOuterWorkFromCurrent();
 		const rawResolver = resolveHeaders(signal);
-		headerWork.track(rawResolver);
+		if (headerWork) headerWork.join(rawResolver);
 		try {
-			const headers = await headerWork.track(untilAborted(signal, () => rawResolver));
+			const headers = await joinJournalOuterWork(headerWork, untilAborted(signal, () => rawResolver));
 			signal?.throwIfAborted();
 			const inner = run({ ...model, resolveHeaders: undefined, headers: headers ? { ...headers } : undefined });
 			for await (const event of inner) {
 				outer.push(event);
 				if (outer.done) return;
 			}
-			if (!outer.done) outer.end(await headerWork.track(inner.result()));
+			if (!outer.done) outer.end(await joinJournalOuterWork(headerWork, inner.result()));
 		} catch (error) {
-			headerWork.noteFailure(error);
+			headerWork?.noteFailure(error);
 			outer.fail(error);
 		} finally {
-			await headerWork.end();
+			await headerWork?.end();
 		}
 	})();
 	return outer;
@@ -977,21 +980,21 @@ function gateUninstrumentedTransport(
 	if (!runtime.hasGate() && (execution === undefined || execution.journalState === "untracked")) return create();
 	const outer = new AssistantMessageEventStream();
 	void (async () => {
-		const transportWork = beginManagedOuterWorkFromCurrent();
+		const transportWork = openJournalOuterWorkFromCurrent();
 		try {
-			await transportWork.track(authorizeUninstrumentedAttempt(model, "chat", signal));
+			await joinJournalOuterWork(transportWork, authorizeUninstrumentedAttempt(model, "chat", signal));
 			assertCurrentJournalExecutionReady();
 			const inner = create();
 			for await (const event of inner) {
 				outer.push(event);
 				if (outer.done) return;
 			}
-			if (!outer.done) outer.end(await transportWork.track(inner.result()));
+			if (!outer.done) outer.end(await joinJournalOuterWork(transportWork, inner.result()));
 		} catch (error) {
-			transportWork.noteFailure(error);
+			transportWork?.noteFailure(error);
 			outer.fail(error);
 		} finally {
-			await transportWork.end();
+			await transportWork?.end();
 		}
 	})();
 	return outer;
@@ -1515,13 +1518,13 @@ function streamSimpleRequest<TApi extends Api>(
 		};
 
 		void (async () => {
-			const resolverWork = beginManagedOuterWorkFromCurrent();
+			const resolverWork = openJournalOuterWorkFromCurrent();
 			try {
 				let lastKey: string | undefined;
 				let credentialId: number | undefined;
 				let oauthIdentity: OAuthRequestIdentity | undefined;
 				try {
-					const resolved = await awaitManagedOuterWork(
+					const resolved = await joinJournalOuterWork(
 						resolverWork,
 						apiKeyResolver({ lastChance: false, error: undefined, signal }),
 					);
@@ -1531,7 +1534,7 @@ function streamSimpleRequest<TApi extends Api>(
 				} catch (error) {
 					// A thrown resolver is a broker/OAuth/network failure, not a missing
 					// key — surface the cause instead of masking it as "No API key".
-					if (resolverWork.active) resolverWork.noteFailure(error);
+					if (resolverWork) resolverWork.noteFailure(error);
 					outer.fail(
 						new AIError.ConfigurationError(
 							`Failed to resolve API key for provider ${model.provider}: ${error instanceof Error ? error.message : String(error)}`,
@@ -1542,7 +1545,7 @@ function streamSimpleRequest<TApi extends Api>(
 				}
 				if (lastKey === undefined) {
 					if (getProviderDefinition(model.provider)?.allowsMissingApiKey) {
-						const failure = await awaitManagedOuterWork(resolverWork, runAttempt());
+						const failure = await joinJournalOuterWork(resolverWork, runAttempt());
 						if (failure) emitFailure(failure);
 						return;
 					}
@@ -1550,7 +1553,7 @@ function streamSimpleRequest<TApi extends Api>(
 					return;
 				}
 				const retryState = createAuthRetryKeyState(lastKey);
-				let failure: AuthRetryFailure | undefined = await awaitManagedOuterWork(
+				let failure: AuthRetryFailure | undefined = await joinJournalOuterWork(
 					resolverWork,
 					runAttempt(lastKey, credentialId, oauthIdentity),
 				);
@@ -1562,7 +1565,7 @@ function streamSimpleRequest<TApi extends Api>(
 					if (signal?.aborted) break;
 					let nextCredentialId: number | undefined;
 					let nextOAuthIdentity: OAuthRequestIdentity | undefined;
-					const nextKey: string | undefined = await awaitManagedOuterWork(
+					const nextKey: string | undefined = await joinJournalOuterWork(
 						resolverWork,
 						resolveNextAuthRetryKey(
 							retryState,
@@ -1577,7 +1580,7 @@ function streamSimpleRequest<TApi extends Api>(
 					);
 					if (nextKey === undefined) break;
 					markNextModelRequestAttempt("auth-rotation");
-					const next: AuthRetryFailure | undefined = await awaitManagedOuterWork(
+					const next: AuthRetryFailure | undefined = await joinJournalOuterWork(
 						resolverWork,
 						runAttempt(nextKey, nextCredentialId, nextOAuthIdentity),
 					);
@@ -1586,7 +1589,7 @@ function streamSimpleRequest<TApi extends Api>(
 				}
 				emitFailure(retryFailure);
 			} finally {
-				await resolverWork.end();
+				await resolverWork?.end();
 			}
 		})();
 		return outer;
