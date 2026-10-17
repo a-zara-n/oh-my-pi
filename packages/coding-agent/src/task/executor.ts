@@ -4452,10 +4452,26 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 						}),
 					);
 				}
-				try {
-					await spawnOuterWork.complete(err);
-				} catch {
-					// Outer work end is accounted.
+				if (abortSignal.aborted) {
+					// Consumer abort returns bounded: `awaitAbortable` already released
+					// the caller, and the still-pending SDK startup must not be drained
+					// on the consumer's return path. The handle opened before the
+					// producer started keeps owning the late startup and its dispose
+					// future; once they settle it delivers the aggregated rejected
+					// outcome to the authority accounting by itself, so the lease is
+					// held for the entire raw cleanup.
+					void spawnOuterWork.complete(err).catch(() => {
+						// Terminal accounting already reached endJournalWork on the
+						// original handle; the detached aggregate has no consumer.
+					});
+				} else {
+					// A non-abort failure means the startup future itself settled, so
+					// the drain is bounded and the end accounting lands before return.
+					try {
+						await spawnOuterWork.complete(err);
+					} catch {
+						// Outer work end is accounted.
+					}
 				}
 				throw err;
 			}
