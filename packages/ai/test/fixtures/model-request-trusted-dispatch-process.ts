@@ -101,15 +101,17 @@ interface ReadyContext {
 // One scenario runs per child. Keep the actual rejected operation, not a
 // message-only approximation, for the binding finalizer's retained-failure check.
 let prepareAwaitRevocationFailure: Error | undefined;
+// The exact error object this scenario's own send rejected with, if it did.
+let lastSendFailure: unknown;
 
-/** Whether `error`'s aggregate/cause graph carries the exact send rejection the scenario observed. */
-function drainCarriesSendFailure(error: unknown, sendFailureMessage: string | undefined): boolean {
-	if (sendFailureMessage === undefined) return false;
+/** Whether `error`'s aggregate/cause graph carries the exact observed send-failure object. */
+function drainCarriesSendFailure(error: unknown, sendFailure: unknown): boolean {
+	if (sendFailure === undefined) return false;
 	const seen = new Set<unknown>();
 	const visit = (current: unknown): boolean => {
 		if (current === undefined || current === null || seen.has(current)) return false;
 		seen.add(current);
-		if (current instanceof Error && current.message === sendFailureMessage) return true;
+		if (current === sendFailure) return true;
 		if (current instanceof AggregateError) return current.errors.some(visit);
 		if (current instanceof Error) return visit(current.cause);
 		return false;
@@ -219,7 +221,13 @@ CREATE TABLE store_config_event(${common},key TEXT NOT NULL,value_json TEXT NOT 
 						if (registry === undefined) throw new Error("real root registry missing");
 						if (scenario === "prepare-await-revoke") prepareRegistryId = registry.registryId;
 						let closing: Promise<void> | undefined;
-						const revoke = (): Promise<void> => (closing ??= closeJournalSession(session));
+						const revoke = (): Promise<void> => {
+							closing ??= closeJournalSession(session);
+							// Observe at creation: a rejected close must not float unhandled
+							// while the binding finalizer is still aggregating it.
+							void closing.catch(() => {});
+							return closing;
+						};
 						try {
 							result = await use({
 								binding,
@@ -268,104 +276,95 @@ CREATE TABLE store_config_event(${common},key TEXT NOT NULL,value_json TEXT NOT 
 								// on the request's outer work makes the authority close reject.
 								// Accept that rejection only when it actually carries this
 								// scenario's observed send failure; anything else stays an error.
-								const sendFailureMessage =
-									result !== undefined && "error" in result && typeof result.error === "string"
-										? result.error
-										: undefined;
-								if (
-									sendFailureMessage !== undefined &&
-									authorityMutation === undefined &&
-									drainCarriesSendFailure(error, sendFailureMessage)
-								) {
-									authorityDrain = {
-										rejected: true,
-										causesMatch: true,
-										message: error instanceof Error ? error.message : String(error),
-									};
-								} else if (authorityMutation === undefined || result === undefined) {
-									throw error;
-								} else {
-									cleanupAuthorityErrors.push(error instanceof Error ? error.message : String(error));
-								}
+							if (
+								lastSendFailure !== undefined &&
+								authorityMutation === undefined &&
+								drainCarriesSendFailure(error, lastSendFailure)
+							) {
+								authorityDrain = {
+									rejected: true,
+									causesMatch: true,
+									message: error instanceof Error ? error.message : String(error),
+								};
+							} else if (authorityMutation === undefined || result === undefined) {
+								throw error;
+							} else {
+								cleanupAuthorityErrors.push(error instanceof Error ? error.message : String(error));
 							}
 						}
+					}
 					});
 				},
 			);
-		} catch (error) {
-			if (scenario === "prepare-await-revoke" && result !== undefined) {
-				const prepareFailure = prepareAwaitRevocationFailure;
-				if (
-					prepareFailure === undefined ||
-					prepareRegistryId === undefined ||
-					!(error instanceof AggregateError) ||
-					error.message !== "Journal principal drains failed"
-				)
-					throw error;
-				const drains: readonly unknown[] = error.errors;
-				const graph = drains[0];
-				if (
-					drains.length !== 1 ||
-					!(graph instanceof AggregateError) ||
-					graph.message !== "Journal bound principal graph failed"
-				)
-					throw error;
-				const causes: readonly unknown[] = graph.errors;
-				// Any additional or substituted cleanup failure remains an uncaught
-				// failure. Only this exact prepare rejection is expected here.
-				if (causes.length !== 1 || causes[0] !== prepareFailure) throw error;
-				prepareCleanup = {
-					name: error.name,
-					message: error.message,
-					errors: [
-						{
-							name: graph.name,
-							message: graph.message,
-							errors: [
-								{
-									name: prepareFailure.name,
-									message: prepareFailure.message,
-									samePrepareRejection: causes[0] === prepareFailure,
-								},
-							],
-						},
-					],
-				};
-				cleanupAuthorityErrors.push(error.message);
-				// Probe after the rejected binding finalizer has actually exited,
-				// independently of the earlier verified-root reacquisition.
-				withRawModelRequestJournalLeases(
-					{
-						storeId,
-						control: "shared",
-						maintenance: "shared",
-						ownerId: writerId,
-						registryId: prepareRegistryId,
-					},
-					raw => {
-						if (raw.registryId !== prepareRegistryId) throw new Error("physical root identity changed");
-						raw.assertHeld();
-					},
-				);
-				finalizerRootReleased = true;
-		} else {
-			const sendFailureMessage =
-				result !== undefined && "error" in result && typeof result.error === "string" ? result.error : undefined;
+	} catch (error) {
+		if (scenario === "prepare-await-revoke" && result !== undefined) {
+			const prepareFailure = prepareAwaitRevocationFailure;
 			if (
-				authorityDrain?.rejected === true &&
-				authorityDrain.causesMatch === true &&
-				sendFailureMessage !== undefined &&
-				drainCarriesSendFailure(error, sendFailureMessage)
-			) {
-				// The binding finalizer re-reports the same expected drain rejection.
-				bindingDrainRejected = true;
-			} else if (authorityMutation === undefined || result === undefined) {
+				prepareFailure === undefined ||
+				prepareRegistryId === undefined ||
+				!(error instanceof AggregateError) ||
+				error.message !== "Journal principal drains failed"
+			)
 				throw error;
-			} else {
-				cleanupAuthorityErrors.push(error instanceof Error ? error.message : String(error));
-			}
+			const drains: readonly unknown[] = error.errors;
+			const graph = drains[0];
+			if (
+				drains.length !== 1 ||
+				!(graph instanceof AggregateError) ||
+				graph.message !== "Journal bound principal graph failed"
+			)
+				throw error;
+			const causes: readonly unknown[] = graph.errors;
+			// Any additional or substituted cleanup failure remains an uncaught
+			// failure. Only this exact prepare rejection is expected here.
+			if (causes.length !== 1 || causes[0] !== prepareFailure) throw error;
+			prepareCleanup = {
+				name: error.name,
+				message: error.message,
+				errors: [
+					{
+						name: graph.name,
+						message: graph.message,
+						errors: [
+							{
+								name: prepareFailure.name,
+								message: prepareFailure.message,
+								samePrepareRejection: causes[0] === prepareFailure,
+							},
+						],
+					},
+				],
+			};
+			cleanupAuthorityErrors.push(error.message);
+			// Probe after the rejected binding finalizer has actually exited,
+			// independently of the earlier verified-root reacquisition.
+			withRawModelRequestJournalLeases(
+				{
+					storeId,
+					control: "shared",
+					maintenance: "shared",
+					ownerId: writerId,
+					registryId: prepareRegistryId,
+				},
+				raw => {
+					if (raw.registryId !== prepareRegistryId) throw new Error("physical root identity changed");
+					raw.assertHeld();
+				},
+			);
+			finalizerRootReleased = true;
+		} else if (
+			authorityDrain?.rejected === true &&
+			authorityDrain.causesMatch === true &&
+			drainCarriesSendFailure(error, lastSendFailure)
+		) {
+			// The binding finalizer re-reports the same expected drain rejection.
+			bindingDrainRejected = true;
+		} else if (authorityMutation === undefined || result === undefined) {
+			throw error;
+		} else {
+			cleanupAuthorityErrors.push(error instanceof Error ? error.message : String(error));
 		}
-		}
+	}
 	} finally {
 		try {
 			await cell.close();
@@ -388,6 +387,7 @@ CREATE TABLE store_config_event(${common},key TEXT NOT NULL,value_json TEXT NOT 
 	if (result === undefined) throw new Error("required-ready scenario produced no result");
 	if (scenario === "prepare-await-revoke") {
 		if (prepareCleanup === undefined) throw new Error("Binding drain did not retain the rejected prepare");
+		bindingDrainRejected = true;
 		return {
 			...result,
 			authorityMutation,
@@ -820,6 +820,7 @@ async function dispatchRegression(context: ReadyContext): Promise<object> {
 				if (response !== undefined) body = await response.text();
 			} catch (caught) {
 				rejected = true;
+				lastSendFailure = caught;
 				error = caught instanceof Error ? caught.message : String(caught);
 			}
 		})();
