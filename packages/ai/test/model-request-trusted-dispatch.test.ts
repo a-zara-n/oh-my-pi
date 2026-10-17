@@ -84,11 +84,24 @@ describe("D37 canonical required-ready builtin dispatch (native authority)", () 
 		});
 	}, 30_000);
 
-	test.skipIf(!nativePreloaded)("real principal revocation during prepare's await prevents admission issuance and releases its root", async () => {
-		expect(await probe("prepare-await-revoke")).toMatchObject({
-			preparingRejected: true, admissionReturned: false, received: 0,
-			rootReacquired: true, journalStateAfter: "required-revoked",
-			cleanupAuthorityErrors: [],
+	test.skipIf(!nativePreloaded)("revocation rejects prepare without admission and retains the same failure through binding drain and root release", async () => {
+		const result = await probe("prepare-await-revoke");
+		expect(result).toMatchObject({
+			preparingRejected: true, admissionReturned: false, admissionsIssued: 0, received: 0,
+			preparingError: { name: "Error", message: "Model request journal capability is unavailable" },
+			revocationSucceeded: true, rootReacquired: true, journalStateAfter: "required-revoked",
+			bindingDrainRejected: true, finalizerRootReleased: true,
+			cleanupAuthorityErrors: ["Journal principal drains failed"],
+		});
+		expect(result.prepareCleanup).toEqual({
+			name: "AggregateError", message: "Journal principal drains failed",
+			errors: [{
+				name: "AggregateError", message: "Journal bound principal graph failed",
+				errors: [{
+					name: "Error", message: "Model request journal capability is unavailable",
+					samePrepareRejection: true,
+				}],
+			}],
 		});
 	}, 30_000);
 

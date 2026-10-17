@@ -83,6 +83,10 @@ interface ReadyContext {
 	assertPhysicalRootReleased(): void;
 }
 
+// One scenario runs per child. Keep the actual rejected operation, not a
+// message-only approximation, for the binding finalizer's retained-failure check.
+let prepareAwaitRevocationFailure: Error | undefined;
+
 async function withReadyRoot(use: (context: ReadyContext) => Promise<object>): Promise<object> {
 	const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "d37-trusted-dispatch-")));
 	const cell = openFileJournalCell({ cwd: directory, sessionDir: path.join(directory, "sessions") });
@@ -104,6 +108,9 @@ async function withReadyRoot(use: (context: ReadyContext) => Promise<object>): P
 	let authorityMutation: "epoch" | "writer-close" | undefined;
 	let result: object | undefined;
 	const cleanupAuthorityErrors: string[] = [];
+	let prepareRegistryId: string | undefined;
+	let prepareCleanup: object | undefined;
+	let finalizerRootReleased = false;
 	try {
 		retainModelRequestWriterCredential(requester, {
 			writerId, token, role: "harness-core", capabilities: [],
@@ -143,6 +150,7 @@ CREATE TABLE store_config_event(${common},key TEXT NOT NULL,value_json TEXT NOT 
 				if (execution.journalState !== "required-ready") throw new Error("real File composition did not become ready");
 				const registry = cell.getHeader().modelRequestRegistry;
 				if (registry === undefined) throw new Error("real root registry missing");
+				if (scenario === "prepare-await-revoke") prepareRegistryId = registry.registryId;
 				let closing: Promise<void> | undefined;
 				const revoke = (): Promise<void> => closing ??= closeJournalSession(session);
 				try {
@@ -182,8 +190,42 @@ CREATE TABLE store_config_event(${common},key TEXT NOT NULL,value_json TEXT NOT 
 			});
 			});
 		} catch (error) {
-			if (authorityMutation === undefined || result === undefined) throw error;
-			cleanupAuthorityErrors.push(error instanceof Error ? error.message : String(error));
+			if (scenario === "prepare-await-revoke" && result !== undefined) {
+				const prepareFailure = prepareAwaitRevocationFailure;
+				if (prepareFailure === undefined || prepareRegistryId === undefined ||
+					!(error instanceof AggregateError) || error.message !== "Journal principal drains failed") throw error;
+				const drains: readonly unknown[] = error.errors;
+				const graph = drains[0];
+				if (drains.length !== 1 || !(graph instanceof AggregateError) ||
+					graph.message !== "Journal bound principal graph failed") throw error;
+				const causes: readonly unknown[] = graph.errors;
+				// Any additional or substituted cleanup failure remains an uncaught
+				// failure. Only this exact prepare rejection is expected here.
+				if (causes.length !== 1 || causes[0] !== prepareFailure) throw error;
+				prepareCleanup = {
+					name: error.name, message: error.message,
+					errors: [{
+						name: graph.name, message: graph.message,
+						errors: [{
+							name: prepareFailure.name, message: prepareFailure.message,
+							samePrepareRejection: causes[0] === prepareFailure,
+						}],
+					}],
+				};
+				cleanupAuthorityErrors.push(error.message);
+				// Probe after the rejected binding finalizer has actually exited,
+				// independently of the earlier verified-root reacquisition.
+				withRawModelRequestJournalLeases({
+					storeId, control: "shared", maintenance: "shared", ownerId: writerId, registryId: prepareRegistryId,
+				}, raw => {
+					if (raw.registryId !== prepareRegistryId) throw new Error("physical root identity changed");
+					raw.assertHeld();
+				});
+				finalizerRootReleased = true;
+			} else {
+				if (authorityMutation === undefined || result === undefined) throw error;
+				cleanupAuthorityErrors.push(error instanceof Error ? error.message : String(error));
+			}
 		}
 	} finally {
 		try { await cell.close(); }
@@ -203,6 +245,13 @@ CREATE TABLE store_config_event(${common},key TEXT NOT NULL,value_json TEXT NOT 
 		}
 	}
 	if (result === undefined) throw new Error("required-ready scenario produced no result");
+	if (scenario === "prepare-await-revoke") {
+		if (prepareCleanup === undefined) throw new Error("Binding drain did not retain the rejected prepare");
+		return {
+			...result, authorityMutation, cleanupAuthorityErrors, prepareCleanup,
+			bindingDrainRejected: true, finalizerRootReleased,
+		};
+	}
 	return { ...result, authorityMutation, cleanupAuthorityErrors };
 }
 
@@ -280,19 +329,29 @@ async function dispatchRegression(context: ReadyContext): Promise<object> {
 			);
 			let preparingRejected = false;
 			let admissionReturned = false;
+			let admissionsIssued = 0;
 			try {
 				const admission = await within(preparing, "prepare interrupted by real revocation");
 				admissionReturned = true;
+				admissionsIssued++;
 				// A mistakenly issued admission is cleaned up, never counted as
 				// success: the parent asserts admissionReturned is false.
 				endJournalSendStart(admission);
-			} catch { preparingRejected = !admissionReturned; }
+			} catch (error) {
+				if (admissionReturned || !(error instanceof Error) ||
+					error.message !== "Model request journal capability is unavailable") throw error;
+				prepareAwaitRevocationFailure = error;
+				preparingRejected = true;
+			}
 			const closed = await revocation;
 			if (!closed.ok) throw closed.error;
 			acquireAndReleaseRoot(context);
 			return {
-				preparingRejected, admissionReturned, received: server.requests.length,
-				rootReacquired: true, journalStateAfter: context.execution.journalState,
+				preparingRejected, admissionReturned, admissionsIssued, received: server.requests.length,
+				preparingError: prepareAwaitRevocationFailure === undefined ? undefined : {
+					name: prepareAwaitRevocationFailure.name, message: prepareAwaitRevocationFailure.message,
+				},
+				revocationSucceeded: closed.ok, rootReacquired: true, journalStateAfter: context.execution.journalState,
 			};
 		} finally { server.stop(); }
 	}
