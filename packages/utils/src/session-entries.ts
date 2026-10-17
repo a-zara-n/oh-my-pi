@@ -120,7 +120,7 @@ export interface ModelRequestMetadataEntry extends SessionEntryBase {
 	readonly record: ModelRequestLifecycleRecord | ModelRequestSourceLink;
 }
 
-/** Closed registry records identify core-owned members, never arbitrary filesystem paths. */
+/** Current closed registry records; writer identity belongs only to owner registration. */
 export type ModelRequestRegistryRecord =
 	| Readonly<{
 			event: "member-registered";
@@ -132,7 +132,7 @@ export type ModelRequestRegistryRecord =
 			journalEpoch: string;
 			firstSeq: 1;
 	  }>
-	| Readonly<{ event: "owner-registered"; ownerId: string; sessionId: string; journalEpoch: string }>
+	| Readonly<{ event: "owner-registered"; ownerId: string; sessionId: string; journalEpoch: string; writerOwnerId: string }>
 	| Readonly<{
 			event: "member-closed";
 			sessionId: string;
@@ -149,15 +149,24 @@ export type ModelRequestRegistryRecord =
 			outcome: "closed" | "faulted";
 	  }>;
 
-export interface ModelRequestRegistryEntry extends SessionEntryBase {
+/** Historical schema 1 retains its exact four record shapes, without inferred writer identity. */
+type LegacyModelRequestRegistryRecord =
+	| Exclude<ModelRequestRegistryRecord, { event: "owner-registered" }>
+	| Readonly<{ event: "owner-registered"; ownerId: string; sessionId: string; journalEpoch: string }>;
+
+interface ModelRequestRegistryEntryBase extends SessionEntryBase {
 	readonly type: "model_request_registry";
 	readonly parentId: null;
-	readonly schemaVersion: 1;
 	readonly registryId: string;
 	readonly registryEpoch: string;
 	readonly seq: number;
-	readonly record: ModelRequestRegistryRecord;
 }
+
+/** Version discrimination is required before consuming the current writer-owner mapping. */
+export type ModelRequestRegistryEntry = ModelRequestRegistryEntryBase & (
+	| Readonly<{ schemaVersion: 1; record: LegacyModelRequestRegistryRecord }>
+	| Readonly<{ schemaVersion: 2; record: ModelRequestRegistryRecord }>
+);
 
 export interface SessionHeader {
 	type: "session";
@@ -180,9 +189,9 @@ export interface SessionHeader {
 	providerPromptCacheKey?: string;
 	/** Optional canonical, non-transcript model-request journal identity. */
 	modelRequestJournal?: ModelRequestJournalDescriptor;
-	/** Canonical, non-transcript root registry identity. */
+	/** Canonical root registry identity; schema 1 is readable historical data, not current authority. */
 	modelRequestRegistry?: Readonly<{
-		schemaVersion: 1;
+		schemaVersion: 1 | 2;
 		registryId: string;
 		registryEpoch: string;
 		rootSessionId: string;

@@ -21,7 +21,7 @@ export function validateModelRequestRegistry(header: SessionHeader, entries: rea
 }> {
 	const registry = header.modelRequestRegistry;
 	if (!registry || !closedKeys(registry, ["schemaVersion", "registryId", "registryEpoch", "rootSessionId"]) ||
-		registry.schemaVersion !== 1 || registry.rootSessionId !== header.id ||
+		(registry.schemaVersion !== 1 && registry.schemaVersion !== 2) || registry.rootSessionId !== header.id ||
 		!/^jr_[0-7][0-9A-HJKMNP-TV-Z]{25}$/.test(registry.registryId) ||
 		!isCanonicalModelRequestId(registry.registryEpoch)) invalid();
 	type Member = { record: Extract<ModelRequestRegistryEntry["record"], { event: "member-registered" }>;
@@ -30,15 +30,21 @@ export function validateModelRequestRegistry(header: SessionHeader, entries: rea
 	const owners = new Map<string, Member>();
 	const active = new Map<string, Member>();
 	let throughSeq = 0;
+	// Schema 2 registration is one adjacent member/owner pair. Legacy history is not backfilled.
+	let pendingMember: Member | undefined;
 	for (const entry of entries) {
-		if (entry.type !== "model_request_registry") continue;
+		if (entry.type !== "model_request_registry") {
+			if (pendingMember) invalid();
+			continue;
+		}
 		if (!closedKeys(entry, ["type", "id", "parentId", "timestamp", "schemaVersion", "registryId", "registryEpoch", "seq", "record"]) ||
-			entry.parentId !== null || entry.schemaVersion !== 1 || entry.registryId !== registry.registryId ||
+			entry.parentId !== null || entry.schemaVersion !== registry.schemaVersion || entry.registryId !== registry.registryId ||
 			entry.registryEpoch !== registry.registryEpoch || entry.seq !== ++throughSeq ||
 			!Number.isSafeInteger(entry.seq) || typeof entry.timestamp !== "string" || !Number.isFinite(Date.parse(entry.timestamp))) invalid();
 		const record = entry.record;
 		if (!record || typeof record !== "object" || !isCanonicalModelRequestId(record.journalEpoch) ||
 			typeof record.sessionId !== "string" || !/^[A-Za-z0-9_-]+$/.test(record.sessionId)) invalid();
+		if (pendingMember && record.event !== "owner-registered") invalid();
 		if (record.event === "member-registered") {
 			if (!closedKeys(record, ["event", "sessionId", "parentSessionId", "ownerId", "persistenceOwnerRef", "journalRef", "journalEpoch", "firstSeq"]) ||
 				!isCanonicalModelRequestId(record.ownerId) || !isCanonicalModelRequestId(record.persistenceOwnerRef) ||
@@ -52,12 +58,20 @@ export function validateModelRequestRegistry(header: SessionHeader, entries: rea
 			}
 			const member: Member = { record, ownerRegistered: false, closed: false, ownerClosed: false };
 			members.set(record.journalEpoch, member); owners.set(record.ownerId, member); active.set(record.sessionId, member);
+			if (entry.schemaVersion === 2) pendingMember = member;
 		} else if (record.event === "owner-registered") {
 			const member = owners.get(record.ownerId);
-			if (!closedKeys(record, ["event", "ownerId", "sessionId", "journalEpoch"]) || !member ||
+			const ownerKeys = entry.schemaVersion === 2 ?
+				["event", "ownerId", "sessionId", "journalEpoch", "writerOwnerId"] :
+				["event", "ownerId", "sessionId", "journalEpoch"];
+			if (!closedKeys(record, ownerKeys) || !member ||
 				member.record.sessionId !== record.sessionId || member.record.journalEpoch !== record.journalEpoch ||
 				member.ownerRegistered || member.closed) invalid();
+			if (entry.schemaVersion === 2 &&
+				(pendingMember !== member || !("writerOwnerId" in record) ||
+					typeof record.writerOwnerId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(record.writerOwnerId))) invalid();
 			member.ownerRegistered = true;
+			pendingMember = undefined;
 		} else if (record.event === "member-closed") {
 			const member = members.get(record.journalEpoch);
 			if (!closedKeys(record, ["event", "sessionId", "journalEpoch", "throughSeq", "outcome"]) || !member?.ownerRegistered ||
@@ -75,6 +89,7 @@ export function validateModelRequestRegistry(header: SessionHeader, entries: rea
 			member.ownerClosed = true;
 		} else invalid();
 	}
+	if (pendingMember) invalid();
 	if (header.modelRequestJournal) {
 		for (const epoch of header.modelRequestJournal.epochs) {
 			const member = members.get(epoch.journalEpoch);

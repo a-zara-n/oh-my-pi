@@ -118,6 +118,28 @@ Canonical `getEntries()` and RPC `get_entries` retain metadata in append order, 
 
 The typed append methods require an opaque runtime-issued owner. `appendModelRequestMetadata(owner, record)` is non-leaf; `appendModelRequestSource(owner, source, link)` generates an actual assistant/model-usage entry and its source link inside one atomic persistence batch. Their returned promises acknowledge only a matching strict persisted-reader snapshot after flush, storage drain and required artifact copies. The owner is never an ID DTO, and existing read-only, extension/hook and RPC readers receive neither its issuer nor the session-bound sink. Ordinary construction, import and matching serialized ids do not issue an owner.
 
+The root's `modelRequestRegistry` descriptor is `{ schemaVersion: 2, registryId, registryEpoch, rootSessionId }`
+for current managed history. Its closed `model_request_registry` entries use the same version and registry
+identity, `parentId: null`, contiguous `seq`, and one of four records: `member-registered`,
+`owner-registered`, `member-closed`, or `owner-closed`. Only `owner-registered` adds the required
+`writerOwnerId`: the raw writer identifier (`[A-Za-z0-9_-]{1,128}`), not the journal owner's UUID.
+Each current member registration must be immediately followed by its matching owner registration.
+Journal owner UUIDs and epochs remain globally unique within the registry history, including after close;
+multiple owners/epochs may share a writer. Duplicate registrations and writer rebinding are rejected.
+Logical member/owner close does not prove that the shared OS writer lease has ended.
+
+Schema 1 registry descriptors and the exact historical four-record shapes remain readable and retainable
+through canonical serialization/export; no writer identity is inferred or backfilled. The exported
+`ModelRequestRegistryEntry` type discriminates schema 1 and 2, while `ModelRequestRegistryRecord` describes
+only current schema 2 records. Descriptor/entry version mismatches, mixed versions, unknown versions,
+missing current writer mappings and extra record fields are invalid. The pure registry validator still
+returns only its existing readonly registry identity/sequence projection and does not issue authority.
+Successful historical validation is not permission to resume managed sending or evidence of writer
+stoppage: current producers must explicitly require a schema 2 root and must not upgrade a schema 1 root
+in place. Source journal descriptors, metadata and acknowledgements stay schema 1 and do not duplicate
+`writerOwnerId`. Transcript/HTML/share exclusions remain unchanged.
+
+
 The managed acknowledgement contract is limited to persistent File storage after flush, storage drain and required artifact copies. File atomic rewrites use `requireAtomicReplace: true`; ordinary writes retain their existing fallback behavior when that option is omitted. The guarantee is **process-crash-reader-visible**, not power-loss durability: **No fsync** or fdatasync is added, and OS crashes, power failures, controller-cache loss and remote-replica loss are not covered. Memory, nonpersistent, Indexed, SQL, Redis and unadvertised third-party backends retain their ordinary behavior but do not provide this managed acknowledgement. These backend capabilities alone are not evidence that owner issuance or a managed append succeeded.
 
 #### ISS047 implementation and verification record

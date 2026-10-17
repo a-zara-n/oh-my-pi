@@ -4,6 +4,13 @@
 
 ### Added
 
+- Added schema 2 registry decoding and version-discriminated entry types. Current owner registrations
+  require the raw `writerOwnerId` and an adjacent matching member registration; duplicate/rebound
+  registrations, mixed versions and altered closed shapes are rejected without relaxing owner/epoch
+  uniqueness. Exact schema 1 history stays readable/exportable without inferred writer mappings and is
+  not current authority or resume proof. Source journal descriptors, metadata and acknowledgements
+  remain schema 1. Registry and persisted-reader regressions are added for parent verification only.
+
 - Added the closed SQLite factory `purpose` option: omitted/`general` preserves guarded
   general RO backup use, while `authority-control` requires explicit readonly/non-creating
   options and the fixed native authorizer. The verifier selects that purpose internally;

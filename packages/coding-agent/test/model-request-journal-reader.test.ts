@@ -11,6 +11,8 @@ import {
 import type { FileEntry,
 	ModelRequestLifecycleRecord,
 	ModelRequestMetadataEntry,
+	ModelRequestRegistryEntry,
+	ModelRequestRegistryRecord,
 	SessionHeader,
 	SessionMessageEntry, } from "@oh-my-pi/pi-utils/session-entries";
 import { loadEntriesFromFileStream } from "@oh-my-pi/pi-utils/session-file-reader";
@@ -88,6 +90,66 @@ describe("managed model request journal persisted reader boundary", () => {
 		const strict = await loadModelRequestJournalFromFile(file);
 		expect(strict.throughSeqByEpoch.get(EPOCH)).toBe(2);
 		expect(strict.metadataEntries).toEqual([metadata, linked]);
+	});
+
+	it.each([1, 2] as const)("retains exact registry schema %s through canonical readers, migration and persistence serialization", async schemaVersion => {
+		using dir = TempDir.createSync("@model-request-registry-reader-");
+		const file = path.join(dir.path(), "session.jsonl");
+		const blobs = new BlobStore(path.join(dir.path(), "blobs"));
+		const registryId = `jr_${"0".repeat(26)}`;
+		const registryEpoch = REQUEST;
+		const root: SessionHeader = { ...structuredClone(header), modelRequestRegistry: {
+			schemaVersion, registryId, registryEpoch, rootSessionId: "s1",
+		} };
+		const records: ModelRequestRegistryRecord[] = [
+			{ event: "member-registered", sessionId: "s1", parentSessionId: null, ownerId: OWNER,
+				persistenceOwnerRef: RESULT, journalRef: "s1", journalEpoch: EPOCH, firstSeq: 1 },
+			{ event: "owner-registered", ownerId: OWNER, sessionId: "s1", journalEpoch: EPOCH, writerOwnerId: "writer_shared" },
+			{ event: "member-closed", sessionId: "s1", journalEpoch: EPOCH, throughSeq: 1, outcome: "closed" },
+			{ event: "owner-closed", ownerId: OWNER, sessionId: "s1", journalEpoch: EPOCH, throughSeq: 1, outcome: "closed" },
+		];
+		const registry = records.map<ModelRequestRegistryEntry>((record, index) => {
+			const common = { type: "model_request_registry" as const, id: `registry_${index}`, parentId: null,
+				timestamp: ISO, registryId, registryEpoch, seq: index + 1 };
+			return schemaVersion === 2 ? { ...common, schemaVersion: 2, record } :
+				{ ...common, schemaVersion: 1, record: record.event === "owner-registered" ?
+					{ event: record.event, ownerId: record.ownerId, sessionId: record.sessionId, journalEpoch: record.journalEpoch } : record };
+		});
+		const entries: FileEntry[] = [root, ...registry, structuredClone(metadata)];
+		const persisted = entries.map(entry => prepareEntryForPersistence(entry, blobs));
+		expect(persisted).toEqual(entries);
+		await persist(file, persisted);
+		const bytes = await readFile(file, "utf8");
+		const ordinary = await loadEntriesFromFile(file);
+		const streaming = await loadEntriesFromFileStream(file);
+		const loaded = await loadSessionFile(file);
+		expect(ordinary).toEqual(entries);
+		expect(streaming.entries).toEqual(entries);
+		expect(loaded.entries).toEqual(entries);
+		migrateSessionEntries(ordinary);
+		expect(ordinary).toEqual(entries);
+		expect((await loadModelRequestJournalFromFile(file)).metadataEntries).toEqual([metadata]);
+		expect(`${ordinary.map(entry => JSON.stringify(entry)).join("\n")}\n`).toBe(bytes);
+		expect(bytes.includes("writerOwnerId")).toBe(schemaVersion === 2);
+	});
+
+	it("rejects mixed registry history in the canonical journal reader without rewriting persisted data", async () => {
+		using dir = TempDir.createSync("@model-request-registry-mixed-");
+		const file = path.join(dir.path(), "session.jsonl");
+		const root: SessionHeader = { ...structuredClone(header), modelRequestRegistry: {
+			schemaVersion: 2, registryId: `jr_${"0".repeat(26)}`, registryEpoch: REQUEST, rootSessionId: "s1",
+		} };
+		const common = { type: "model_request_registry", parentId: null, timestamp: ISO,
+			registryId: root.modelRequestRegistry?.registryId, registryEpoch: REQUEST };
+		await persist(file, [root,
+			{ ...common, id: "member", seq: 1, schemaVersion: 2, record: { event: "member-registered", sessionId: "s1",
+				parentSessionId: null, ownerId: OWNER, persistenceOwnerRef: RESULT, journalRef: "s1", journalEpoch: EPOCH, firstSeq: 1 } },
+			{ ...common, id: "owner", seq: 2, schemaVersion: 1, record: { event: "owner-registered", ownerId: OWNER,
+				sessionId: "s1", journalEpoch: EPOCH } },
+		]);
+		const bytes = await readFile(file, "utf8");
+		await expect(loadModelRequestJournalFromFile(file)).rejects.toThrow("Invalid model request registry");
+		expect(await readFile(file, "utf8")).toBe(bytes);
 	});
 
 	it("retains the ordinary lenient legacy reader while rejecting malformed managed snapshots", async () => {
