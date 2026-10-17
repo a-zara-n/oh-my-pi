@@ -213,6 +213,12 @@ Ordinary untracked delegation still avoids double authorization and retains
 the same ungated auxiliary transport. External marker registration no longer
 promises reference-identical `gateFetch` results.
 
+`transportFetch` independently records only the functions its own factory
+created in a private WeakSet. It never treats a copied function property or
+symbol as wrapper provenance, including when a supplied fetch arrives through
+the actual stream dispatcher/provider path. Ordinary factory-owned rewraps
+remain idempotent; custom fetch and Cowork defaults keep their untracked path.
+
 For a required transport, request-debug snapshot/file preparation is awaited
 before entering `gatedSend`, and response-debug wrapping stays after the returned
 response. The ordinary untracked sender retains its existing debug/Cowork path.

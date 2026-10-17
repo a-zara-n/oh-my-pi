@@ -11,10 +11,8 @@ import { gatedSend, markFetchGated } from "./model-request-fetch";
 import { createFetchRequestDebugSession, isRequestDebugEnabled } from "./request-debug";
 import { assertModelRequestBuiltinFetch, modelRequestBuiltinFetch } from "./model-request-builtin-fetch";
 
-/** Stamped on a fetch already built by {@link transportFetch}. */
-const TRANSPORT_FETCH = Symbol("omp.transportFetch");
-
-type TransportFetch = FetchImpl & { [TRANSPORT_FETCH]?: true };
+/** Only functions created by this module qualify for an identity-preserving rewrap. */
+const transportFetches = new WeakSet<FetchImpl>();
 
 function requireBuiltinTransport(base: FetchImpl): void {
 	try {
@@ -38,10 +36,10 @@ function requireBuiltinTransport(base: FetchImpl): void {
  * credential rotation or a fallback each reach the gate as a separate attempt.
  * With no gate registered the call goes straight through, unchanged.
  *
- * Idempotent: the built fetch is stamped and returned as-is on later passes.
- * `streamSimple` re-enters `stream`, and `streamSimpleRequest` re-enters itself
- * on auth retries, so without the stamp each entry point would add another
- * layer (three PI_REQ_DEBUG dumps for one request).
+ * Idempotent for this factory's own functions only. `streamSimple` re-enters
+ * `stream`, and `streamSimpleRequest` re-enters itself on auth retries, so a
+ * second layer would duplicate preparation/debug dumps. A copied property or
+ * symbol on an arbitrary supplied function is never transport evidence.
  */
 export function transportFetch(model: Model<Api>, fetchImpl: FetchImpl | undefined): FetchImpl {
 	const execution = getModelRequestRuntime().currentExecution();
@@ -49,8 +47,8 @@ export function transportFetch(model: Model<Api>, fetchImpl: FetchImpl | undefin
 	const required = execution !== undefined && execution.journalState !== "untracked";
 	// Do not resolve a caller's global getter even while constructing a required wrapper.
 	if (required) requireBuiltinTransport(modelRequestBuiltinFetch);
-	const given = fetchImpl as TransportFetch | undefined;
-	if (given?.[TRANSPORT_FETCH]) return given;
+	const given = fetchImpl;
+	if (given !== undefined && transportFetches.has(given)) return given;
 	const base =
 		given ??
 		(required
@@ -76,7 +74,7 @@ export function transportFetch(model: Model<Api>, fetchImpl: FetchImpl | undefin
 	/** The same transport with no gate: what a provider's non-inference requests (token exchange, metadata) use. */
 	const ungated: FetchImpl = (input, init) => send(input, prepare(input, init));
 	if (base.preconnect) ungated.preconnect = base.preconnect;
-	const fetch: TransportFetch = async (input, init) => {
+	const fetch: FetchImpl = async (input, init) => {
 		const sentInit = prepare(input, init);
 		const execution = getModelRequestRuntime().currentExecution();
 		assertJournalExecutionReady(execution);
@@ -98,7 +96,7 @@ export function transportFetch(model: Model<Api>, fetchImpl: FetchImpl | undefin
 		return gatedSend({ model, kind: "chat", input, init: sentInit, transport: base, send: () => send(input, sentInit) });
 	};
 	if (base.preconnect) fetch.preconnect = base.preconnect;
-	fetch[TRANSPORT_FETCH] = true;
+	transportFetches.add(fetch);
 	return markFetchGated(fetch, ungated);
 }
 
