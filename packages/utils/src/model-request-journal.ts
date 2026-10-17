@@ -1,14 +1,17 @@
 import type { ModelRequestPurpose } from "./model-request-data";
+import { validateModelRequestRegistry } from "./model-request-registry";
 import type {
 	ModelRequestJournalAck,
 	ModelRequestJournalModelRef,
 	ModelRequestJournalDescriptor,
 	ModelRequestLifecycleRecord,
 	ModelRequestMetadataEntry,
+	ModelRequestRegistryEntry,
 	ModelRequestSourceLink,
 	ModelRequestSourceLinkInput,
 	ModelRequestSourceProvenance,
 	SessionEntry,
+	SessionHeader,
 } from "./session-entries";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -221,6 +224,7 @@ export function validateModelRequestJournal(
 		epochIndices.set(epoch.journalEpoch, index);
 	}
 	const metadataEntries: ModelRequestMetadataEntry[] = [];
+	const registryEntries: ModelRequestRegistryEntry[] = [];
 	const sources = new Map<string, Record<string, unknown>>();
 	const entryIds = new Set<string>([descriptor.sessionId]);
 	let lastEpochIndex = 0;
@@ -229,6 +233,11 @@ export function validateModelRequestJournal(
 		if (!object(entry) || typeof entry.type !== "string" || !Object.hasOwn(ENTRY_TYPES, entry.type) ||
 			!entryId(entry.id) || entryIds.has(entry.id)) invalid();
 		entryIds.add(entry.id);
+		if (entry.type === "model_request_registry") {
+			// The canonical registry validator below checks the closed persisted shape.
+			registryEntries.push(entry as unknown as ModelRequestRegistryEntry);
+			continue;
+		}
 		if (entry.type !== "model_request_metadata") {
 			sources.set(entry.id, entry);
 			continue;
@@ -245,6 +254,9 @@ export function validateModelRequestJournal(
 		}
 		throughSeqByEpoch.set(entry.journalEpoch, entry.seq);
 		metadataEntries.push(entry);
+	}
+	if (header.modelRequestRegistry !== undefined || registryEntries.length > 0) {
+		validateModelRequestRegistry(header as unknown as SessionHeader, registryEntries);
 	}
 	return { descriptor, metadataEntries, throughSeqByEpoch };
 }
