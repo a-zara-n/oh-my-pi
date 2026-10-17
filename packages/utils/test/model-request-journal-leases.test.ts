@@ -167,6 +167,13 @@ mac("fixed model request journal OS leases", () => {
 		const storeId = `test-${randomUUID()}`;
 		const owner = process.getuid?.();
 		if (owner === undefined) throw new Error("Missing test uid");
+		// This probe must exit on callback settlement, not wait for stdin EOF like the
+		// long-lived process-death fixture. The parent deliberately blocks in spawnSync.
+		const probe = `import { withRawModelRequestJournalLeases } from ${JSON.stringify(join(import.meta.dir, "../src/model-request-journal-leases.ts"))};
+withRawModelRequestJournalLeases(${JSON.stringify({storeId, control: "shared", maintenance: "shared", registryId: "registry-test"})}, raw => {
+	raw.assertHeld();
+	process.stdout.write("held\\n");
+});`;
 		let namespace: string | undefined;
 		let retained: RawModelRequestJournalRetainedRootScope | undefined;
 		try {
@@ -177,11 +184,11 @@ mac("fixed model request journal OS leases", () => {
 				expect(retained.ownerId).toBe("writer-test");
 				const root = join(raw.namespacePath, "accounting/registry-test.lock");
 				expect(tryAcquireRawModelRequestJournalFileLease(root, "exclusive", owner)).toBeUndefined();
-				const busy = Bun.spawnSync([process.execPath, join(import.meta.dir, "fixtures/model-request-journal-lease-holder.ts"), storeId, "registry-test"], {stdin: "ignore", stdout: "pipe", stderr: "pipe"});
+				const busy = Bun.spawnSync([process.execPath, "--eval", probe], {stdin: "ignore", stdout: "pipe", stderr: "pipe"});
 				expect(busy.exitCode).not.toBe(0);
 				retained.release();
 				// No await or Promise settlement may intervene between release and the OS probe.
-				const available = Bun.spawnSync([process.execPath, join(import.meta.dir, "fixtures/model-request-journal-lease-holder.ts"), storeId, "registry-test"], {stdin: "ignore", stdout: "pipe", stderr: "pipe"});
+				const available = Bun.spawnSync([process.execPath, "--eval", probe], {stdin: "ignore", stdout: "pipe", stderr: "pipe"});
 				expect(available.exitCode).toBe(0);
 				expect(available.stdout.toString()).toBe("held\n");
 				retained.release();
@@ -242,13 +249,23 @@ mac("fixed model request journal OS leases", () => {
 					subset.assertHeld();
 					await gate.promise;
 				});
-				expect(() => retainRawModelRequestJournalRoot(raw, "other-root")).toThrow("order rejected");
-				withRawModelRequestJournalLeases({storeId, control: "shared", maintenance: "shared"}, () => {
+				let failure: unknown;
+				let failed = false;
+				try {
 					expect(() => retainRawModelRequestJournalRoot(raw, "other-root")).toThrow("order rejected");
-					expect(() => retained?.assertHeld()).toThrow("ended");
-				});
-				gate.resolve();
-				await child;
+					withRawModelRequestJournalLeases({storeId, control: "shared", maintenance: "shared"}, () => {
+						expect(() => retainRawModelRequestJournalRoot(raw, "other-root")).toThrow("order rejected");
+						expect(() => retained?.assertHeld()).toThrow("ended");
+					});
+				} catch (error) { failed = true; failure = error; }
+				finally {
+					gate.resolve();
+					try { await child; } catch (error) {
+						if (failed) throw new AggregateError([failure, error], "Subset assertions and child settlement failed");
+						throw error;
+					}
+				}
+				if (failed) throw failure;
 				expect(() => retained?.assertHeld()).toThrow("ended");
 				const next = retainRawModelRequestJournalRoot(raw, "other-root");
 				next.assertHeld();
