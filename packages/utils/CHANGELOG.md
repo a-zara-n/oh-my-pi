@@ -12,6 +12,9 @@
 
 ### Added
 
+- Extended the existing journal execution identity checker with an optional genuine execution
+  to compare the leaf's exact private family. This is a pure identity check, not readiness,
+  authority or an admission, and its original one-argument behavior is unchanged.
 - Added schema 2 registry decoding and version-discriminated entry types. Current owner registrations
   require the raw `writerOwnerId` and an adjacent matching member registration; duplicate/rebound
   registrations, mixed versions and altered closed shapes are rejected without relaxing owner/epoch

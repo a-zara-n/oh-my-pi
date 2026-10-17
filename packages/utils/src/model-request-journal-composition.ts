@@ -2000,8 +2000,9 @@ class JournalExecutionImpl implements ModelRequestExecution {
 }
 Object.freeze(JournalExecutionImpl.prototype);
 
-export function assertJournalExecutionIdentity(execution: unknown): asserts execution is ModelRequestExecution {
-	requireExecution(execution);
+export function assertJournalExecutionIdentity(execution: unknown, expectedFamilyOf?: ModelRequestExecution): asserts execution is ModelRequestExecution {
+	const state = requireExecution(execution);
+	if (expectedFamilyOf !== undefined && state.family !== requireExecution(expectedFamilyOf).family) unavailable();
 }
 
 export function createJournalExecution(input: Readonly<{
