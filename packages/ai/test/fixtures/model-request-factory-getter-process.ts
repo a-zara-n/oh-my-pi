@@ -77,7 +77,7 @@ CREATE TABLE store_config_event(${common},key TEXT NOT NULL,value_json TEXT NOT 
 				sessionId: () => "d37-getter-root",
 				root: { kind: "self", modelRequestJournalLeaseBinding: binding },
 				agent: { id: "d37-getter-agent", name: "main", kind: "main", depth: 0 },
-				purpose: "chat",
+				purpose: "main",
 			});
 			const factory = constructWithGetter(execution);
 			let invocationRejected = false;
