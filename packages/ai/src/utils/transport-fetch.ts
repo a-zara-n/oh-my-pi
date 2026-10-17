@@ -53,7 +53,7 @@ export function transportFetch(model: Model<Api>, fetchImpl: FetchImpl | undefin
 	if (base.preconnect) ungated.preconnect = base.preconnect;
 	const fetch: TransportFetch = async (input, init) => {
 		const sentInit = prepare(input, init);
-		return gatedSend({ model, kind: "chat", input, init: sentInit, send: () => send(input, sentInit) });
+		return gatedSend({ model, kind: "chat", input, init: sentInit, transport: base, send: () => send(input, sentInit) });
 	};
 	if (base.preconnect) fetch.preconnect = base.preconnect;
 	fetch[TRANSPORT_FETCH] = true;

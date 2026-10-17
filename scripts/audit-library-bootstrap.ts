@@ -1,4 +1,7 @@
-// This isolated preload intentionally has no application imports: selecting SQLite must precede their evaluation.
+// Capture the runtime builtin before extensions, caller configuration, or the application graph can run.
+// This leaf has no runtime dependencies and does not open SQLite.
+import "../packages/ai/src/utils/model-request-builtin-fetch";
+// Selecting SQLite must still precede evaluation of every other application module.
 import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";

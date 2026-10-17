@@ -25,6 +25,7 @@ import type {
 import { currentModelRequestDestination, nextModelRequestAttemptLink } from "../model-request-lineage";
 import { getModelRequestRuntime } from "../model-request-runtime";
 import { copyResponseMetadata } from "./request-debug";
+import { assertModelRequestBuiltinFetch } from "./model-request-builtin-fetch";
 
 /**
  * Every fetch that authorizes each of its calls, mapped to the same transport without the gate. Membership is how
@@ -255,7 +256,9 @@ export interface GatedSendArgs {
 	readonly kind: ModelRequestKind;
 	readonly input: string | URL | Request;
 	readonly init: RequestInit | undefined;
-	/** Performs the actual I/O. Not called unless the gate permits. */
+	/** Exact underlying fetch reference; a callback, signature or name cannot authenticate a managed transport. */
+	readonly transport?: FetchImpl;
+	/** Ordinary untracked I/O only. Never evidence that a required transport is supported. */
 	readonly send: () => Promise<Response>;
 }
 
@@ -267,6 +270,15 @@ export async function gatedSend(args: GatedSendArgs): Promise<Response> {
 	const runtime = getModelRequestRuntime();
 	const execution = runtime.currentExecution();
 	assertJournalExecutionReady(execution);
+	if (execution !== undefined && execution.journalState !== "untracked") {
+		try {
+			assertModelRequestBuiltinFetch(args.transport);
+		} catch (error) {
+			throw new ModelRequestDeniedError("transport-unsupported", "required model request needs the startup builtin fetch", {
+				cause: error,
+			});
+		}
+	}
 	if (!runtime.hasGate() && (execution === undefined || execution.journalState === "untracked")) return args.send();
 	const { input, init } = args;
 	const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
@@ -324,7 +336,8 @@ export async function gatedSend(args: GatedSendArgs): Promise<Response> {
  */
 export function gateFetch(model: ModelRequestModelRef, kind: ModelRequestKind, base: FetchImpl): FetchImpl {
 	if (ungatedTwins.has(base)) return base;
-	const gated: FetchImpl = (input, init) => gatedSend({ model, kind, input, init, send: () => base(input, init) });
+	const gated: FetchImpl = (input, init) =>
+		gatedSend({ model, kind, input, init, transport: base, send: () => base(input, init) });
 	if (base.preconnect) gated.preconnect = base.preconnect;
 	return markFetchGated(gated, base);
 }

@@ -159,6 +159,54 @@ dispatched that must be declared: a local `streamSimple` next to a separately su
 `streamSimple` only. The `openai-codex` WebSocket path (also taken by the v2 streaming compaction) does not call any
 hook yet.
 
+### Audit startup builtin identity (D-37)
+
+The isolated `scripts/audit-library-bootstrap.ts` imports the dependency-free
+`utils/model-request-builtin-fetch` leaf before the application graph. That leaf
+captures the actual `globalThis.fetch` reference once. Its non-replaceable
+process identity distinguishes the canonical module from a separately evaluated
+copy; required fetch wrappers reject a custom/queued sender or a later global
+replacement before invoking that sender. Function source, names, URLs, caller
+booleans and callback registration are not transport evidence. The leaf itself
+does not select SQLite, load a provider, or change ordinary untracked custom-fetch
+and Cowork behavior.
+
+This requires trusted startup to run before extensions, configuration or other
+untrusted JavaScript. It is not an in-process JavaScript sandbox and does not
+prove that a builtin call starts DNS, TLS or socket writes synchronously.
+**The capture/identity check alone does not enable required sending.** Required
+sends remain `transport-unsupported` until the journal leaf supplies the approved
+one-use admission and actual synchronous short-root release contract.
+
+Parent verification uses the real builtin, not a fake-fetch wiring test:
+
+1. Run `bun test packages/ai/test/model-request-builtin-fetch.test.ts` and the
+   existing transport-hook suite. The capture suite covers real loopback I/O,
+   queued custom-sender rejection, a replacement getter that must not execute,
+   and a separately evaluated physical module copy.
+2. With the completed journal admission implementation and native artifact,
+   launch the isolated integration fixture through `audit-library-bootstrap.ts`;
+   use a fresh real authority database/File principal and only a credential-free
+   loopback route. Exercise both no-gate and gate-`pass` required attempts.
+3. For gate deny/abort, revoke while prepare awaits, revoke after admission but
+   before consumption, and authority/epoch/family-generation changes, require
+   zero builtin invocations and zero loopback requests. Replay the exact
+   consumed admission and require rejection, not a second dispatch.
+4. Observe `begin → lease.beginSend → actual captured builtin invocation →
+   finally end` in one stack; prove another root lease can be acquired before the
+   returned fetch Promise resolves. A synchronous builtin failure must also
+   release the root and leave the admission unusable.
+5. Separately hold the real loopback response open after dispatch, revoke the
+   family, then finish/drain it. Dispatch-before-revoke is inflight: later packet
+   arrival is permitted, and cancellation or a missing packet is not evidence of
+   zero charge. Preserve its reservation/unknown accounting until the existing
+   outcome/drain contract resolves it. This is not the former zero-wire guarantee
+   for revoke after invocation but before runtime-internal network work.
+
+Items 2–5 require the actual journal admission contract; the capture unit suite
+does not establish them, provider lifecycle producer coverage, or route approval.
+
+
 ## Denial is terminal
 
 A denial carries `AIError.Flag.ModelRequestDenied` (an exclusive classification: `AIError.classify` returns only that
