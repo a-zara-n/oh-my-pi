@@ -67,8 +67,10 @@ mac("authority private binding lifetime with actual File principals", () => {
 				const parent = await fixture.ready(binding, root);
 				await fixture.ready(binding, child, parent);
 				const retained = retainVerifiedModelRequestJournalRoot(binding, "lifetime-use");
+				retained.assertActive();
 				entered.resolve(retained);
 				await useSettlement.promise;
+				retained.assertActive();
 				// This caller-owned root is not the File registry. End its real
 				// ownership before a different registry's logical-close acquisition.
 				retained.release();
@@ -76,7 +78,9 @@ mac("authority private binding lifetime with actual File principals", () => {
 			});
 			void operation.catch(error => entered.reject(error));
 			const retained = await entered.promise;
-			retained.assertActive();
+			// This observer does not inherit the genuine callback's lease ALS.
+			// Its inability to use the scope is distinct from the OS lock being held.
+			expect(() => retained.assertActive()).toThrow("Journal retained root ended");
 			expect(closedSessions(root)).toEqual([]);
 			assertExclusiveLease(path.join(fixture.namespace, "accounting/lifetime-use.lock"), true);
 			useSettlement.resolve();
