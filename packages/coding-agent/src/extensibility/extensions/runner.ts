@@ -291,20 +291,12 @@ function createHandlerContext(
  * review, `chatgpt-codex-connector[bot]`). `setTimeout` returns a handle we
  * can `clearTimeout` on the winning branch.
  */
-function startRaceHandlerWithTimeout<T>(
+async function raceHandlerWithTimeout<T>(
 	work: (handlerSignal: AbortSignal, timeoutBudget: HandlerTimeoutBudget) => Promise<T> | T,
 	timeoutMs: number,
 	signal?: AbortSignal,
-): {
-	workPromise: Promise<T | undefined>;
-	resultPromise: Promise<T | typeof EXTENSION_HANDLER_TIMEOUT | typeof EXTENSION_HANDLER_ABORTED>;
-} {
-	if (signal?.aborted) {
-		return {
-			workPromise: Promise.resolve(undefined),
-			resultPromise: Promise.resolve(EXTENSION_HANDLER_ABORTED),
-		};
-	}
+): Promise<T | typeof EXTENSION_HANDLER_TIMEOUT | typeof EXTENSION_HANDLER_ABORTED> {
+	if (signal?.aborted) return EXTENSION_HANDLER_ABORTED;
 
 	const timeoutController = new AbortController();
 	const handlerSignal = signal ? AbortSignal.any([signal, timeoutController.signal]) : timeoutController.signal;
@@ -356,37 +348,28 @@ function startRaceHandlerWithTimeout<T>(
 		},
 	};
 	armTimer();
-	const workPromise = Promise.resolve(work(handlerSignal, timeoutBudget));
-	const resultPromise = (async () => {
-		try {
-			if (signal?.aborted) return EXTENSION_HANDLER_ABORTED;
-			const result = await Promise.race([workPromise, interruptPromise]);
-			if (result === EXTENSION_HANDLER_TIMEOUT) {
-				await Promise.race([
-					workPromise.then(
-						() => undefined,
-						() => undefined,
-					),
-					Bun.sleep(0),
-				]);
-			}
-			return result;
-		} finally {
-			settle();
-			signal?.removeEventListener("abort", onAbort);
+	try {
+		if (signal?.aborted) return EXTENSION_HANDLER_ABORTED;
+		const workPromise = Promise.resolve(work(handlerSignal, timeoutBudget));
+		const result = await Promise.race([workPromise, interruptPromise]);
+		if (result === EXTENSION_HANDLER_TIMEOUT) {
+			await Promise.race([
+				workPromise.then(
+					() => undefined,
+					() => undefined,
+				),
+				Bun.sleep(0),
+			]);
 		}
-	})();
-	return { workPromise, resultPromise };
+		return result;
+	} finally {
+		settle();
+		signal?.removeEventListener("abort", onAbort);
+	}
 }
-
 const MAX_PENDING_CREDENTIAL_DISABLED = 32;
 
-/**
- * Buffer cap for `mcp_notification` events received before {@link ExtensionRunner.initialize}
- * has run. Sized to match the manager-side buffer in `MCPManager.NOTIFICATION_BUFFER_CAP` so
- * the two layers can't drop different amounts of the same burst — the pipe drains, or it
- * spills, but it does so consistently at both ends. Drop-oldest under pressure.
- */
+
 const MAX_PENDING_MCP_NOTIFICATIONS = 100;
 
 /**
@@ -1575,43 +1558,6 @@ export class ExtensionRunner {
 			let handlerResult: R | typeof EXTENSION_HANDLER_TIMEOUT | typeof EXTENSION_HANDLER_ABORTED | undefined;
 			let handlerFailure: { error: unknown } | undefined;
 			let flushFailure: unknown;
-			try {
-				const raced = startRaceHandlerWithTimeout(
-					async (handlerSignal, budget) => {
-						registrationScope.signal = handlerSignal;
-						let result: R | undefined;
-						try {
-							const handlerContext = createHandlerContext(
-								ctx,
-								handlerSignal,
-								event.type === "tool_call" ? budget : undefined,
-							);
-							result = await this.#toolRegistrationScope.run(registrationScope, () =>
-								handler(event, handlerContext),
-							);
-						} catch (error) {
-							handlerFailure = { error };
-						} finally {
-							registrationScope.closed = true;
-						}
-						try {
-							await this.#flushToolRegistrations(registrationScope.pending);
-						} catch (error) {
-							flushFailure = error;
-							handlerFailure ??= { error };
-						}
-						return result;
-					},
-					timeoutMs,
-					signal,
-				);
-				outerWork.trackDetached(raced.workPromise);
-				handlerResult = await this.runScoped(() => raced.resultPromise);
-			} catch (error) {
-				handlerFailure = { error };
-			} finally {
-				registrationScope.closed = true;
-			}
 			const aggregateFailure = (): unknown | undefined => {
 				const failures: unknown[] = [];
 				if (handlerFailure) failures.push(handlerFailure.error);
@@ -1620,6 +1566,49 @@ export class ExtensionRunner {
 				if (failures.length === 1) return failures[0];
 				return new AggregateError(failures, "Extension handler outer work failed");
 			};
+			try {
+				handlerResult = await this.runScoped(() =>
+					raceHandlerWithTimeout(
+						(handlerSignal: AbortSignal, budget: HandlerTimeoutBudget) => {
+							registrationScope.signal = handlerSignal;
+							const raw = (async () => {
+								let result: R | undefined;
+								try {
+									const handlerContext = createHandlerContext(
+										ctx,
+										handlerSignal,
+										event.type === "tool_call" ? budget : undefined,
+									);
+									result = await this.#toolRegistrationScope.run(registrationScope, () =>
+										handler(event, handlerContext),
+									);
+								} catch (error) {
+									handlerFailure = { error };
+								} finally {
+									registrationScope.closed = true;
+								}
+								try {
+									await this.#flushToolRegistrations(registrationScope.pending);
+								} catch (error) {
+									flushFailure = error;
+									handlerFailure ??= { error };
+								}
+								return result;
+							})();
+							// The raw handler+flush future stays on the open journal work handle
+							// for its full lifetime, including past a timeout race loss.
+							outerWork.trackDetached(raw);
+							return raw;
+						},
+						timeoutMs,
+						signal,
+					),
+				);
+			} catch (error) {
+				handlerFailure = { error };
+			} finally {
+				registrationScope.closed = true;
+			}
 			try {
 				if (handlerResult === EXTENSION_HANDLER_ABORTED) return undefined;
 				if (handlerResult === EXTENSION_HANDLER_TIMEOUT) {
@@ -1651,7 +1640,14 @@ export class ExtensionRunner {
 				return handlerResult as R | undefined;
 			} finally {
 				try {
-					await outerWork.complete(aggregateFailure());
+					const failure = aggregateFailure();
+					// Bounded consumer timeout returns before the raw handler/flush future settles;
+					// journal work still drains on the open handle in the background.
+					if (handlerResult === EXTENSION_HANDLER_TIMEOUT) {
+						void outerWork.complete(failure).catch(() => {});
+					} else {
+						await outerWork.complete(failure);
+					}
 				} catch {
 					// Outer work end is accounted; handler errors were already surfaced.
 				}

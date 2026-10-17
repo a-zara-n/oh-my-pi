@@ -9,12 +9,11 @@
 
 import type { AgentMessage } from "@oh-my-pi/pi-utils/agent-messages";
 import { logger, prompt } from "@oh-my-pi/pi-utils";
+import type { AgentSession } from "../session/agent-session";
 import type { Settings } from "../config/settings";
 import { memoryToolRefs } from "../memory-backend/tool-names";
 import type { MemoryBackend, MemoryBackendStartOptions, MemoryPromptPreparation } from "../memory-backend/types";
 import hindsightInstructions from "../prompts/system/hindsight-instructions.md" with { type: "text" };
-import type { AgentSession } from "../session/agent-session";
-import { trackAgentSessionOuterWork } from "../session/internal/agent-session-outer-work";
 import { type BankScope, computeBankScope } from "./bank";
 import { createHindsightClient } from "./client";
 import { type HindsightConfig, isHindsightConfigured, loadHindsightConfig } from "./config";
@@ -317,12 +316,13 @@ async function installPrimaryState(
 	// because `runMentalModelLoad` calls `refreshBaseSystemPrompt`.
 	if (config.mentalModelsEnabled) {
 		const loadPromise = state.runMentalModelLoad(scope);
-		trackAgentSessionOuterWork(session, loadPromise);
+		// The RAW bootstrap is held on a self-contained journal work handle inside
+		// HindsightSessionState.runMentalModelLoad; this deadline-settled wrapper is
+		// consumer-facing only and must not be tracked as outer work.
 		state.mentalModelsLoadPromise = loadPromise.catch(err => {
 			logger.debug("Hindsight: mental-model bootstrap failed", { bankId: state.bankId, error: String(err) });
 		});
 	}
-
 	return state;
 }
 

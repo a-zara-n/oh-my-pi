@@ -18,8 +18,8 @@ import type { MemoryPromptPreparation } from "../memory-backend/types";
 import { redactMemorySecrets, redactRememberWrite } from "../memory-backend/redact";
 import type { AgentSession, AgentSessionEvent } from "../session/agent-session";
 import {
+	detachAgentSessionOuterWork,
 	runAgentSessionOuterWork,
-	trackAgentSessionOuterWork,
 } from "../session/internal/agent-session-outer-work";
 import type { MnemopiBackendConfig, MnemopiScoping } from "./config";
 import { mnemopiEmbedClient } from "./embed-client";
@@ -830,12 +830,12 @@ export class MnemopiSessionState {
 				logger.warn("Mnemopi: consolidate-on-dispose exceeded shutdown budget; detaching to background.", {
 					timeoutMs,
 				});
-				// Defer close until the in-flight consolidate settles so SQLite
+				detachAgentSessionOuterWork(this.session, consolidatePromise.finally(closeOwned), error => {
+					logger.warn("Mnemopi: detached consolidate-on-dispose failed.", { error: String(error) });
+				});
 				// writes don't race a closed handle. The process is on the way
 				// to `postmortem.quit(0)`; if it exits first, the OS reclaims
 				// the handles (and a still-pending embed() goes down with the
-				// embed worker the caller is about to SIGKILL).
-				trackAgentSessionOuterWork(this.session, consolidatePromise.finally(closeOwned));
 				return;
 			}
 		} else {

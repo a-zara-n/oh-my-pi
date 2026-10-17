@@ -18,14 +18,14 @@ function combineJournalWorkErrors(errors: unknown[]): unknown | undefined {
 	return new AggregateError(failures, "Journal outer work failed");
 }
 
-/** Drain every detached future; late registrations during settlement stay in the set until empty. */
-async function drainDetachedPromises(tracked: Set<Promise<unknown>>, failures: unknown[]): Promise<void> {
+/**
+ * Wait for every detached future; late registrations during settlement stay in the set
+ * until empty. Failures are recorded at settle time by `trackDetached`, so a promise
+ * that settles (and unregisters) before `complete` drains still keeps its failure.
+ */
+async function drainDetachedPromises(tracked: Set<Promise<unknown>>): Promise<void> {
 	while (tracked.size > 0) {
-		const batch = [...tracked];
-		const settled = await Promise.allSettled(batch);
-		for (const result of settled) {
-			if (result.status === "rejected") failures.push(result.reason);
-		}
+		await Promise.allSettled([...tracked]);
 	}
 }
 
@@ -59,9 +59,17 @@ class JournalOuterWorkScopeImpl implements JournalOuterWorkScope {
 	trackDetached(promise: Promise<unknown>): void {
 		if (!this.active) return;
 		this.#tracked.add(promise);
-		void promise.finally(() => this.#tracked.delete(promise)).catch(error => {
-			this.#failures.push(error);
-		});
+		// Keep rejections off the unhandled-rejection path until the journal end
+		// accounting observes them, and record the failure at settle time so a
+		// promise that unregisters before `complete` still keeps its cause.
+		void promise.catch(() => undefined);
+		void promise.then(
+			() => this.#tracked.delete(promise),
+			error => {
+				this.noteFailure(error);
+				this.#tracked.delete(promise);
+			},
+		);
 	}
 
 	async complete(primaryError?: unknown): Promise<void> {
@@ -71,7 +79,7 @@ class JournalOuterWorkScopeImpl implements JournalOuterWorkScope {
 		}
 		const failures = [...this.#failures];
 		if (primaryError !== undefined) failures.push(primaryError);
-		await drainDetachedPromises(this.#tracked, failures);
+		await drainDetachedPromises(this.#tracked);
 		this.#ended = true;
 		const error = combineJournalWorkErrors(failures);
 		endJournalWork(this.#handle, error === undefined ? { type: "fulfilled" } : { type: "rejected", error });
