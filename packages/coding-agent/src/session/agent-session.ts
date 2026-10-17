@@ -988,7 +988,7 @@ export class AgentSession implements SettingsScope {
 	#fallbackExtensionTimers: ManagedTimers | undefined = undefined;
 	#turnIndex = 0;
 	#messageEndPersistenceTail: Promise<void> = Promise.resolve();
-	#pendingMessageEndPersistence = new Map<string, Promise<void>>();
+	#pendingMessageEndPersistence = new Map<string, Promise<string | undefined>>();
 	#persistedMessageKeys: { anchor: string; keys: Set<string> } | undefined;
 
 	// Custom commands (TypeScript slash commands)
@@ -1814,7 +1814,7 @@ export class AgentSession implements SettingsScope {
 			waitForSessionMessagePersistence: message => this.#waitForSessionMessagePersistence(message),
 			appendSessionMessage: message => this.#appendSessionMessage(message),
 			persistedAssistantEntryId: message => (message as PersistedAssistantMessage)[kPersistedSessionEntryId],
-			sessionMessageAlreadyPersisted: message => this.#sessionMessageAlreadyPersisted(message),
+			sessionMessageAlreadyPersisted: message => this.#persistedSessionMessageEntryId(message) !== undefined,
 			setModelWithProviderSessionReset: model => this.#setModelWithProviderSessionReset(model),
 			resolveActiveEditMode: () => this.#tools.resolveActiveEditMode(),
 			syncAfterModelChange: previousEditMode => this.#tools.syncAfterModelChange(previousEditMode),
@@ -3497,7 +3497,7 @@ export class AgentSession implements SettingsScope {
 	};
 
 	/** Commit messages in emission order without waiting for notification listeners. */
-	#queueMessageEndPersistence(message: AgentMessage, promptGeneration: number): Promise<void> {
+	#queueMessageEndPersistence(message: AgentMessage, promptGeneration: number): Promise<string | undefined> {
 		const key = sessionMessagePersistenceKey(message);
 		const pending = this.#messageEndPersistenceTail
 			.then(() => this.#persistMessageEnd(message, promptGeneration))
@@ -3507,7 +3507,10 @@ export class AgentSession implements SettingsScope {
 				}
 			});
 		if (key !== undefined) this.#pendingMessageEndPersistence.set(key, pending);
-		this.#messageEndPersistenceTail = pending.catch(() => {});
+		this.#messageEndPersistenceTail = pending.then(
+			() => {},
+			() => {},
+		);
 		return pending;
 	}
 
@@ -3569,10 +3572,10 @@ export class AgentSession implements SettingsScope {
 	}
 
 	/**
-	 * True when {@link message} is structurally identical to a message already
-	 * appended to the current branch. Uses the current branch's memoized
-	 * persistence-key cache for the common missing-key case, and only walks the
-	 * branch to verify content when a key hit could be a rare collision.
+	 * Returns the entry ID when {@link message} is structurally identical to a
+	 * message already appended to the current branch. Uses the current branch's
+	 * memoized persistence-key cache for the common missing-key case, and only
+	 * walks the branch to verify content when a key hit could be a rare collision.
 	 *
 	 * Error turns need one extra discriminator. An empty error turn carries no
 	 * content at all, so every failed attempt of one retry saga serializes to the
@@ -3584,11 +3587,11 @@ export class AgentSession implements SettingsScope {
 	 * supersedes, and the session journal silently loses the record of why the
 	 * run stopped. The failure text is the only thing that distinguishes them.
 	 */
-	#sessionMessageAlreadyPersisted(message: AgentMessage): boolean {
+	#persistedSessionMessageEntryId(message: AgentMessage): string | undefined {
 		const key = sessionMessagePersistenceKey(message);
-		if (key === undefined) return false;
+		if (key === undefined) return undefined;
 		const keys = this.#ensurePersistedMessageKeys();
-		if (!keys.has(key)) return false;
+		if (!keys.has(key)) return undefined;
 		const branch = this.sessionManager.getBranchView();
 		for (let index = branch.length - 1; index >= 0; index--) {
 			const entry = branch[index];
@@ -3602,9 +3605,9 @@ export class AgentSession implements SettingsScope {
 			) {
 				continue;
 			}
-			return true;
+			return entry.id;
 		}
-		return false;
+		return undefined;
 	}
 
 	#appendSessionMessage(
@@ -3632,7 +3635,7 @@ export class AgentSession implements SettingsScope {
 		return entryId;
 	}
 
-	#persistSessionMessageIfMissing(message: AgentMessage): void {
+	#persistSessionMessageIfMissing(message: AgentMessage): string | undefined {
 		if (
 			message.role !== "user" &&
 			message.role !== "developer" &&
@@ -3642,7 +3645,8 @@ export class AgentSession implements SettingsScope {
 		) {
 			return;
 		}
-		if (this.#sessionMessageAlreadyPersisted(message)) return;
+		const persistedEntryId = this.#persistedSessionMessageEntryId(message);
+		if (persistedEntryId !== undefined) return persistedEntryId;
 		if (message.role === "assistant") {
 			const assistantMsg = message as AssistantMessage;
 			if (this.#recovery.isClassifierRefusal(assistantMsg)) return;
@@ -3661,9 +3665,8 @@ export class AgentSession implements SettingsScope {
 			message.role === "toolResult" &&
 			semanticToolResult(message.toolName, message)?.toolName === "rewind" &&
 			this.#rewoundToolResultIds.delete(message.toolCallId);
-		if (!skipPersistedRewindResult) {
-			this.#appendSessionMessage(message);
-		}
+		if (skipPersistedRewindResult) return;
+		return this.#appendSessionMessage(message);
 	}
 
 	/**
@@ -3694,7 +3697,7 @@ export class AgentSession implements SettingsScope {
 		};
 	}
 
-	#persistMessageEnd(message: AgentMessage, promptGeneration: number): void {
+	#persistMessageEnd(message: AgentMessage, promptGeneration: number): string | undefined {
 		// Session transitions may replace the transcript before a queued commit
 		// runs. Never append the previous conversation to the replacement session.
 		if (this.#promptGeneration !== promptGeneration) {
@@ -3726,7 +3729,7 @@ export class AgentSession implements SettingsScope {
 			}
 			return;
 		}
-		this.#persistSessionMessageIfMissing(message);
+		return this.#persistSessionMessageIfMissing(message);
 	}
 
 	/**
@@ -3941,9 +3944,8 @@ export class AgentSession implements SettingsScope {
 			// Set #checkpointState synchronously too: the reminder is now visible to
 			// the very next provider call, so a model that immediately calls `rewind`
 			// must find an active checkpoint in RewindTool.execute(). The entry id is
-			// backfilled post-await (see the toolResult handler) once the checkpoint
-			// toolResult entry is persisted; #applyRewind runs on a later rewind turn,
-			// never before that backfill.
+			// backfilled post-await from the persistence result; #applyRewind runs
+			// on a later rewind turn, never before that backfill.
 			this.#checkpointState = {
 				checkpointMessageCount: this.agent.state.messages.length,
 				checkpointEntryId: null,
@@ -4078,7 +4080,7 @@ export class AgentSession implements SettingsScope {
 
 		// Handle session persistence
 		if (event.type === "message_end") {
-			await messageEndPersistence;
+			const persistedEntryId = await messageEndPersistence;
 			if (this.#promptGeneration !== eventPromptGeneration) return;
 			if (interruptedThinkingMessage) {
 				this.sessionManager.appendCustomMessageEntry(
@@ -4179,23 +4181,15 @@ export class AgentSession implements SettingsScope {
 					);
 				}
 				if (semanticResult?.toolName === "checkpoint" && !isError) {
-					// Backfill the checkpoint entry id now that the toolResult entry is
-					// persisted. #checkpointState was set synchronously pre-await (with a
-					// null entry id) so an immediate `rewind` still finds an active
-					// checkpoint; locate the toolResult's own entry by identity since the
-					// transient reminder entry follows it (last-entry would branch-cut the
-					// reminder instead of leaving it on the active path).
-					const entries = this.sessionManager.getEntries();
-					let checkpointEntryId: string | null = null;
-					for (let i = entries.length - 1; i >= 0; i--) {
-						const entry = entries[i];
-						if (entry.type === "message" && entry.message === event.message) {
-							checkpointEntryId = entry.id;
-							break;
-						}
+					// The persistence queue returns the checkpoint tool result's own ID.
+					// SessionManager may clone messages, and the transient reminder may
+					// already follow the result, so neither object identity nor the leaf
+					// identifies the checkpoint boundary.
+					if (persistedEntryId === undefined) {
+						throw new Error("Checkpoint tool result was not persisted");
 					}
 					if (this.#checkpointState) {
-						this.#checkpointState.checkpointEntryId = checkpointEntryId;
+						this.#checkpointState.checkpointEntryId = persistedEntryId;
 					}
 				}
 				if (semanticResult?.toolName === "rewind" && !isError && this.#checkpointState) {
@@ -10558,19 +10552,15 @@ export class AgentSession implements SettingsScope {
 		if (!checkpointState) {
 			return;
 		}
+		if (checkpointState.checkpointEntryId === null) {
+			throw new Error("Cannot rewind before the checkpoint entry is persisted");
+		}
 		// The rewound turn's reply is the exploration branch's newest, so this records its prompt.
 		const explorationPromptDigest = this.#tools.recordedPromptDigest();
 		this.#bash.withBranchTransition(() => {
-			try {
-				this.sessionManager.branchWithSummary(checkpointState.checkpointEntryId, report, {
-					startedAt: checkpointState.startedAt,
-				});
-			} catch (error) {
-				logger.warn("Rewind branch checkpoint missing, falling back to root", {
-					error: error instanceof Error ? error.message : String(error),
-				});
-				this.sessionManager.branchWithSummary(null, report, { startedAt: checkpointState.startedAt });
-			}
+			this.sessionManager.branchWithSummary(checkpointState.checkpointEntryId, report, {
+				startedAt: checkpointState.startedAt,
+			});
 		});
 
 		const rewoundAt = new Date().toISOString();

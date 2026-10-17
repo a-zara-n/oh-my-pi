@@ -18,7 +18,7 @@ import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { convertToLlm } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { RewindTool, type ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
+import { CheckpointTool, RewindTool, type ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
@@ -116,6 +116,7 @@ async function createHarness(
 	options?: {
 		onAgentEnd?: (willContinue: boolean | undefined) => void;
 		resolveFallbackTool?: (name: string) => AgentTool | undefined;
+		fileBacked?: boolean;
 	},
 ): Promise<Harness & { mock: MockModel }> {
 	const tempDir = TempDir.createSync("@pi-checkpoint-rewind-branch-");
@@ -146,7 +147,9 @@ async function createHarness(
 		resolveFallbackTool: options?.resolveFallbackTool,
 	});
 
-	const sessionManager = SessionManager.inMemory(tempDir.path());
+	const sessionManager = options?.fileBacked
+		? SessionManager.create(tempDir.path(), path.join(tempDir.path(), "sessions"))
+		: SessionManager.inMemory(tempDir.path());
 	let extensionRunner: ExtensionRunner | undefined;
 	if (options?.onAgentEnd) {
 		const runtime = new ExtensionRuntime();
@@ -214,6 +217,144 @@ async function expectNoActiveCheckpointError(session: AgentSession): Promise<voi
 }
 
 describe("AgentSession checkpoint rewind branch context", () => {
+	it.each([null, "missing-checkpoint-entry"])(
+		"does not discard file-backed history when the checkpoint boundary is %s",
+		async checkpointEntryId => {
+			let session: AgentSession;
+			const toolSession = createToolSession({
+				getCheckpointState: () => session.getCheckpointState(),
+			});
+			const harness = await createHarness(
+				[
+					{ content: ["Prior answer"], stopReason: "stop" },
+					{
+						content: [
+							{
+								type: "toolCall",
+								id: "invalid_checkpoint_rewind",
+								name: "rewind",
+								arguments: { report: "investigation findings" },
+							},
+						],
+						stopReason: "toolUse",
+					},
+					{ content: ["Unexpected continuation"], stopReason: "stop" },
+				],
+				[new RewindTool(toolSession)],
+				{ fileBacked: true },
+			);
+			session = harness.session;
+			await session.prompt("Prior user conversation");
+			const priorIds = session.sessionManager.getBranch().map(entry => entry.id);
+			session.setCheckpointState({
+				checkpointEntryId,
+				checkpointMessageCount: session.messages.length,
+				startedAt: new Date().toISOString(),
+			});
+
+			await session.prompt("Rewind without a usable persisted checkpoint");
+			await session.settleInFlightMessagePersistence();
+
+			const branch = session.sessionManager.getBranch();
+			const retainedIds = new Set(branch.map(entry => entry.id));
+			for (const id of priorIds) expect(retainedIds.has(id)).toBe(true);
+			expect(branch.some(entry => entry.type === "branch_summary")).toBe(false);
+			expect(session.getLastCompletedRewind()).toBeUndefined();
+			expect(session.getCheckpointState()?.checkpointEntryId).toBe(checkpointEntryId);
+			expect(session.agent.state.error).toBeDefined();
+			expect(harness.mock.calls).toHaveLength(2);
+		},
+	);
+
+	it("retains the persisted checkpoint and prior conversation when file storage clones tool results", async () => {
+		const report = "findings retained after exploration";
+		let session: AgentSession;
+		let persistedCheckpointId: string | undefined;
+		let checkpointResultWasCloned = false;
+		const toolSession = createToolSession({
+			getCheckpointState: () => session.getCheckpointState(),
+			getLastCompletedRewind: () => session.getLastCompletedRewind(),
+		});
+		const harness = await createHarness(
+			(async function* () {
+				yield { content: ["Prior answer"], stopReason: "stop" };
+				yield {
+					content: [
+						{ type: "toolCall", id: "file_checkpoint", name: "checkpoint", arguments: { goal: "inspect" } },
+					],
+					stopReason: "toolUse",
+				};
+				await session.settleInFlightMessagePersistence();
+				const entry = session.sessionManager.getEntries().find(
+					entry =>
+						entry.type === "message" &&
+						entry.message.role === "toolResult" &&
+						entry.message.toolCallId === "file_checkpoint",
+				);
+				persistedCheckpointId = entry?.id;
+				checkpointResultWasCloned =
+					entry?.type === "message" &&
+					entry.message !==
+						session.messages.find(
+							message => message.role === "toolResult" && message.toolCallId === "file_checkpoint",
+						);
+				yield {
+					content: [{ type: "toolCall", id: "file_rewind", name: "rewind", arguments: { report } }],
+					stopReason: "toolUse",
+				};
+				yield { content: ["After rewind"], stopReason: "stop" };
+			})() as MockResponseSource,
+			[new CheckpointTool(toolSession), new RewindTool(toolSession)],
+			{ fileBacked: true },
+		);
+		session = harness.session;
+		await session.prompt("Prior user conversation");
+		const priorIds = session.sessionManager
+			.getBranch()
+			.filter(entry => entry.type === "message")
+			.map(entry => entry.id);
+
+		await session.prompt("Investigate with a checkpoint");
+		await session.settleInFlightMessagePersistence();
+
+		expect(checkpointResultWasCloned).toBe(true);
+		expect(persistedCheckpointId).toBeDefined();
+		const branch = session.sessionManager.getBranch();
+		const retainedIds = new Set(branch.map(entry => entry.id));
+		for (const id of priorIds) expect(retainedIds.has(id)).toBe(true);
+		expect(branch.some(entry => entry.id === persistedCheckpointId)).toBe(true);
+		const summary = branch.find(entry => entry.type === "branch_summary");
+		expect(summary?.parentId).toBe(persistedCheckpointId);
+		expect(
+			session.messages.some(
+				message => message.role === "custom" && message.customType === "checkpoint-active-reminder",
+			),
+		).toBe(false);
+		expect(session.getLastCompletedRewind()?.report).toBe(report);
+		expect(session.getCheckpointState()).toBeUndefined();
+		const finalCall = harness.mock.calls.at(-1);
+		expect(
+			finalCall?.context.messages.some(
+				message => message.role === "user" && messageText(message) === "Prior user conversation",
+			),
+		).toBe(true);
+		expect(
+			finalCall?.context.messages.some(
+				message => message.role === "assistant" && messageText(message) === "Prior answer",
+			),
+		).toBe(true);
+		expect(
+			finalCall?.context.messages.some(
+				message => message.role === "toolResult" && message.toolCallId === "file_checkpoint",
+			),
+		).toBe(true);
+		expect(
+			finalCall?.context.messages.some(
+				message => message.role === "toolResult" && message.toolCallId === "file_rewind",
+			),
+		).toBe(false);
+	});
+
 	it("rebuilds active history through branch_summary before the post-rewind assistant turn", async () => {
 		const report = "findings: kept checkpoint; risks: stale signed thinking";
 		const { session, mock } = await createHarness([
