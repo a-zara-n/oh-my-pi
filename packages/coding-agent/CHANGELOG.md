@@ -21,6 +21,10 @@
 - A model request gate denial now stops turn auto-retry, model fallback, judge-candidate fallback and compaction fallback instead of retrying.
 - A gate denial of an advisor turn ends that review whatever its wording says: a denial message that reads like a provider content filter no longer triggers the reasoning-stripped resend or the advisor model fallback, and the structured denial is kept when the advisor failure is reported.
 
+### Fixed
+
+- Fixed managed model-request context probes reporting expected failed-session cleanup as an uncaught exception and starting genuine-authority checks without the pinned SQLite library.
+
 ## [18.8.8] - 2026-10-10
 
 ### Added
