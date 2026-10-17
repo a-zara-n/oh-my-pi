@@ -16,7 +16,7 @@ export function patchAmalgamation(canonical: string): string {
 	replace("struct unixShmNode {\n", "struct unixShmNode {\n  sqlite3_uint64 ompGeneration;\n  struct stat ompStat;\n");
 	// The implementation is below all real callbacks, above the methods table.
 	replace("#define IOMETHODS(FINDER,METHOD,VERSION,CLOSE,LOCK,UNLOCK,CKLOCK,SHMMAP)", `${fragment("owned-vfs.c")}\n#define IOMETHODS(FINDER,METHOD,VERSION,CLOSE,LOCK,UNLOCK,CKLOCK,SHMMAP)`);
-	replace("static void robust_close(unixFile *pFile, int h, int lineno){\n  if( osClose(h) ){", "static void robust_close(unixFile *pFile, int h, int lineno){\n  if( osClose(h) ){\n    ompSqliteCloseFailure(pFile);");
+	replace("static void robust_close(unixFile *pFile, int h, int lineno){\n  if( osClose(h) ){", "static void robust_close(unixFile *pFile, int h, int lineno){\n  if( osClose(h) ){\n    int savedErrno=errno;\n    ompSqliteCloseFailure(pFile);\n    errno=savedErrno;");
 	// Reject alternate locking implementations before their first open.
 	replace("  memset(p, 0, sizeof(unixFile));\n\n#ifdef SQLITE_ASSERT_NO_FILES", `  memset(p, 0, sizeof(unixFile));
   if( strcmp(pVfs->zName,"unix")!=0 ) return SQLITE_CANTOPEN;
