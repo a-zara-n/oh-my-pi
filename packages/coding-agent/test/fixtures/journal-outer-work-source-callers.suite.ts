@@ -1,5 +1,10 @@
 import "../../../../scripts/audit-library-bootstrap";
+import * as path from "node:path";
 import { describe, expect, test, vi } from "bun:test";
+import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
+import * as ai from "@oh-my-pi/pi-ai";
+import type { Model } from "@oh-my-pi/pi-ai";
+import type { Api } from "@oh-my-pi/pi-utils/model-data";
 import { Agent, type AgentEvent } from "@oh-my-pi/pi-agent-core";
 import type { CustomMessage } from "@oh-my-pi/pi-agent-core";
 import { runWithModelRequestExecution } from "@oh-my-pi/pi-ai/model-request-execution";
@@ -9,6 +14,7 @@ import { Settings } from "../../src/config/settings";
 import { ModelRegistry } from "../../src/config/model-registry";
 import { startMemoryStartupTask } from "../../src/memories";
 import { hindsightBackend } from "../../src/hindsight/backend";
+import * as mnemopiState from "../../src/mnemopi/state";
 import { loadMnemopiModules, MnemopiSessionState, setMnemopiSessionState } from "../../src/mnemopi/state";
 import { loadMnemopiConfig } from "../../src/mnemopi/config";
 import { startSharpshooterScheduler } from "../../src/sharpshooter/scheduler";
@@ -21,7 +27,11 @@ import {
 import { journalOuterWorkFromBinding } from "../../src/session/internal/outer-work";
 import { childModelRequestRootOf } from "../../src/session/model-request-context";
 import { runSubprocess } from "../../src/task/executor";
-import { testSetExtensionHandlerTimeoutMs } from "../../src/extensibility/extensions/runner";
+import {
+	EXTENSION_HANDLER_TIMEOUT_MS,
+	testSetExtensionHandlerTimeoutMs,
+} from "../../src/extensibility/extensions/runner";
+import { tinyModelClient } from "../../src/tiny/title-client";
 import { ExtensionToolWrapper } from "../../src/extensibility/extensions/wrapper";
 import { Type } from "../../src/extensibility/legacy-typebox";
 import type { AgentTool } from "@oh-my-pi/pi-agent-core";
@@ -34,6 +44,20 @@ import {
 } from "./journal-outer-work-managed-harness";
 
 const mac = process.platform === "darwin" ? describe : describe.skip;
+
+const LOCAL_JUDGE = getBundledModel("local", "qwen2.5-1.5b");
+const ONLINE_JUDGE = getBundledModel("anthropic", "claude-sonnet-4-6");
+
+function makeJudgeRegistry(
+	models: Model<Api>[],
+	keys: Record<string, string> = {},
+): { registry: ModelRegistry; authStorage: ReturnType<typeof createInMemoryAuthStorage> } {
+	const authStorage = createInMemoryAuthStorage();
+	for (const provider in keys) authStorage.keys.setRuntime(provider, keys[provider]!);
+	const registry = new ModelRegistry(authStorage, "/nonexistent/journal-outer-work-judge-models.yml");
+	vi.spyOn(registry, "getAvailable").mockReturnValue(models);
+	return { registry, authStorage };
+}
 
 mac("journal outer work canonical source callers", () => {
 	test("S-01/AC-OL-01: createAgentSession holds binding startup work until settingsManager first await settles", async () => {
@@ -127,6 +151,46 @@ mac("journal outer work canonical source callers", () => {
 					await pending;
 				});
 				expect(detachedDone).toBe(true);
+				await harness.dispose();
+			});
+		} finally {
+			await fixture.close();
+		}
+	});
+
+	test("S-04a/AC-OL-02: message_end persistence queue holds execution outer work until append settles", async () => {
+		const fixture = new R11JournalFixture();
+		try {
+			const root = fixture.open();
+			await fixture.withBinding(root, async binding => {
+				const principal = await fixture.ready(binding, root);
+				const harness = await openManagedAgentHarness(principal, binding);
+				const persistGate = Promise.withResolvers<void>();
+				let persistEntered = false;
+				const manager = harness.session.sessionManager;
+				const realAppend = manager.appendMessage.bind(manager);
+				const appendSpy = vi.spyOn(manager, "appendMessage").mockImplementation((...args) => {
+					persistEntered = true;
+					return realAppend(...args);
+				});
+				const origRun = harness.session.runJournalOuterWork.bind(harness.session);
+				const runSpy = vi.spyOn(harness.session, "runJournalOuterWork").mockImplementation(async work =>
+					origRun(async () => {
+						const value = await work();
+						await persistGate.promise;
+						return value;
+					}),
+				);
+				await withManagedExecution(principal.execution, async () => {
+					harness.emitMessageEnd();
+					await Promise.resolve();
+					expect(persistEntered).toBe(true);
+					expectBindingAcceptsOuterWork(binding);
+					persistGate.resolve();
+					await Bun.sleep(0);
+				});
+				runSpy.mockRestore();
+				appendSpy.mockRestore();
 				await harness.dispose();
 			});
 		} finally {
@@ -327,6 +391,14 @@ mac("journal outer work canonical source callers", () => {
 		}
 	});
 
+	test("S-07c/AC-OL-14: loadMnemopiModules rejects when one parallel loader fails", async () => {
+		const loadRoot = vi.spyOn(mnemopiState, "loadMnemopi").mockResolvedValue({} as Awaited<ReturnType<typeof mnemopiState.loadMnemopi>>);
+		const loadCore = vi.spyOn(mnemopiState, "loadMnemopiCore").mockRejectedValueOnce(new Error("core load failed"));
+		await expect(loadMnemopiModules()).rejects.toThrow("Mnemopi module load failed");
+		loadRoot.mockRestore();
+		loadCore.mockRestore();
+	});
+
 	test("S-07c/AC-OL-14: mnemopi backend start uses allSettled parallel module load", async () => {
 		await expect(loadMnemopiModules()).resolves.toBeUndefined();
 	});
@@ -408,7 +480,45 @@ mac("journal outer work canonical source callers", () => {
 		}
 	});
 
-	test("S-10/AC-OL-13: ExtensionRunner tool_call handler flush reject with late registration on handler outer work", async () => {
+	test("S-10/AC-OL-13: ExtensionRunner onToolRegistered flush reject fails tool_call handler outer work", async () => {
+		const fixture = new R11JournalFixture();
+		try {
+			const root = fixture.open();
+			await fixture.withBinding(root, async binding => {
+				const principal = await fixture.ready(binding, root);
+				const harness = await openManagedAgentHarness(principal, binding);
+				harness.runner.onToolRegistered(async () => {
+					throw new Error("flush reject");
+				});
+				harness.api.on("tool_call", () => {
+					harness.api.registerTool({
+						name: "late_registered",
+						label: "late",
+						description: "late",
+						parameters: Type.Object({}),
+						execute: async () => ({ content: [{ type: "text", text: "ok" }] }),
+					});
+				});
+				const tool: AgentTool = {
+					name: "probe",
+					label: "probe",
+					description: "probe",
+					parameters: Type.Object({}),
+					approval: "read",
+					execute: async () => ({ content: [{ type: "text", text: "ok" }] }),
+				};
+				const wrapped = new ExtensionToolWrapper(tool, harness.runner);
+				await withManagedExecution(principal.execution, async () => {
+					await expect(wrapped.execute("id", {})).rejects.toThrow("flush reject");
+				});
+				await harness.dispose();
+			});
+		} finally {
+			await fixture.close();
+		}
+	});
+
+	test("S-10/AC-OL-13: ExtensionRunner tool_call timeout keeps handler outer work for late tool registration", async () => {
 		const fixture = new R11JournalFixture();
 		testSetExtensionHandlerTimeoutMs(25);
 		try {
@@ -535,6 +645,67 @@ mac("journal outer work canonical source callers", () => {
 				authStorage.close();
 			});
 		} finally {
+			await fixture.close();
+		}
+	});
+
+	test("G-01/AC-OL-14: ChainJudge.withCandidate recovers on fallback judge after first candidate fails", async () => {
+		if (!LOCAL_JUDGE || !ONLINE_JUDGE) return;
+		const fixture = new R11JournalFixture();
+		try {
+			const root = fixture.open();
+			await fixture.withBinding(root, async binding => {
+				const principal = await fixture.ready(binding, root);
+				const settings = Settings.isolated({
+					modelRoles: { judge: `${LOCAL_JUDGE.provider}/${LOCAL_JUDGE.id}` },
+					"retry.fallbackChains": { judge: [`${ONLINE_JUDGE.provider}/${ONLINE_JUDGE.id}`] },
+				});
+				const { registry, authStorage } = makeJudgeRegistry([LOCAL_JUDGE, ONLINE_JUDGE], {
+					[ONLINE_JUDGE.provider]: "key",
+				});
+				const kinds: string[] = [];
+				vi.spyOn(tinyModelClient, "complete").mockRejectedValueOnce(new Error("local judge failed"));
+				vi.spyOn(ai, "completeSimple").mockImplementation(async model => ({
+					role: "assistant",
+					content: [{ type: "text", text: "ok" }],
+					api: model.api,
+					provider: model.provider,
+					model: model.id,
+					usage: {
+						input: 0,
+						output: 0,
+						cacheRead: 0,
+						cacheWrite: 0,
+						totalTokens: 0,
+						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+					},
+					stopReason: "stop",
+					timestamp: Date.now(),
+				}));
+				await withManagedExecution(principal.execution, async () => {
+					const judge = new ChainJudge({ settings, registry, purpose: "outer-work-probe" });
+					const answer = await judge.withCandidate(async (candidate, kind) => {
+						kinds.push(kind);
+						if (kind === "online") return "recovered";
+						await candidate.judge({
+							state: "outer-work probe",
+							questions: {
+								bucket: {
+									type: "choice",
+									instructions: "Choose a bucket.",
+									criteria: { trivial: "trivial", moderate: "moderate" },
+								},
+							},
+						});
+						return "local";
+					});
+					expect(answer).toBe("recovered");
+					expect(kinds).toEqual(["local", "online"]);
+				});
+				authStorage.close();
+			});
+		} finally {
+			vi.restoreAllMocks();
 			await fixture.close();
 		}
 	});
