@@ -82,7 +82,11 @@ import {
 import { isModelRequestLocalStream } from "./model-request-execution";
 import { getModelRequestRuntime } from "./model-request-runtime";
 import { authorizeUninstrumentedAttempt } from "./utils/model-request-fetch";
-import { joinJournalOuterWork, openJournalOuterWorkFromCurrent } from "../internal/journal-outer-work";
+import {
+	joinJournalOuterWork,
+	type JournalOuterWork,
+	openJournalOuterWorkFromCurrent,
+} from "../internal/journal-outer-work";
 import { withTransportFetch } from "./utils/transport-fetch";
 
 function isGoogleVertexAuthenticatedModel(model: Model<Api>): boolean {
@@ -480,6 +484,7 @@ async function tryAcquireProviderInFlightLease(
 	provider: string,
 	limit: number,
 	signal?: AbortSignal,
+	slotWork?: JournalOuterWork,
 ): Promise<ProviderInFlightLease | null> {
 	const releaseLock = await acquireProviderInFlightLock(provider, signal);
 	try {
@@ -514,7 +519,9 @@ async function tryAcquireProviderInFlightLease(
 						await write();
 					}
 				})
-				.catch(() => {});
+				.catch(error => {
+					slotWork?.noteFailure(error);
+				});
 		};
 		const heartbeat = setInterval(
 			touchHeartbeat,
@@ -609,8 +616,12 @@ async function removeProviderInFlightLeaseDir(leasePath: string): Promise<void> 
 // rather than recomputing it from the current root. A release that lands after
 // the in-flight root has been repointed (only the test seam does that) must not
 // write `.wakeup` into an unrelated provider directory.
-async function releaseProviderInFlightLease(lease: ProviderInFlightLease): Promise<void> {
+async function releaseProviderInFlightLease(
+	lease: ProviderInFlightLease,
+	slotWork?: JournalOuterWork,
+): Promise<void> {
 	const heartbeatFlush = lease.stopHeartbeat();
+	slotWork?.join(heartbeatFlush);
 	const flushTimeout = Promise.withResolvers<"timeout">();
 	const flushTimer = setTimeout(
 		() => flushTimeout.resolve("timeout"),
@@ -620,11 +631,16 @@ async function releaseProviderInFlightLease(lease: ProviderInFlightLease): Promi
 	try {
 		const outcome = await Promise.race([heartbeatFlush.then(() => "flushed" as const), flushTimeout.promise]);
 		if (outcome === "timeout") {
+			slotWork?.noteFailure(new Error("Provider in-flight heartbeat flush timed out"));
 			logger.warn("Provider in-flight heartbeat flush timed out; forcing lease cleanup", { path: lease.path });
 		}
 	} finally {
 		clearTimeout(flushTimer);
 	}
+
+	const removeLease = providerInFlightLeaseRemoverOverride ?? removeProviderInFlightLeaseDir;
+	const removePromise = removeLease(lease.path);
+	slotWork?.join(removePromise);
 
 	const releaseTimeout = Promise.withResolvers<never>();
 	const releaseTimer = setTimeout(
@@ -633,27 +649,36 @@ async function releaseProviderInFlightLease(lease: ProviderInFlightLease): Promi
 	);
 	releaseTimer.unref?.();
 	try {
-		const removeLease = providerInFlightLeaseRemoverOverride ?? removeProviderInFlightLeaseDir;
-		await Promise.race([removeLease(lease.path), releaseTimeout.promise]);
+		await Promise.race([removePromise, releaseTimeout.promise]);
+	} catch (error) {
+		slotWork?.noteFailure(error);
+		throw error;
 	} finally {
 		clearTimeout(releaseTimer);
 	}
 	// Wake-up is an optimization: waiters also poll every 250 ms. Do not let a
 	// notification-file stall keep a completed provider request open.
-	void signalProviderInFlightWaitersInDir(path.dirname(lease.path));
+	const wakeupPromise = signalProviderInFlightWaitersInDir(path.dirname(lease.path));
+	slotWork?.join(wakeupPromise);
+	try {
+		await wakeupPromise;
+	} catch (error) {
+		slotWork?.noteFailure(error);
+	}
 }
 
 async function acquireProviderInFlightSlot(
 	provider: string,
 	limit: number | undefined,
 	signal?: AbortSignal,
+	slotWork?: JournalOuterWork,
 ): Promise<() => Promise<void>> {
 	if (limit === undefined) return async () => {};
 	let loggedWait = false;
 	while (true) {
 		if (signal?.aborted) throw signal.reason ?? new AIError.AbortError("Provider request aborted before dispatch");
-		const lease = await tryAcquireProviderInFlightLease(provider, limit, signal);
-		if (lease) return () => releaseProviderInFlightLease(lease);
+		const lease = await tryAcquireProviderInFlightLease(provider, limit, signal, slotWork);
+		if (lease) return () => releaseProviderInFlightLease(lease, slotWork);
 		if (!loggedWait) {
 			loggedWait = true;
 			logger.debug("Provider in-flight limit blocked request", { provider, limit });
@@ -749,6 +774,7 @@ function withProviderInFlightLimit<TOptions extends Pick<StreamOptions, "signal"
 				// remain unavailable and waiters rely on the fallback poll.
 				// Never replace a completed response or the provider's original error
 				// with a coordination-directory cleanup failure.
+				slotWork?.noteFailure(releaseError);
 				logger.warn("Provider in-flight permit release failed", {
 					provider: model.provider,
 					error: String(releaseError),
@@ -759,7 +785,7 @@ function withProviderInFlightLimit<TOptions extends Pick<StreamOptions, "signal"
 			const startedWaitingAt = Date.now();
 			release = await joinJournalOuterWork(
 				slotWork,
-				acquireProviderInFlightSlot(model.provider, limit, options?.signal),
+				acquireProviderInFlightSlot(model.provider, limit, options?.signal, slotWork),
 			);
 			if (Date.now() - startedWaitingAt >= PROVIDER_INFLIGHT_SIGNAL_FALLBACK_MS) {
 				logger.debug("Provider in-flight limit wait completed", { provider: model.provider, limit });

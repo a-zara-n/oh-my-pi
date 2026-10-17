@@ -40,18 +40,18 @@ const SCENARIOS: ReadonlyArray<{
 	},
 	{
 		name: "gate-decision-unrecognizable",
-		rows: ["E-02", "AC-OL-14"],
+		rows: ["E-01", "E-02", "AC-OL-05", "AC-OL-14"],
 		expect: v => {
 			expect(v.message).toContain("unrecognizable");
-			expect(v.authorityRejected).toBe(true);
+			expect(v.authorityOk).toBe(true);
 		},
 	},
 	{
 		name: "gate-deny-outer-rejected",
-		rows: ["E-02", "AC-OL-02"],
+		rows: ["E-01", "E-02", "AC-OL-05"],
 		expect: v => {
 			expect(v.denied).toBe(true);
-			expect(v.authorityRejected).toBe(true);
+			expect(v.authorityOk).toBe(true);
 		},
 	},
 	{
@@ -97,10 +97,10 @@ const SCENARIOS: ReadonlyArray<{
 	},
 	{
 		name: "gate-authorize-throws-outer-end",
-		rows: ["E-02", "AC-OL-14"],
+		rows: ["E-01", "E-02", "AC-OL-05", "AC-OL-14"],
 		expect: v => {
 			expect(v.sendFailed).toBe(true);
-			expect(v.authorityRejected).toBe(true);
+			expect(v.authorityOk).toBe(true);
 		},
 	},
 	{
