@@ -25,11 +25,7 @@ import {
 } from "@oh-my-pi/pi-utils/model-request-journal-composition";
 import { ModelRequestDeniedError } from "../error/model-request-denied";
 import type { FetchImpl } from "../types";
-import type {
-	ModelRequestKind,
-	ModelRequestLease,
-	ModelRequestWire,
-} from "../model-request-gate";
+import type { ModelRequestKind, ModelRequestLease, ModelRequestWire } from "../model-request-gate";
 import { currentModelRequestDestination, nextModelRequestAttemptLink } from "../model-request-lineage";
 import {
 	getModelRequestRuntime,
@@ -70,11 +66,15 @@ function currentDispatchExecution(runtime: ModelRequestRuntime): ModelRequestExe
 	// A mutable facade cannot hide an active required context. Preserve other
 	// runtime instances' ordinary untracked behavior without trusting their calls
 	// for the canonical managed path.
-	if (runtime === canonicalRuntime || (execution !== undefined && execution.journalState !== "untracked")) return execution;
+	if (runtime === canonicalRuntime || (execution !== undefined && execution.journalState !== "untracked"))
+		return execution;
 	return runtime.currentExecution();
 }
 
-function authorizeDispatch(runtime: ModelRequestRuntime, input: ModelRequestAuthorizationInput): Promise<ModelRequestPermit> {
+function authorizeDispatch(
+	runtime: ModelRequestRuntime,
+	input: ModelRequestAuthorizationInput,
+): Promise<ModelRequestPermit> {
 	// Never reacquire the canonical method after checking its reference. This
 	// also covers an ordinary execution that becomes required across an await.
 	return runtime === canonicalRuntime ? authorizeCanonical(input) : runtime.authorize(input);
@@ -206,7 +206,9 @@ async function settleQuietly(lease: ModelRequestLease, outcome: ModelRequestOutc
 		await lease.settle(outcome);
 	} catch (error) {
 		// Never let a gate's bookkeeping failure replace the request's own result.
-		logger.warn("model request lease settle failed", { error: error instanceof Error ? error.message : String(error) });
+		logger.warn("model request lease settle failed", {
+			error: error instanceof Error ? error.message : String(error),
+		});
 	}
 }
 
@@ -229,20 +231,20 @@ function observeResponse(lease: ModelRequestLease, response: Response, signal: A
 	observeQuietly("observeResponse", () =>
 		lease.observeResponse({ status: response.status, headers: responseHeaders(response.headers) }),
 	);
+	const upstream = response.body;
+	if (upstream === null) {
+		void settleQuietly(lease, { type: "response-ended", status: response.status });
+		return response;
+	}
 	let settled = false;
-	const onAbort: (() => void) | undefined = () =>
+	const onAbort = () =>
 		finish({ type: "response-failed", status: response.status, aborted: true, transportClosed: true });
 	const finish = (outcome: ModelRequestOutcome): void => {
 		if (settled) return;
 		settled = true;
-		if (onAbort !== undefined) signal?.removeEventListener("abort", onAbort);
+		signal?.removeEventListener("abort", onAbort);
 		void settleQuietly(lease, outcome);
 	};
-	const upstream = response.body;
-	if (upstream === null) {
-		finish({ type: "response-ended", status: response.status });
-		return response;
-	}
 	if (signal?.aborted) onAbort();
 	else signal?.addEventListener("abort", onAbort, { once: true });
 
@@ -302,7 +304,8 @@ function registerRequiredPermit(
 	execution: ModelRequestExecution,
 	permit: ModelRequestPermit,
 ): RequiredPermitRecord {
-	if (requiredPermits.has(permit)) throw new ModelRequestDeniedError("gate-error", "model request permit was already used");
+	if (requiredPermits.has(permit))
+		throw new ModelRequestDeniedError("gate-error", "model request permit was already used");
 	Object.freeze(permit);
 	const record: RequiredPermitRecord = {
 		runtime,
@@ -367,7 +370,8 @@ async function sendRequired(
 			// A gate callback can revoke/abort/reenter. Run it BEFORE the final synchronous admission check.
 			lease?.beginSend();
 			assertRequiredPermit(permit, record, "prepared", transport, signal);
-			if (record.admission !== admission) throw new ModelRequestDeniedError("gate-error", "model request admission changed");
+			if (record.admission !== admission)
+				throw new ModelRequestDeniedError("gate-error", "model request admission changed");
 			beginJournalSend(admission, execution, permit);
 			record.state = "begun";
 			dispatched = true;
@@ -383,7 +387,10 @@ async function sendRequired(
 				endJournalSendStart(admission);
 			} catch (releaseError) {
 				if (startFailure !== undefined) {
-					throw new AggregateError([startFailure.error, releaseError], "model request start and root release failed");
+					throw new AggregateError(
+						[startFailure.error, releaseError],
+						"model request start and root release failed",
+					);
 				}
 				throw releaseError;
 			}
@@ -400,19 +407,27 @@ async function sendRequired(
 			try {
 				await responsePromise;
 			} catch (transportError) {
-				if (transportError !== failure) failure = new AggregateError([failure, transportError], "model request dispatch and release failed");
+				if (transportError !== failure)
+					failure = new AggregateError([failure, transportError], "model request dispatch and release failed");
 			}
 		}
 		if (lease !== undefined) {
 			await settleQuietly(
 				lease,
 				dispatched
-					? { type: "request-failed", sent: "maybe", aborted: signal?.aborted === true, transportClosed: responseAwaited }
+					? {
+							type: "request-failed",
+							sent: "maybe",
+							aborted: signal?.aborted === true,
+							transportClosed: responseAwaited,
+						}
 					: { type: "not-sent", aborted: signal?.aborted === true },
 			);
 		}
 		if (!dispatched && !signal?.aborted && !(failure instanceof ModelRequestDeniedError)) {
-			throw new ModelRequestDeniedError("gate-error", "model request journal admission failed before dispatch", { cause: failure });
+			throw new ModelRequestDeniedError("gate-error", "model request journal admission failed before dispatch", {
+				cause: failure,
+			});
 		}
 		throw failure;
 	}
@@ -448,9 +463,13 @@ export async function gatedSend(args: GatedSendArgs): Promise<Response> {
 		try {
 			assertModelRequestBuiltinFetch(args.transport);
 		} catch (error) {
-			throw new ModelRequestDeniedError("transport-unsupported", "required model request needs the startup builtin fetch", {
-				cause: error,
-			});
+			throw new ModelRequestDeniedError(
+				"transport-unsupported",
+				"required model request needs the startup builtin fetch",
+				{
+					cause: error,
+				},
+			);
 		}
 	}
 	if (!runtime.hasGate() && (execution === undefined || execution.journalState === "untracked")) return args.send();
@@ -490,7 +509,9 @@ export async function gatedSend(args: GatedSendArgs): Promise<Response> {
 		// Nothing was sent. A gate whose bookkeeping fails must not leak the lease, and the failure is the gate's:
 		// terminal, not a transport error a retry layer would replay.
 		await settleQuietly(lease, { type: "not-sent", aborted: false });
-		throw new ModelRequestDeniedError("gate-error", "model request gate failed while starting to send", { cause: error });
+		throw new ModelRequestDeniedError("gate-error", "model request gate failed while starting to send", {
+			cause: error,
+		});
 	}
 	let response: Response;
 	try {
@@ -520,9 +541,13 @@ export function gateFetch(model: ModelRequestModelRef, kind: ModelRequestKind, b
 		try {
 			assertModelRequestBuiltinFetch(ownWrapper ? modelRequestBuiltinFetch : base);
 		} catch (error) {
-			throw new ModelRequestDeniedError("transport-unsupported", "required model request needs the startup builtin fetch", {
-				cause: error,
-			});
+			throw new ModelRequestDeniedError(
+				"transport-unsupported",
+				"required model request needs the startup builtin fetch",
+				{
+					cause: error,
+				},
+			);
 		}
 	}
 	if (ownWrapper) return base;
@@ -577,7 +602,10 @@ export async function authorizeUninstrumentedAttempt(
 	const execution = currentDispatchExecution(runtime);
 	assertJournalExecutionReady(execution);
 	if (execution !== undefined && execution.journalState !== "untracked") {
-		throw new ModelRequestDeniedError("transport-unsupported", "required model request transport has no fixed builtin dispatch");
+		throw new ModelRequestDeniedError(
+			"transport-unsupported",
+			"required model request transport has no fixed builtin dispatch",
+		);
 	}
 	if (!runtime.hasGate() && (execution === undefined || execution.journalState === "untracked")) return;
 	const link = nextModelRequestAttemptLink();
@@ -593,7 +621,10 @@ export async function authorizeUninstrumentedAttempt(
 	try {
 		assertJournalExecutionReady(execution);
 		if (execution !== undefined && execution.journalState !== "untracked") {
-			throw new ModelRequestDeniedError("transport-unsupported", "required model request transport has no fixed builtin dispatch");
+			throw new ModelRequestDeniedError(
+				"transport-unsupported",
+				"required model request transport has no fixed builtin dispatch",
+			);
 		}
 	} catch (error) {
 		if (permit.lease !== undefined) {
