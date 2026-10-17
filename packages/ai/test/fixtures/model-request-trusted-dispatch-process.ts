@@ -27,7 +27,7 @@ import { openModelRequestJournalDatabase } from "@oh-my-pi/pi-utils/model-reques
 import { registerModelRequestGate, type ModelRequestLease } from "../../src/model-request-gate";
 import { getModelRequestRuntime } from "../../src/model-request-runtime";
 import { modelRequestBuiltinFetch } from "../../src/utils/model-request-builtin-fetch";
-import { buildModelRequestWire, gatedSend } from "../../src/utils/model-request-fetch";
+import { buildModelRequestWire, gatedSend, gateFetch, markFetchGated } from "../../src/utils/model-request-fetch";
 import { transportFetch } from "../../src/utils/transport-fetch";
 import { loopbackModel, startLoopbackProvider } from "../helpers/model-request-loopback";
 
@@ -42,8 +42,23 @@ const scenarios = [
 	"gate-await-revoke", "begin-epoch-change", "begin-database-close",
 	"prepare-await-revoke",
 	"authorize-accessor",
+	"marked-before-required",
 ] as const;
 if (!scenarios.some(value => value === scenario)) throw new Error("unknown trusted dispatch scenario");
+let auxiliaryTwinCalls = 0;
+// Construct before opening the owned journal factory latches this process.
+// Public registration of the real builtin must not permanently remove its
+// future invocation from the required dispatcher.
+const markedBeforeRequired = scenario === "marked-before-required"
+	? gateFetch(
+			loopbackModel("openai-completions", "http://127.0.0.1:9"),
+			"chat",
+			markFetchGated(modelRequestBuiltinFetch, async () => {
+				auxiliaryTwinCalls++;
+				throw new Error("model dispatch must not call the arbitrary auxiliary twin");
+			}),
+		)
+	: undefined;
 
 async function within<T>(promise: Promise<T>, label: string): Promise<T> {
 	// A failure watchdog for a real subprocess/network/native-lock integration,
@@ -325,7 +340,7 @@ async function dispatchRegression(context: ReadyContext): Promise<object> {
 		registerModelRequestGate("native-trusted-dispatch-regression", {
 			async authorize() {
 				gateCalls++;
-				if (scenario === "deny" || scenario === "fake-supplied" || scenario === "forged-authorize" || scenario === "authorize-accessor") {
+				if (scenario === "deny" || scenario === "fake-supplied" || scenario === "forged-authorize" || scenario === "authorize-accessor" || scenario === "marked-before-required") {
 					return { type: "deny", code: "fixture-deny", message: "real gate denied" };
 				}
 				if (scenario === "gate-await-revoke") {
@@ -381,6 +396,9 @@ async function dispatchRegression(context: ReadyContext): Promise<object> {
 				transport: modelRequestBuiltinFetch,
 				send: async () => { senderCalls++; return modelRequestBuiltinFetch(`${server.origin}/authorize-accessor`, { signal }); },
 			});
+		} else if (scenario === "marked-before-required") {
+			if (markedBeforeRequired === undefined) throw new Error("missing pre-required marked fetch");
+			invoke = () => markedBeforeRequired(`${server.origin}/marked-before-required`, { signal });
 		} else {
 			invoke = () => transportFetch(model, undefined)(`${server.origin}/builtin`, { method: "POST", body: "real-request", signal });
 		}
@@ -441,6 +459,7 @@ async function dispatchRegression(context: ReadyContext): Promise<object> {
 			rejected, error, body, received: server.requests.length,
 			gateCalls, beginCalls, responseHeads, chunks, senderCalls, fakeLeaseCalls,
 			forgedAuthorizeCalls, authorizePropertyReads, outcomes, probe, inflight, rootReacquired: true,
+			auxiliaryTwinCalls,
 			verifiedReacquireRejected,
 			journalStateAfter: context.execution.journalState,
 		};

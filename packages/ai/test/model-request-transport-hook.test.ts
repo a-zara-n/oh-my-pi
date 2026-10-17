@@ -24,7 +24,7 @@ import * as bedrockProvider from "@oh-my-pi/pi-ai/providers/amazon-bedrock";
 import * as cursorProvider from "@oh-my-pi/pi-ai/providers/cursor";
 import * as gitlabWorkflowProvider from "@oh-my-pi/pi-ai/providers/gitlab-duo-workflow";
 import { setBedrockProviderModule, setCursorProviderModule } from "@oh-my-pi/pi-ai/providers/register-builtins";
-import { gateFetch } from "@oh-my-pi/pi-ai/utils/model-request-fetch";
+import { auxiliaryFetch, gateFetch } from "@oh-my-pi/pi-ai/utils/model-request-fetch";
 import { transportFetch } from "@oh-my-pi/pi-ai/utils/transport-fetch";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import {
@@ -516,6 +516,24 @@ describe("credential rotation reaches the gate as a separate attempt", () => {
 		expect(resolved).toEqual(["first"]);
 		expect(gate.attempts).toHaveLength(1);
 		expect(loopback.requests).toHaveLength(0);
+	});
+});
+
+describe("ordinary untracked wrapping compatibility", () => {
+	test("a marked core transport delegates through one gate and retains its ungated auxiliary transport", async () => {
+		const loopback = serve(scripted({ status: 200, chunks: ["ok"] }));
+		const model = loopbackModel("openai-completions", loopback.origin);
+		const transport = transportFetch(model, undefined);
+		const wrapped = gateFetch(model, "chat", transport);
+		allowEachAttempt();
+
+		await (await wrapped(`${loopback.origin}/model`)).text();
+		expect(gate.attempts).toHaveLength(1);
+		expect(loopback.requests).toHaveLength(1);
+
+		await (await auxiliaryFetch(wrapped)(`${loopback.origin}/metadata`)).text();
+		expect(gate.attempts).toHaveLength(1);
+		expect(loopback.requests).toHaveLength(2);
 	});
 });
 
