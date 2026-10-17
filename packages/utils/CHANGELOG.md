@@ -41,6 +41,9 @@
   and shares its actual completion promise with concurrent close callers. This is not the
   separate startup binding-lifetime join or the pending cross-ALS family-comparison contract.
   Worker-side verification was not run; managed sending is not accepted by these notes.
+- Drain all already accepted File queues before starting descendant logical closes: both
+  source appends and close batches use the same real registry-root lease. This prevents a
+  descendant close from racing an ancestor's still-running source acknowledgement.
 - Added the isolated audit SQLite preload, a fixed source-owned VFS control codec, exclusive
   STORE_ID/database creation and per-connection identity/generation registry. The authority reader
   now verifies actual owned main/WAL/shm and live writer generations in one real RO snapshot rather

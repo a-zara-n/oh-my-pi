@@ -3243,14 +3243,18 @@ class FileSessionPrincipalImpl implements FileJournalCell {
 	async #drainAndCloseSession(state: JournalSessionState, session: JournalSession): Promise<void> {
 		const failures: unknown[] = [];
 		try {
+			// A descendant's close also takes the shared registry root. Finish all
+			// already accepted File work before starting any such close operation.
+			const cells = new Set<FileSessionPrincipalImpl>([this]);
+			for (const family of this.#families) if (family.cell) cells.add(family.cell);
+			const drains = await Promise.allSettled([...cells].map(cell => cell.flush()));
+			for (const drain of drains) if (drain.status === "rejected") failures.push(drain.reason);
 			for (const family of this.#families) {
 				if (family.session && family.session !== session && family.cell) {
 					try { await family.cell.closeSession(family.session); }
 					catch (error) { failures.push(error); }
 				}
 			}
-			try { await this.flush(); }
-			catch (error) { failures.push(error); }
 			if (failures.length > 0) throw new AggregateError(failures, "Journal principal drain failed");
 			await withVerifiedModelRequestJournalLeases(state.binding, state.registryId, async scope => {
 				this.#assertOwnerScope(state, scope);
