@@ -798,7 +798,7 @@ async function writeLinesToFile(target: string, lines: readonly string[]): Promi
 }
 
 export class FileSessionStorage implements SessionStorage {
-	readonly modelRequestJournal = "process-crash-reader-visible";
+	readonly modelRequestJournal: "process-crash-reader-visible" = "process-crash-reader-visible";
 
 	#assertExpectedSize(fpath: string, expectedSize: number | null | undefined): void {
 		if (expectedSize === undefined) return;

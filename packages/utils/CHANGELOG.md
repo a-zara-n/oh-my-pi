@@ -4,6 +4,9 @@
 
 ### Added
 
+- Preserve the exact `FileSessionStorage.modelRequestJournal` capability type through
+  forwarding getters, without widening the storage durability contract or changing its value.
+
 - Outer work lifetime on `@oh-my-pi/pi-utils/model-request-journal-composition`: `JournalWorkOutcome`,
   `JournalWorkHandle`, `beginJournalBindingWork`, `beginJournalExecutionWork`, and `endJournalWork`.
   Authority wires a package-private live-binding closure at initialization; termination joins outer work
