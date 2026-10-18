@@ -75,7 +75,7 @@ export async function openManagedAgentHarness(
 		sessionManager: manager,
 		settings:
 			options.settings ??
-			Settings.isolated({ "compaction.enabled": false, "memory.backend": "off" }),
+			Settings.isolated({ "compaction.enabled": false, "memory.enabled": false }),
 		modelRegistry: registry,
 		extensionRunner: runner,
 		modelRequestExecution: principal.execution,
