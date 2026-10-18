@@ -183,16 +183,29 @@ class GuardedLease implements ModelRequestLease {
 	}
 
 	settle(outcome: ModelRequestOutcome): Promise<void> {
-		this.#settled ??= (async () => {
-			try {
-				await this.#lease.settle(outcome);
-			} catch (error) {
-				this.#gateWork?.noteFailure(error);
-				throw error;
-			} finally {
-				await this.#gateWork?.endTransferred();
-			}
-		})();
+		if (this.#settled === undefined) {
+			const completion = Promise.withResolvers<void>();
+			// Publish the shared completion before touching the backing lease: a
+			// settle() re-entered synchronously from inside the backing call must
+			// converge on this exact promise instead of starting a second backing
+			// settlement and a second gate-work end (DES-004 AC-OL-14).
+			this.#settled = completion.promise;
+			void (async () => {
+				try {
+					try {
+						await this.#lease.settle(outcome);
+					} catch (error) {
+						this.#gateWork?.noteFailure(error);
+						throw error;
+					} finally {
+						await this.#gateWork?.endTransferred();
+					}
+					completion.resolve();
+				} catch (error) {
+					completion.reject(error);
+				}
+			})();
+		}
 		return this.#settled;
 	}
 
