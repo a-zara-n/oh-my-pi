@@ -1623,7 +1623,7 @@ function streamSimpleRequest<TApi extends Api>(
 					return;
 				}
 				const retryState = createAuthRetryKeyState(lastKey);
-				let failure: AuthRetryFailure | undefined = await joinJournalOuterWork(
+			const failure: AuthRetryFailure | undefined = await joinJournalOuterWork(
 					resolverWork,
 					runAttempt(lastKey, credentialId, oauthIdentity),
 				);
