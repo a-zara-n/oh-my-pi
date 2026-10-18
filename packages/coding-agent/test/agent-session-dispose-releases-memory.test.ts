@@ -516,7 +516,7 @@ describe("AgentSession dispose releases retained memory", () => {
 		class FailingAtomicStorage implements SessionStorage {
 			readonly #inner = new FileSessionStorage();
 
-			get modelRequestJournal() {
+			get modelRequestJournal(): SessionStorage["modelRequestJournal"] {
 				return this.#inner.modelRequestJournal;
 			}
 

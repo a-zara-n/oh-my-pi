@@ -43,6 +43,7 @@ import { tinyModelClient } from "../../src/tiny/title-client";
 import { ExtensionToolWrapper } from "../../src/extensibility/extensions/wrapper";
 import { Type } from "../../src/extensibility/legacy-typebox";
 import type { AgentTool } from "@oh-my-pi/pi-agent-core";
+import type { AuthStorage } from "../../src/session/auth-storage";
 import { SessionManager } from "../../src/session/session-manager";
 import { AgentRegistry } from "../../src/registry/agent-registry";
 import { tryAcquireSessionLease } from "@oh-my-pi/pi-utils/model-request-journal-composition";
@@ -62,11 +63,15 @@ const ONLINE_JUDGE = getBundledModel("anthropic", "claude-sonnet-4-6");
 
 function makeJudgeRegistry(
 	models: Model<Api>[],
+	directory: string,
 	keys: Record<string, string> = {},
-): { registry: ModelRegistry; authStorage: ReturnType<typeof createInMemoryAuthStorage> } {
+): { registry: ModelRegistry; authStorage: AuthStorage } {
 	const authStorage = createInMemoryAuthStorage();
 	for (const provider in keys) authStorage.keys.setRuntime(provider, keys[provider]!);
-	const registry = new ModelRegistry(authStorage, "/nonexistent/journal-outer-work-judge-models.yml");
+	// The YAML stays absent; the registry derives its models.db cache from this
+	// path's dirname, so it must live inside the fixture's scratch directory
+	// rather than pointing the cache at an unrelated filesystem root.
+	const registry = new ModelRegistry(authStorage, path.join(directory, "journal-outer-work-judge-models.yml"));
 	vi.spyOn(registry, "getAvailable").mockReturnValue(models);
 	return { registry, authStorage };
 }
@@ -134,7 +139,7 @@ mac("journal outer work canonical source callers", () => {
 			const root = fixture.open(rootFile);
 			await fixture.withBinding(root, async binding => {
 				const authStorage = createInMemoryAuthStorage();
-				const settings = Settings.isolated({ "compaction.enabled": false, "memory.enabled": false });
+				const settings = Settings.isolated({ "compaction.enabled": false, "memory.backend": "off" });
 				const startup = createAgentSession({
 					modelRequestJournalLeaseBinding: binding,
 					authStorage,
@@ -396,7 +401,7 @@ mac("journal outer work canonical source callers", () => {
 				const harness = await openManagedAgentHarness(principal, binding);
 				const settings = Settings.isolated({
 					"compaction.enabled": false,
-					"memory.enabled": true,
+					"memory.backend": "local",
 				});
 				const registry = new ModelRegistry(harness.authStorage, undefined, { ignoreLocalModelConfig: true });
 				await withManagedExecution(principal.execution, async () => {
@@ -703,7 +708,7 @@ mac("journal outer work canonical source callers", () => {
 						bindProcessState: false,
 						cwd: fixture.directory,
 						agentDir: fixture.directory,
-						settings: Settings.isolated({ "compaction.enabled": false, "memory.enabled": false }),
+						settings: Settings.isolated({ "compaction.enabled": false, "memory.backend": "off" }),
 					});
 					await Promise.resolve();
 					expectBindingAcceptsOuterWork(binding);
@@ -725,14 +730,14 @@ mac("journal outer work canonical source callers", () => {
 
 	test("S-10/AC-OL-13: ExtensionRunner onToolRegistered flush reject fails tool_call handler outer work", async () => {
 		const fixture = new R11JournalFixture();
-		let operation: Promise<void> | undefined;
+		const flushFailure = new Error("flush reject");
 		try {
 			const root = fixture.open();
-			operation = fixture.withBinding(root, async binding => {
+			const operation = fixture.withBinding(root, async binding => {
 				const principal = await fixture.ready(binding, root);
 				const harness = await openManagedAgentHarness(principal, binding);
 				harness.runner.onToolRegistered(async () => {
-					throw new Error("flush reject");
+					throw flushFailure;
 				});
 				harness.api.on("tool_call", () => {
 					harness.api.registerTool({
@@ -756,18 +761,20 @@ mac("journal outer work canonical source callers", () => {
 					await expect(wrapped.execute("id", {})).rejects.toThrow("flush reject");
 				});
 				await harness.dispose();
-				void operation?.catch(() => {});
-				const received = await operation?.then(
-					() => undefined,
-					error => error,
-				);
-				// The flush failure is accounted: the binding drain surfaces it.
-				expect(
-					leafCauses(received).some(
-						cause => cause instanceof Error && cause.message === "flush reject",
-					),
-				).toBe(true);
 			});
+			// Observe the drain from outside the binding callback: awaiting the
+			// operation inside it would wait on the callback's own completion.
+			const received = await operation.then(
+				() => {
+					throw new Error("expected the binding operation to reject");
+				},
+				error => error,
+			);
+			// The flush failure is accounted: the binding drain surfaces exactly the
+			// injected failure object and no other leaf.
+			const causes = leafCauses(received);
+			expect(causes).toContain(flushFailure);
+			expect(causes.every(cause => cause === flushFailure)).toBe(true);
 		} finally {
 			await fixture.close();
 		}
@@ -821,10 +828,10 @@ mac("journal outer work canonical source callers", () => {
 
 	test("S-12/AC-OL-14: agent_end allSettled waits for processAgentEvent when computerControlRevocation rejects", async () => {
 		const fixture = new R11JournalFixture();
-		let operation: Promise<void> | undefined;
+		const revokeFailure = new Error("revoke failed");
 		try {
 			const root = fixture.open();
-			operation = fixture.withBinding(root, async binding => {
+			const operation = fixture.withBinding(root, async binding => {
 				const principal = await fixture.ready(binding, root);
 				const harness = await openManagedAgentHarness(principal, binding);
 				const gate = Promise.withResolvers<void>();
@@ -833,9 +840,7 @@ mac("journal outer work canonical source callers", () => {
 					await gate.promise;
 					maintenanceDone = true;
 				});
-				vi.spyOn(computerSupervisor, "revokeComputerControlForOwner").mockRejectedValueOnce(
-					new Error("revoke failed"),
-				);
+				vi.spyOn(computerSupervisor, "revokeComputerControlForOwner").mockRejectedValueOnce(revokeFailure);
 				await withManagedExecution(principal.execution, async () => {
 					// emitExternalEvent is fire-and-forget in agent-core; the maintenance failure
 					// surfaces consumer-visibly as a session notice after the allSettled drain.
@@ -860,18 +865,20 @@ mac("journal outer work canonical source callers", () => {
 					}
 				});
 				await harness.dispose();
-				void operation?.catch(() => {});
-				const received = await operation?.then(
-					() => undefined,
-					error => error,
-				);
-				// The maintenance failure is accounted: the binding drain surfaces it.
-				expect(
-					leafCauses(received).some(
-						cause => cause instanceof Error && cause.message === "revoke failed",
-					),
-				).toBe(true);
 			});
+			// Observe the drain from outside the binding callback: awaiting the
+			// operation inside it would wait on the callback's own completion.
+			const received = await operation.then(
+				() => {
+					throw new Error("expected the binding operation to reject");
+				},
+				error => error,
+			);
+			// The maintenance failure is accounted: the binding drain surfaces exactly
+			// the injected failure object and no other leaf.
+			const causes = leafCauses(received);
+			expect(causes).toContain(revokeFailure);
+			expect(causes.every(cause => cause === revokeFailure)).toBe(true);
 		} finally {
 			vi.restoreAllMocks();
 			await fixture.close();
@@ -889,7 +896,7 @@ mac("journal outer work canonical source callers", () => {
 			const root = fixture.open(rootFile);
 			await fixture.withBinding(root, async binding => {
 				const authStorage = createInMemoryAuthStorage();
-				const settings = Settings.isolated({ "compaction.enabled": false, "memory.enabled": false });
+				const settings = Settings.isolated({ "compaction.enabled": false, "memory.backend": "off" });
 				const startup = createAgentSession({
 					modelRequestJournalLeaseBinding: binding,
 					authStorage,
@@ -946,7 +953,7 @@ mac("journal outer work canonical source callers", () => {
 			await fixture.withBinding(root, async binding => {
 				const principal = await fixture.ready(binding, root);
 				const harness = await openManagedAgentHarness(principal, binding, {
-					settings: Settings.isolated({ "compaction.enabled": true, "memory.enabled": false }),
+					settings: Settings.isolated({ "compaction.enabled": true, "memory.backend": "off" }),
 				});
 				const gate = Promise.withResolvers<void>();
 				harness.api.on("session_before_compact", async () => {
@@ -1015,7 +1022,7 @@ mac("journal outer work canonical source callers", () => {
 					modelRoles: { judge: `${LOCAL_JUDGE.provider}/${LOCAL_JUDGE.id}` },
 					"retry.fallbackChains": { judge: [`${ONLINE_JUDGE.provider}/${ONLINE_JUDGE.id}`] },
 				});
-				const { registry, authStorage } = makeJudgeRegistry([LOCAL_JUDGE, ONLINE_JUDGE], {
+				const { registry, authStorage } = makeJudgeRegistry([LOCAL_JUDGE, ONLINE_JUDGE], fixture.directory, {
 					[ONLINE_JUDGE.provider]: "key",
 				});
 				const kinds: string[] = [];
