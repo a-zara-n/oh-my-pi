@@ -267,57 +267,59 @@ export class ChainJudge implements Judge {
 	async withCandidate<T>(run: (judge: Judge, kind: JudgeKind) => Promise<T>, options: JudgeOptions = {}): Promise<T> {
 		const outerWork = journalOuterWorkFromExecution(getModelRequestExecution());
 		return outerWork.run(async () => {
-		const signal = options.signal;
-		let lastFailure: string | undefined;
-		let lastUnavailable: string | undefined;
-		const candidates = this.#resolveCandidates();
-		const rejections = this.#rejections();
-		// One chain per call: every candidate attempted after the first is a `judge-candidate` re-attempt.
-		const chain = createModelRequestRetryChain();
-		let attempted = 0;
-		for (const candidate of candidates) {
-			if (signal?.aborted) {
-				throw signal.reason instanceof Error ? signal.reason : new AIError.AbortError("judgment aborted");
-			}
-			const identity = formatModelStringWithRouting(candidate.model);
-			const skippedUntil = rejections.get(identity);
-			if (skippedUntil !== undefined) {
-				if (skippedUntil > Date.now()) {
-					lastUnavailable = `${identity} rejected the account recently`;
-					continue;
-				}
-				rejections.delete(identity);
-			}
-			try {
-				const judge = await this.#createJudge(candidate, signal);
-				if (!judge) {
-					lastUnavailable = `no API key for ${candidate.model.provider}/${candidate.model.id}`;
-					continue;
-				}
-				const reason = attempted++ > 0 ? "judge-candidate" : undefined;
-				return await runInModelRequestRetryChain(chain, reason, () =>
-					runWithModelRequestPurpose(this.#deps.requestPurpose ?? "judge", () => run(judge, kindOf(candidate))),
-				);
-			} catch (error) {
+			const signal = options.signal;
+			let lastFailure: string | undefined;
+			let lastUnavailable: string | undefined;
+			const candidates = this.#resolveCandidates();
+			const rejections = this.#rejections();
+			// One chain per call: every candidate attempted after the first is a `judge-candidate` re-attempt.
+			const chain = createModelRequestRetryChain();
+			let attempted = 0;
+			for (const candidate of candidates) {
 				if (signal?.aborted) {
 					throw signal.reason instanceof Error ? signal.reason : new AIError.AbortError("judgment aborted");
 				}
-				// A gate denial is terminal: the next candidate must not be tried and no account cooldown is recorded.
-				if (AIError.isModelRequestDenied(error)) throw error;
-				if (isAbortOrTimeout(error)) throw error;
-				const rejected = isAccountRejection(error);
-				if (rejected) rejections.set(identity, Date.now() + CANDIDATE_REJECTION_COOLDOWN_MS);
-				lastFailure = error instanceof Error ? error.message : String(error);
-				logger.warn("judgment candidate failed", {
-					candidate: identity,
-					status: AIError.status(error),
-					error: lastFailure,
-					skippedForMs: rejected ? CANDIDATE_REJECTION_COOLDOWN_MS : undefined,
-				});
+				const identity = formatModelStringWithRouting(candidate.model);
+				const skippedUntil = rejections.get(identity);
+				if (skippedUntil !== undefined) {
+					if (skippedUntil > Date.now()) {
+						lastUnavailable = `${identity} rejected the account recently`;
+						continue;
+					}
+					rejections.delete(identity);
+				}
+				try {
+					const judge = await this.#createJudge(candidate, signal);
+					if (!judge) {
+						lastUnavailable = `no API key for ${candidate.model.provider}/${candidate.model.id}`;
+						continue;
+					}
+					const reason = attempted++ > 0 ? "judge-candidate" : undefined;
+					return await runInModelRequestRetryChain(chain, reason, () =>
+						runWithModelRequestPurpose(this.#deps.requestPurpose ?? "judge", () => run(judge, kindOf(candidate))),
+					);
+				} catch (error) {
+					if (signal?.aborted) {
+						throw signal.reason instanceof Error ? signal.reason : new AIError.AbortError("judgment aborted");
+					}
+					// A gate denial is terminal: the next candidate must not be tried and no account cooldown is recorded.
+					if (AIError.isModelRequestDenied(error)) throw error;
+					if (isAbortOrTimeout(error)) throw error;
+					const rejected = isAccountRejection(error);
+					if (rejected) rejections.set(identity, Date.now() + CANDIDATE_REJECTION_COOLDOWN_MS);
+					lastFailure = error instanceof Error ? error.message : String(error);
+					logger.warn("judgment candidate failed", {
+						candidate: identity,
+						status: AIError.status(error),
+						error: lastFailure,
+						skippedForMs: rejected ? CANDIDATE_REJECTION_COOLDOWN_MS : undefined,
+					});
+				}
 			}
-		}
-		if (candidates.length === 0) throw new Error("judgment: no judge model available");
-		throw new Error(`judgment: every judge candidate failed: ${lastFailure ?? lastUnavailable ?? "unknown error"}`);
+			if (candidates.length === 0) throw new Error("judgment: no judge model available");
+			throw new Error(
+				`judgment: every judge candidate failed: ${lastFailure ?? lastUnavailable ?? "unknown error"}`,
+			);
 		});
 	}
 

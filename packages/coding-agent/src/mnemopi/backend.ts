@@ -111,36 +111,36 @@ export const mnemopiBackend: MemoryBackend = {
 		const sessionId = session.sessionId;
 		if (!sessionId) return;
 		await runAgentSessionOuterWork(session, async () => {
-		if (options.taskDepth > 0) {
-			const parent = getMnemopiSessionStateFromParent(options);
-			if (!parent) return;
-			const previous = setMnemopiSessionState(
-				session,
-				new MnemopiSessionState({
-					sessionId,
-					config: parent.config,
+			if (options.taskDepth > 0) {
+				const parent = getMnemopiSessionStateFromParent(options);
+				if (!parent) return;
+				const previous = setMnemopiSessionState(
 					session,
-					aliasOf: parent,
-					hasRecalledForFirstTurn: true,
-				}),
-			);
-			await previous?.dispose();
-			return;
-		}
+					new MnemopiSessionState({
+						sessionId,
+						config: parent.config,
+						session,
+						aliasOf: parent,
+						hasRecalledForFirstTurn: true,
+					}),
+				);
+				await previous?.dispose();
+				return;
+			}
 
-		try {
-			const config = await loadMnemopiConfigWithProviders(
-				settings,
-				agentDir,
-				modelRegistry,
-				sessionId,
-				session.sessionManager,
-			);
-			await loadMnemopiModules();
-			await installMnemopiState(session, config);
-		} catch (error) {
-			logger.warn("Mnemopi: backend startup failed; memory backend inert.", { error: String(error) });
-		}
+			try {
+				const config = await loadMnemopiConfigWithProviders(
+					settings,
+					agentDir,
+					modelRegistry,
+					sessionId,
+					session.sessionManager,
+				);
+				await loadMnemopiModules();
+				await installMnemopiState(session, config);
+			} catch (error) {
+				logger.warn("Mnemopi: backend startup failed; memory backend inert.", { error: String(error) });
+			}
 		});
 	},
 

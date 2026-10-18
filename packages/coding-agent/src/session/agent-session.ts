@@ -3061,7 +3061,6 @@ export class AgentSession implements SettingsScope {
 		};
 	}
 
-
 	/**
 	 * Run `fn` under this session's request context, optionally declaring the purpose of the requests it makes.
 	 * For work the session starts outside the agent loop (titles, memory jobs, summaries) and for callers that hand
@@ -3567,9 +3566,7 @@ export class AgentSession implements SettingsScope {
 					.filter((result): result is PromiseRejectedResult => result.status === "rejected")
 					.map(result => result.reason);
 				if (failures.length === 0) return;
-				throw failures.length === 1
-					? failures[0]
-					: new AggregateError(failures, "agent_end maintenance failed");
+				throw failures.length === 1 ? failures[0] : new AggregateError(failures, "agent_end maintenance failed");
 			});
 		} catch (error) {
 			// Post-turn maintenance (compaction, pruning rewrites, hooks) threw before

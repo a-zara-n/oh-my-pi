@@ -24,6 +24,8 @@
 
 ### Changed
 
+- Guarded model-request leases publish their settlement Promise before invoking the backing lease, so synchronous reentry shares one settlement and preserves the backing failure.
+
 - Null-body fetch responses retain their direct response-ended settlement path after abort-handler cleanup: an actual loopback HTTP 204 preserves response identity and settles once without adding or removing an abort listener.
 - Required `transportFetch` construction now checks journal readiness and the canonical global descriptor before choosing a base, so replacing `globalThis.fetch` with a getter cannot run that getter merely by constructing a required transport. Ordinary untracked global/Cowork selection and invocation-time requirement rechecks remain unchanged.
 - Canonical dispatch now calls captured, receiver-bound authorizer/current-execution methods rather than reacquiring mutable runtime properties after checking them. A restoring accessor cannot substitute a fake permit between the check and authorization; the native regression requires the actual denying gate to run and no builtin loopback request.

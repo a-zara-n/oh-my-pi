@@ -1392,76 +1392,76 @@ export async function createAgentSession(
 			.modelRequestJournalLeaseBinding,
 	);
 	return shimOuterWork.run(async () => {
-	const loader = options.resourceLoader;
-	if (!loader) {
-		return ompCreateAgentSession(hostResolved);
-	}
+		const loader = options.resourceLoader;
+		if (!loader) {
+			return ompCreateAgentSession(hostResolved);
+		}
 
-	if (loader instanceof DefaultResourceLoader && !loader.loaded) {
-		await loader.reload();
-	}
+		if (loader instanceof DefaultResourceLoader && !loader.loaded) {
+			await loader.reload();
+		}
 
-	const state =
-		loader instanceof DefaultResourceLoader
-			? loader.__getResolverState()
-			: {
-					cwd: options.cwd ?? getProjectDir(),
-					agentDir: options.agentDir ?? getAgentDir(),
-					settingsPromise: undefined,
-					eventBus: undefined,
-					extensionsResult: loader.getExtensions(),
-					skills: loader.getSkills().skills,
-					prompts: loader.getPrompts().prompts,
-					agentsFiles: loader.getAgentsFiles().agentsFiles,
-					systemPrompt: loader.getSystemPrompt(),
-					appendSystemPrompt: loader.getAppendSystemPrompt(),
-					extensionFactories: [] as ExtensionFactory[],
-				};
+		const state =
+			loader instanceof DefaultResourceLoader
+				? loader.__getResolverState()
+				: {
+						cwd: options.cwd ?? getProjectDir(),
+						agentDir: options.agentDir ?? getAgentDir(),
+						settingsPromise: undefined,
+						eventBus: undefined,
+						extensionsResult: loader.getExtensions(),
+						skills: loader.getSkills().skills,
+						prompts: loader.getPrompts().prompts,
+						agentsFiles: loader.getAgentsFiles().agentsFiles,
+						systemPrompt: loader.getSystemPrompt(),
+						appendSystemPrompt: loader.getAppendSystemPrompt(),
+						extensionFactories: [] as ExtensionFactory[],
+					};
 
-	const { resourceLoader: _, ...rest } = options;
-	const forwarded: CreateAgentSessionOptions = {
-		...rest,
-		cwd: rest.cwd ?? state.cwd,
-		agentDir: rest.agentDir ?? state.agentDir,
-	};
+		const { resourceLoader: _, ...rest } = options;
+		const forwarded: CreateAgentSessionOptions = {
+			...rest,
+			cwd: rest.cwd ?? state.cwd,
+			agentDir: rest.agentDir ?? state.agentDir,
+		};
 
-	if (rest.eventBus === undefined && state.eventBus !== undefined) {
-		forwarded.eventBus = state.eventBus;
-	}
-	if (rest.settings === undefined && rest.settingsManager === undefined && state.settingsPromise !== undefined) {
-		forwarded.settingsManager = state.settingsPromise;
-	}
+		if (rest.eventBus === undefined && state.eventBus !== undefined) {
+			forwarded.eventBus = state.eventBus;
+		}
+		if (rest.settings === undefined && rest.settingsManager === undefined && state.settingsPromise !== undefined) {
+			forwarded.settingsManager = state.settingsPromise;
+		}
 
-	// Route the loader's already-loaded extension result through the SDK's
-	// `preloadedExtensions` seam. Skipping this branch would let
-	// `createAgentSession` re-run its own discovery and undo the caller's
-	// `noExtensions: true`.
-	if (
-		rest.preloadedExtensions === undefined &&
-		rest.preloadedPreparedExtensions === undefined &&
-		rest.preloadedExtensionPaths === undefined
-	) {
-		forwarded.preloadedExtensions = state.extensionsResult;
-	}
+		// Route the loader's already-loaded extension result through the SDK's
+		// `preloadedExtensions` seam. Skipping this branch would let
+		// `createAgentSession` re-run its own discovery and undo the caller's
+		// `noExtensions: true`.
+		if (
+			rest.preloadedExtensions === undefined &&
+			rest.preloadedPreparedExtensions === undefined &&
+			rest.preloadedExtensionPaths === undefined
+		) {
+			forwarded.preloadedExtensions = state.extensionsResult;
+		}
 
-	if (rest.skills === undefined) {
-		forwarded.skills = state.skills;
-	}
-	if (rest.promptTemplates === undefined) {
-		forwarded.promptTemplates = state.prompts;
-	}
-	if (rest.contextFiles === undefined) {
-		forwarded.contextFiles = state.agentsFiles;
-	}
+		if (rest.skills === undefined) {
+			forwarded.skills = state.skills;
+		}
+		if (rest.promptTemplates === undefined) {
+			forwarded.promptTemplates = state.prompts;
+		}
+		if (rest.contextFiles === undefined) {
+			forwarded.contextFiles = state.agentsFiles;
+		}
 
-	if (rest.systemPrompt === undefined && state.systemPrompt !== undefined) {
-		forwarded.systemPrompt = state.systemPrompt;
-	}
-	if (rest.appendSystemPrompt === undefined && state.appendSystemPrompt.length > 0) {
-		forwarded.appendSystemPrompt = state.appendSystemPrompt.join("\n\n");
-	}
+		if (rest.systemPrompt === undefined && state.systemPrompt !== undefined) {
+			forwarded.systemPrompt = state.systemPrompt;
+		}
+		if (rest.appendSystemPrompt === undefined && state.appendSystemPrompt.length > 0) {
+			forwarded.appendSystemPrompt = state.appendSystemPrompt.join("\n\n");
+		}
 
-	return ompCreateAgentSession(withHostModelRequestRoot(forwarded));
+		return ompCreateAgentSession(withHostModelRequestRoot(forwarded));
 	});
 }
 

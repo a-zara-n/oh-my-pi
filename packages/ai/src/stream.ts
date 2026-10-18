@@ -638,10 +638,7 @@ async function removeProviderInFlightLeaseDir(leasePath: string): Promise<void> 
 // rather than recomputing it from the current root. A release that lands after
 // the in-flight root has been repointed (only the test seam does that) must not
 // write `.wakeup` into an unrelated provider directory.
-async function releaseProviderInFlightLease(
-	lease: ProviderInFlightLease,
-	slotWork?: JournalOuterWork,
-): Promise<void> {
+async function releaseProviderInFlightLease(lease: ProviderInFlightLease, slotWork?: JournalOuterWork): Promise<void> {
 	const heartbeatFlush = lease.stopHeartbeat();
 	slotWork?.join(heartbeatFlush);
 	const flushTimeout = Promise.withResolvers<"timeout">();
@@ -724,9 +721,7 @@ export const __providerInFlightForTesting = {
 	setHeartbeatWriter(writer: ((writeProviderInFlightInfo: () => Promise<void>) => Promise<void>) | undefined): void {
 		providerInFlightHeartbeatWriterOverride = writer;
 	},
-	setWakeupWriter(
-		writer: ((dir: string, writeWakeupFile: () => Promise<void>) => Promise<void>) | undefined,
-	): void {
+	setWakeupWriter(writer: ((dir: string, writeWakeupFile: () => Promise<void>) => Promise<void>) | undefined): void {
 		providerInFlightWakeupWriterOverride = writer;
 	},
 	setLeaseRemover(remover: ((leasePath: string) => Promise<void>) | undefined): void {
@@ -961,7 +956,10 @@ function withResolvedModelHeaders<TApi extends Api>(
 			headerWork = openJournalOuterWorkFromCurrent();
 			const rawResolver = resolveHeaders(signal);
 			if (headerWork) headerWork.join(rawResolver);
-			const headers = await joinJournalOuterWork(headerWork, untilAborted(signal, () => rawResolver));
+			const headers = await joinJournalOuterWork(
+				headerWork,
+				untilAborted(signal, () => rawResolver),
+			);
 			signal?.throwIfAborted();
 			const inner = run({ ...model, resolveHeaders: undefined, headers: headers ? { ...headers } : undefined });
 			for await (const event of inner) {
@@ -1623,7 +1621,7 @@ function streamSimpleRequest<TApi extends Api>(
 					return;
 				}
 				const retryState = createAuthRetryKeyState(lastKey);
-			const failure: AuthRetryFailure | undefined = await joinJournalOuterWork(
+				const failure: AuthRetryFailure | undefined = await joinJournalOuterWork(
 					resolverWork,
 					runAttempt(lastKey, credentialId, oauthIdentity),
 				);
@@ -1637,16 +1635,10 @@ function streamSimpleRequest<TApi extends Api>(
 					let nextOAuthIdentity: OAuthRequestIdentity | undefined;
 					const nextKey: string | undefined = await joinJournalOuterWork(
 						resolverWork,
-						resolveNextAuthRetryKey(
-							retryState,
-							apiKeyResolver,
-							retryFailure.error,
-							signal,
-							resolved => {
-								nextCredentialId = typeof resolved === "string" ? undefined : resolved?.credentialId;
-								nextOAuthIdentity = typeof resolved === "string" ? undefined : resolved?.oauthIdentity;
-							},
-						),
+						resolveNextAuthRetryKey(retryState, apiKeyResolver, retryFailure.error, signal, resolved => {
+							nextCredentialId = typeof resolved === "string" ? undefined : resolved?.credentialId;
+							nextOAuthIdentity = typeof resolved === "string" ? undefined : resolved?.oauthIdentity;
+						}),
 					);
 					if (nextKey === undefined) break;
 					markNextModelRequestAttempt("auth-rotation");

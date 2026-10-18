@@ -92,27 +92,27 @@ export async function runSharpshooterConsolidation(options: {
 	force?: boolean;
 }): Promise<SharpshooterConsolidationResult> {
 	return journalOuterWorkFromExecution(getModelRequestExecution()).run(async () => {
-	const bankDir = sharpshooterBankDir(options.agentDir, options.cwd);
-	try {
-		await fs.mkdir(bankDir, { recursive: true });
-	} catch (error) {
-		return { ran: false, reason: "error", error: errorMessage(error) };
-	}
+		const bankDir = sharpshooterBankDir(options.agentDir, options.cwd);
+		try {
+			await fs.mkdir(bankDir, { recursive: true });
+		} catch (error) {
+			return { ran: false, reason: "error", error: errorMessage(error) };
+		}
 
-	let acquired = false;
-	try {
-		return await withFileLock(
-			sharpshooterLockPath(options.agentDir, options.cwd),
-			async () => {
-				acquired = true;
-				return await consolidateLocked(options, bankDir);
-			},
-			{ retries: 1, retryDelayMs: 1 },
-		);
-	} catch (error) {
-		if (!acquired) return { ran: false, reason: "locked" };
-		return { ran: false, reason: "error", error: errorMessage(error) };
-	}
+		let acquired = false;
+		try {
+			return await withFileLock(
+				sharpshooterLockPath(options.agentDir, options.cwd),
+				async () => {
+					acquired = true;
+					return await consolidateLocked(options, bankDir);
+				},
+				{ retries: 1, retryDelayMs: 1 },
+			);
+		} catch (error) {
+			if (!acquired) return { ran: false, reason: "locked" };
+			return { ran: false, reason: "error", error: errorMessage(error) };
+		}
 	});
 }
 

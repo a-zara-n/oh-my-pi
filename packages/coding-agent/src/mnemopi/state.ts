@@ -796,76 +796,74 @@ export class MnemopiSessionState {
 
 	async dispose(options: { consolidate?: boolean; timeoutMs?: number; retain?: boolean } = {}): Promise<void> {
 		await runAgentSessionOuterWork(this.session, async () => {
-		this.#recallGeneration++;
-		this.unsubscribe?.();
-		this.unsubscribe = undefined;
-		if (this.aliasOf) return;
-		const closeOwned = (): void => {
-			for (const memory of this.scoped.owned) memory.close();
-		};
-		if (options.consolidate === false) {
-			closeOwned();
-			return;
-		}
-		const { timeoutMs } = options;
-		const boundedTimeoutMs = timeoutMs !== undefined && timeoutMs > 0 ? timeoutMs : undefined;
-		const deadline = boundedTimeoutMs !== undefined ? performance.now() + boundedTimeoutMs : undefined;
-		if (boundedTimeoutMs !== undefined) this.#boundOwnedBusyTimeout(boundedTimeoutMs);
-		// Begin the cleanup work handle BEFORE the consolidate producer starts, while
-		// the journal binding still accepts new work: this dispose's bounded return
-		// can land after the binding moved to closing (which refuses a new begin), so
-		// the raw cleanup future must already hold its own handle — the deadline
-		// detach below never asks for a new begin.
-		const cleanupWork = beginDetachedAgentSessionOuterWork(this.session);
-		const consolidatePromise = this.consolidate({
-			full: false,
-			extract: false,
-			sleep: false,
-			retain: this.config.autoRetain && options.retain !== false,
-		});
-		// Raw cleanup future: the consolidate failure and the closeOwned failure are
-		// both kept and aggregated — the logging consumer below never converts an
-		// unrecovered failure into a fulfilled dispose.
-		const cleanupFuture = (async () => {
-			const failures: unknown[] = [];
-			try {
-				await consolidatePromise;
-			} catch (error) {
-				failures.push(error);
-			}
-			try {
+			this.#recallGeneration++;
+			this.unsubscribe?.();
+			this.unsubscribe = undefined;
+			if (this.aliasOf) return;
+			const closeOwned = (): void => {
+				for (const memory of this.scoped.owned) memory.close();
+			};
+			if (options.consolidate === false) {
 				closeOwned();
-			} catch (error) {
-				failures.push(error);
+				return;
 			}
-			if (failures.length === 1) throw failures[0];
-			if (failures.length > 1) throw new AggregateError(failures, "Mnemopi: dispose cleanup failed");
-		})();
-		cleanupWork.settle(cleanupFuture, error => {
-			logger.warn("Mnemopi: consolidation on dispose failed.", { error: String(error) });
-		});
-		const settledCleanup = cleanupFuture.then(
-			() => true,
-			() => true,
-		);
-		if (deadline === undefined) {
-			await settledCleanup;
+			const { timeoutMs } = options;
+			const boundedTimeoutMs = timeoutMs !== undefined && timeoutMs > 0 ? timeoutMs : undefined;
+			const deadline = boundedTimeoutMs !== undefined ? performance.now() + boundedTimeoutMs : undefined;
+			if (boundedTimeoutMs !== undefined) this.#boundOwnedBusyTimeout(boundedTimeoutMs);
+			// Begin the cleanup work handle BEFORE the consolidate producer starts, while
+			// the journal binding still accepts new work: this dispose's bounded return
+			// can land after the binding moved to closing (which refuses a new begin), so
+			// the raw cleanup future must already hold its own handle — the deadline
+			// detach below never asks for a new begin.
+			const cleanupWork = beginDetachedAgentSessionOuterWork(this.session);
+			const consolidatePromise = this.consolidate({
+				full: false,
+				extract: false,
+				sleep: false,
+				retain: this.config.autoRetain && options.retain !== false,
+			});
+			// Raw cleanup future: the consolidate failure and the closeOwned failure are
+			// both kept and aggregated — the logging consumer below never converts an
+			// unrecovered failure into a fulfilled dispose.
+			const cleanupFuture = (async () => {
+				const failures: unknown[] = [];
+				try {
+					await consolidatePromise;
+				} catch (error) {
+					failures.push(error);
+				}
+				try {
+					closeOwned();
+				} catch (error) {
+					failures.push(error);
+				}
+				if (failures.length === 1) throw failures[0];
+				if (failures.length > 1) throw new AggregateError(failures, "Mnemopi: dispose cleanup failed");
+			})();
+			cleanupWork.settle(cleanupFuture, error => {
+				logger.warn("Mnemopi: consolidation on dispose failed.", { error: String(error) });
+			});
+			const settledCleanup = cleanupFuture.then(
+				() => true,
+				() => true,
+			);
+			if (deadline === undefined) {
+				await settledCleanup;
+				return;
+			}
+			const remainingMs = deadline - performance.now();
+			const completed =
+				remainingMs > 0 ? await Promise.race([settledCleanup, Bun.sleep(remainingMs).then(() => false)]) : false;
+			if (completed) return;
+			logger.warn("Mnemopi: consolidate-on-dispose exceeded shutdown budget; detaching to background.", {
+				timeoutMs,
+			});
+			// The raw future keeps closeOwned behind the consolidate settle, so writes
+			// never race a closed handle. The process is on its way to
+			// `postmortem.quit(0)`; if it exits first, the OS reclaims the handles (and
+			// a still-pending embed() goes down with the embed worker).
 			return;
-		}
-		const remainingMs = deadline - performance.now();
-		const completed =
-			remainingMs > 0
-				? await Promise.race([settledCleanup, Bun.sleep(remainingMs).then(() => false)])
-				: false;
-		if (completed) return;
-		logger.warn("Mnemopi: consolidate-on-dispose exceeded shutdown budget; detaching to background.", {
-			timeoutMs,
-		});
-		// The raw future keeps closeOwned behind the consolidate settle, so writes
-		// never race a closed handle. The process is on its way to
-		// `postmortem.quit(0)`; if it exits first, the OS reclaims the handles (and
-		// a still-pending embed() goes down with the embed worker).
-		return;
 		});
 	}
 }

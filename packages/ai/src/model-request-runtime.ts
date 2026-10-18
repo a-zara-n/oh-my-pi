@@ -39,11 +39,7 @@ import type {
 	ModelRequestWire,
 } from "./model-request-gate";
 import { buildModelRequestCoverage } from "./model-request-coverage";
-import {
-	joinJournalOuterWork,
-	type JournalOuterWork,
-	openJournalOuterWork,
-} from "../internal/journal-outer-work";
+import { joinJournalOuterWork, type JournalOuterWork, openJournalOuterWork } from "../internal/journal-outer-work";
 
 export type { ModelRequestExecution } from "@oh-my-pi/pi-utils/model-request-journal-composition";
 

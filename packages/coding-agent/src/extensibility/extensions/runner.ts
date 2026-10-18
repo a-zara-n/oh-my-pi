@@ -369,7 +369,6 @@ async function raceHandlerWithTimeout<T>(
 }
 const MAX_PENDING_CREDENTIAL_DISABLED = 32;
 
-
 const MAX_PENDING_MCP_NOTIFICATIONS = 100;
 
 /**

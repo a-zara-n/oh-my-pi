@@ -35,11 +35,7 @@ import {
 } from "../model-request-runtime";
 import { copyResponseMetadata } from "./request-debug";
 import { assertModelRequestBuiltinFetch, modelRequestBuiltinFetch } from "./model-request-builtin-fetch";
-import {
-	joinJournalOuterWork,
-	type JournalOuterWork,
-	openJournalOuterWork,
-} from "../../internal/journal-outer-work";
+import { joinJournalOuterWork, type JournalOuterWork, openJournalOuterWork } from "../../internal/journal-outer-work";
 
 /**
  * Ordinary untracked wrapping hint and auxiliary transport mapping. Public
@@ -460,10 +456,7 @@ async function sendRequired(
 		if (responsePromise !== undefined && !responseAwaited) {
 			try {
 				const lateResponse = await joinJournalOuterWork(work, responsePromise);
-				await joinJournalOuterWork(
-					work,
-					observeResponse(lease, lateResponse, signal, work).settlement,
-				);
+				await joinJournalOuterWork(work, observeResponse(lease, lateResponse, signal, work).settlement);
 			} catch (transportError) {
 				if (transportError !== failure)
 					failure = new AggregateError([failure, transportError], "model request dispatch and release failed");
